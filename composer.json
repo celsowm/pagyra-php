@@ -1,0 +1,17 @@
+{
+    "name": "celsowm/pagyra-php",
+    "description": "A pdf lib",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "Celsowm\\PagyraPhp\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "celsowm",
+            "email": "celsowm@gmail.com"
+        }
+    ],
+    "require": {}
+}
