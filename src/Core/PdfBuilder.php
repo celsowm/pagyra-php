@@ -1,7 +1,9 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Core;
+
 use Celsowm\PagyraPhp\Block\PdfBlockBuilder;
 use Celsowm\PagyraPhp\Block\PdfBlockRenderer;
 use Celsowm\PagyraPhp\Color\PdfColor;
@@ -56,6 +58,7 @@ final class PdfBuilder
 
         $this->setMargins(56, 56, 56, 56);
         $this->internal_newPage();
+        $this->bootstrapDefaultFont();
     }
 
     public function getStyleManager(): PdfStyleManager
@@ -1819,5 +1822,26 @@ final class PdfBuilder
     public function addImageData(string $alias, string $data, ?string $hint = null): void
     {
         $this->imageManager->addImageData($alias, $data, $hint);
+    }
+
+    private function bootstrapDefaultFont(): void
+    {
+        $candidates = [
+            __DIR__ . '/../../fonts/NotoSans-Regular.ttf',
+            __DIR__ . '/../../fonts/DejaVuSans.ttf',
+            __DIR__ . '/../../fonts/Roboto-Regular.ttf',
+        ];
+
+        foreach ($candidates as $ttf) {
+            if (is_string($ttf) && is_file($ttf)) {
+                try {
+                    $this->addTTFFont('PagyraDefault', $ttf);
+                    $this->setFont('PagyraDefault', 12.0);
+                    return;
+                } catch (\Throwable $e) {
+                    // ignora e tenta próxima
+                }
+            }
+        }
     }
 }
