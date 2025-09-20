@@ -40,7 +40,7 @@ final class CssCascade
 
             $inlineDeclarations = $this->parseInlineStyle($node['attributes']['style'] ?? null);
             if ($inlineDeclarations !== []) {
-                $style->applyDeclarations($inlineDeclarations, [1, 0, 0], PHP_INT_MAX);
+                $style->applyDeclarations($inlineDeclarations, [1000, 0, 0], PHP_INT_MAX);
             }
 
             $computed[$nodeId] = $style;
