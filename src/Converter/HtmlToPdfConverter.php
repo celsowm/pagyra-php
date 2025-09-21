@@ -689,27 +689,71 @@ final class HtmlToPdfConverter
 
     private function styleMarkersFromOptions(array $options): array
     {
-        $style = strtoupper((string)($options['style'] ?? ''));
-        return [
-            'bold' => str_contains($style, 'B'),
-            'italic' => str_contains($style, 'I'),
-            'underline' => str_contains($style, 'U'),
-        ];
+        $markers = ['bold' => false, 'italic' => false, 'underline' => false];
+        $raw = trim((string)($options['style'] ?? ''));
+        if ($raw === '') {
+            return $markers;
+        }
+
+        $lettersOnly = preg_replace('/[^A-Za-z]/', '', $raw);
+        if ($lettersOnly !== '' && preg_match('/^[BIUbiu]+$/', $lettersOnly) === 1) {
+            foreach (str_split(strtoupper($lettersOnly)) as $letter) {
+                if ($letter === 'B') {
+                    $markers['bold'] = true;
+                } elseif ($letter === 'I') {
+                    $markers['italic'] = true;
+                } elseif ($letter === 'U') {
+                    $markers['underline'] = true;
+                }
+            }
+            return $markers;
+        }
+
+        $tokens = preg_split('/[\s,;]+/', strtolower($raw)) ?: [];
+        foreach ($tokens as $token) {
+            if ($token === '') {
+                continue;
+            }
+            if ($token === 'bold' || $token === 'b') {
+                $markers['bold'] = true;
+                continue;
+            }
+            if ($token === 'italic' || $token === 'i') {
+                $markers['italic'] = true;
+                continue;
+            }
+            if ($token === 'underline' || $token === 'u') {
+                $markers['underline'] = true;
+                continue;
+            }
+
+            if (str_contains($token, 'bold')) {
+                $markers['bold'] = true;
+            }
+            if (str_contains($token, 'italic') || str_contains($token, 'oblique')) {
+                $markers['italic'] = true;
+            }
+            if (str_contains($token, 'underline')) {
+                $markers['underline'] = true;
+            }
+        }
+
+        return $markers;
     }
 
     private function markersToStyleString(array $markers): string
     {
-        $parts = [];
+        $letters = '';
         if (!empty($markers['bold'])) {
-            $parts[] = 'bold';
+            $letters .= 'B';
         }
         if (!empty($markers['italic'])) {
-            $parts[] = 'italic';
+            $letters .= 'I';
         }
         if (!empty($markers['underline'])) {
-            $parts[] = 'underline';
+            $letters .= 'U';
         }
-        return implode(' ', $parts);
+        return $letters;
     }
 
     private function hasStyleDirective(array $styleMap): bool
@@ -724,11 +768,25 @@ final class HtmlToPdfConverter
 
     private function appendStyleMarker(string $original, string $marker): string
     {
-        $markers = array_filter(explode(' ', strtolower($original)));
-        if (!in_array($marker, $markers, true)) {
-            $markers[] = $marker;
+        $markers = $this->styleMarkersFromOptions(['style' => $original]);
+        $normalized = strtolower($marker);
+        if ($normalized === 'bold' || $normalized === 'b') {
+            $markers['bold'] = true;
+        } elseif ($normalized === 'italic' || $normalized === 'i' || $normalized === 'oblique') {
+            $markers['italic'] = true;
+        } elseif ($normalized === 'underline' || $normalized === 'u') {
+            $markers['underline'] = true;
+        } else {
+            $letter = strtoupper($marker)[0] ?? null;
+            if ($letter === 'B') {
+                $markers['bold'] = true;
+            } elseif ($letter === 'I') {
+                $markers['italic'] = true;
+            } elseif ($letter === 'U') {
+                $markers['underline'] = true;
+            }
         }
-        return implode(' ', $markers);
+        return $this->markersToStyleString($markers);
     }
 
     private function renderTableFlow(array $flow, PdfBuilder $pdf, array $computedStyles): void
