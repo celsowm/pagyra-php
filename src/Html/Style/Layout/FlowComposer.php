@@ -37,6 +37,33 @@ final class FlowComposer
                 return;
             }
 
+            if ($tag === 'ul' || $tag === 'ol') {
+                if ($this->hasAncestorTag($node, 'table') || $this->hasAncestorTag($node, 'ul') || $this->hasAncestorTag($node, 'ol')) {
+                    return;
+                }
+                $nodeId = (string)($node['nodeId'] ?? '');
+                if ($nodeId === '') {
+                    return;
+                }
+                $items = $this->collectListItems($node, $styles);
+                if ($items === []) {
+                    return;
+                }
+                $flows[] = [
+                    'type' => 'list',
+                    'tag' => $tag,
+                    'nodeId' => $nodeId,
+                    'items' => $items,
+                    'style' => $styles[$nodeId] ?? null,
+                    'attributes' => $node['attributes'] ?? [],
+                ];
+                return;
+            }
+
+            if ($tag === 'li') {
+                return;
+            }
+
             if (!$this->isBlockTag($tag)) {
                 return;
             }
@@ -73,7 +100,7 @@ final class FlowComposer
 
     private function isBlockTag(string $tag): bool
     {
-        return in_array($tag, ['p', 'div', 'li', 'blockquote', 'section', 'article', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true);
+        return in_array($tag, ['p', 'div', 'li', 'blockquote', 'section', 'article', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol'], true);
     }
 
     private function hasNestedBlockChild(array $node): bool
@@ -188,6 +215,71 @@ final class FlowComposer
             $this->collectRunsRecursive($child, $newChain, $nextLink, $runs);
         }
     }
+
+    /**
+     * @param array<string, mixed> $node
+     * @param array<string, ComputedStyle> $styles
+     * @return array<int, array<string, mixed>>
+     */
+    private function collectListItems(array $node, array $styles): array
+    {
+        $items = [];
+        foreach ($node['children'] ?? [] as $child) {
+            if (($child['type'] ?? '') !== 'element') {
+                continue;
+            }
+            $childTag = strtolower((string)($child['tag'] ?? ''));
+            if ($childTag !== 'li') {
+                continue;
+            }
+            $itemId = (string)($child['nodeId'] ?? '');
+            if ($itemId === '') {
+                continue;
+            }
+            $runs = $this->collectRuns($child);
+            $item = [
+                'nodeId' => $itemId,
+                'runs' => $runs,
+                'attributes' => $child['attributes'] ?? [],
+                'style' => $styles[$itemId] ?? null,
+            ];
+            $nestedLists = [];
+            foreach ($child['children'] ?? [] as $grandchild) {
+                if (($grandchild['type'] ?? '') !== 'element') {
+                    continue;
+                }
+                $grandTag = strtolower((string)($grandchild['tag'] ?? ''));
+                if ($grandTag !== 'ul' && $grandTag !== 'ol') {
+                    continue;
+                }
+                $grandId = (string)($grandchild['nodeId'] ?? '');
+                if ($grandId === '') {
+                    continue;
+                }
+                $grandItems = $this->collectListItems($grandchild, $styles);
+                if ($grandItems === []) {
+                    continue;
+                }
+                $nestedLists[] = [
+                    'tag' => $grandTag,
+                    'nodeId' => $grandId,
+                    'items' => $grandItems,
+                    'attributes' => $grandchild['attributes'] ?? [],
+                    'style' => $styles[$grandId] ?? null,
+                ];
+            }
+            if ($nestedLists !== []) {
+                $item['children'] = $nestedLists;
+            }
+            if ($runs === [] && $nestedLists === []) {
+                continue;
+            }
+            $items[] = $item;
+        }
+
+        return $items;
+    }
+
 
     /**
      * @return array<int, array{cells: array<int, string>, isHeader: bool}>
