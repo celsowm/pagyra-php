@@ -94,7 +94,7 @@ final class HtmlToPdfConverter
 
         if (isset($map['line-height'])) {
             $fontSize = (float)($options['size'] ?? 12.0);
-            $options['lineHeight'] = $this->parseLengthOptional($map['line-height'], $fontSize, 1.2 * $fontSize);
+            $options['lineHeight'] = $this->parseLengthOptional($map['line-height'], $fontSize, 1.2 * $fontSize, true);
         }
 
         if (isset($map['color']) && strtolower($map['color']) !== 'inherit') {
@@ -130,23 +130,27 @@ final class HtmlToPdfConverter
         return $this->convertLength($value, $default, $default);
     }
 
-    private function parseLengthOptional(string $value, float $reference, float $fallback): float
+    private function parseLengthOptional(string $value, float $reference, float $fallback, bool $unitlessIsMultiplier = false): float
     {
-        return $this->convertLength($value, $reference, $fallback);
+        return $this->convertLength($value, $reference, $fallback, $unitlessIsMultiplier);
     }
 
-    private function convertLength(string $value, float $reference, float $fallback): float
+    private function convertLength(string $value, float $reference, float $fallback, bool $unitlessIsMultiplier = false): float
     {
         $value = trim($value);
         if ($value === '' || strtolower($value) === 'normal') {
             return $fallback;
         }
         if (is_numeric($value)) {
-            return (float)$value;
+            $number = (float)$value;
+            return $unitlessIsMultiplier ? $number * $reference : $number;
         }
         if (preg_match('/^([0-9]*\.?[0-9]+)(px|pt|em|rem)?$/i', $value, $m) === 1) {
             $number = (float)$m[1];
-            $unit = strtolower($m[2] ?? 'pt');
+            $unit = strtolower($m[2] ?? '');
+            if ($unit === '') {
+                return $unitlessIsMultiplier ? $number * $reference : $number;
+            }
             return match ($unit) {
                 'px' => $number * 0.75,
                 'em', 'rem' => $number * $reference,
@@ -155,7 +159,6 @@ final class HtmlToPdfConverter
         }
         return $fallback;
     }
-
     private function buildRunsFromFlow(
         array $runSpecs,
         array $computedStyles,
@@ -522,7 +525,7 @@ final class HtmlToPdfConverter
 
         if (isset($styleMap['line-height'])) {
             $ref = (float)($options['size'] ?? $baseFontSize);
-            $options['lineHeight'] = $this->parseLengthOptional($styleMap['line-height'], $ref, 1.2 * $ref);
+            $options['lineHeight'] = $this->parseLengthOptional($styleMap['line-height'], $ref, 1.2 * $ref, true);
         }
 
         $refSize = (float)($options['size'] ?? $baseFontSize);
@@ -642,7 +645,7 @@ final class HtmlToPdfConverter
                 $tableFontSizeDeclared = true;
             }
             if (isset($map['line-height'])) {
-                $tableLineHeight = $this->parseLengthOptional($map['line-height'], $tableFontSize, 1.2 * $tableFontSize);
+                $tableLineHeight = $this->parseLengthOptional($map['line-height'], $tableFontSize, 1.2 * $tableFontSize, true);
                 $tableLineHeightDeclared = true;
             }
         }
@@ -724,6 +727,19 @@ final class HtmlToPdfConverter
         }
 
         $pdf->addTable($tableData, $options);
+        $marginBottom = 0.0;
+        if ($tableStyle instanceof ComputedStyle) {
+            $map = $tableStyle->toArray();
+            if (isset($map['margin-bottom']) && strtolower($map['margin-bottom']) !== 'auto') {
+                $marginBottom = max(0.0, $this->parseLengthOptional($map['margin-bottom'], $tableFontSize, 0.0));
+            }
+        }
+
+        $lineGap = $pdf->getStyleManager()->getLineHeight();
+        $spacer = max($marginBottom, $lineGap);
+        if ($spacer > 0.0) {
+            $pdf->addSpacer($spacer);
+        }
     }
 
     /**
