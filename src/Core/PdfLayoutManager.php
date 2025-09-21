@@ -138,7 +138,12 @@ final class PdfLayoutManager
 
     public function resetCursor(): void
     {
-        $this->cursorY = $this->pageHeight - $this->currentContext['mTop'];
+        $topMargin = $this->currentContext['mTop'];
+        $contentTop = $this->pdf->getContentTopOffset();
+        if ($contentTop > $topMargin) {
+            $topMargin = $contentTop;
+        }
+        $this->cursorY = $this->pageHeight - $topMargin;
     }
 
     public function getCursorY(): float

@@ -422,6 +422,14 @@ final class PdfBuilder
         }
     }
 
+    public function getContentTopOffset(): float
+    {
+        if ($this->pageHeaderDefined && $this->pageHeaderPushesContent) {
+            return $this->pageHeaderOffset;
+        }
+        return $this->baseMargins['top'];
+    }
+
     public function setFooter(callable $callback, array $options = []): void
     {
         if ($this->pageFooterDefined) {
