@@ -851,14 +851,26 @@ final class PdfBuilder
         foreach ($data as $row) {
             $isHeader = (isset($tableOptions['headerRow']) && $rowIndex === $tableOptions['headerRow']);
             $this->styleManager->push();
-            if ($isHeader) $this->styleManager->applyOptions(['style' => $tableOptions['headerStyle'] ?? 'B'], $this);
+            if ($isHeader) {
+                $this->styleManager->applyOptions(['style' => $tableOptions['headerStyle'] ?? 'B'], $this);
+            }
 
             for ($i = 0; $i < $numCols; $i++) {
-                if (isset($row[$i])) {
-                    $text = is_string($row[$i]) ? $row[$i] : (string)$row[$i];
-                    $width = $this->textRenderer->measureTextStyled($text, $this->styleManager);
-                    $maxWidths[$i] = max($maxWidths[$i], $width);
+                if (!isset($row[$i])) {
+                    continue;
                 }
+                $cell = $row[$i];
+                $cellOptions = $this->getTableCellOptions($cell);
+                [$styleOptions, $unusedBg] = $this->partitionCellOptions($cellOptions);
+
+                $this->styleManager->push();
+                if ($styleOptions !== []) {
+                    $this->styleManager->applyOptions($styleOptions, $this);
+                }
+                $text = $this->getTableCellText($cell);
+                $width = $this->textRenderer->measureTextStyled($text, $this->styleManager);
+                $maxWidths[$i] = max($maxWidths[$i], $width);
+                $this->styleManager->pop();
             }
             $this->styleManager->pop();
             $rowIndex++;
@@ -903,6 +915,45 @@ final class PdfBuilder
         return $spec;
     }
 
+    /**
+     * @param mixed $cell
+     */
+    private function getTableCellText($cell): string
+    {
+        if (is_array($cell)) {
+            $text = $cell['text'] ?? '';
+            return is_string($text) ? $text : (string)$text;
+        }
+        return is_string($cell) ? $cell : (string)$cell;
+    }
+
+    /**
+     * @param mixed $cell
+     * @return array<string, mixed>
+     */
+    private function getTableCellOptions($cell): array
+    {
+        if (is_array($cell) && isset($cell['options']) && is_array($cell['options'])) {
+            return $cell['options'];
+        }
+        return [];
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     * @return array{0: array<string, mixed>, 1: mixed}
+     */
+    private function partitionCellOptions(array $options): array
+    {
+        $styleOptions = $options;
+        $bgColor = null;
+        if (array_key_exists('bgcolor', $styleOptions)) {
+            $bgColor = $styleOptions['bgcolor'];
+            unset($styleOptions['bgcolor']);
+        }
+        return [$styleOptions, $bgColor];
+    }
+
     private function wrapText(string $text, float $maxWidth): array
     {
         if ($maxWidth <= 0 || $this->textRenderer->measureTextStyled($text, $this->styleManager) <= $maxWidth) return [$text];
@@ -941,21 +992,40 @@ final class PdfBuilder
         $this->styleManager->push();
         $this->styleManager->applyOptions(['style' => $style], $this);
 
-        $lineHeight = $this->styleManager->getLineHeight();
-        $maxHeight = $lineHeight;
-        if ($wrapText) {
-            for ($i = 0; $i < count($row); $i++) {
-                if (isset($row[$i], $columnWidths[$i])) {
-                    $text = is_string($row[$i]) ? $row[$i] : (string)$row[$i];
-                    $cellWidth = $columnWidths[$i] - ($padding * 2);
-                    $lines = $this->wrapText($text, $cellWidth);
-                    $cellHeight = count($lines) * $lineHeight;
-                    $maxHeight = max($maxHeight, $cellHeight);
-                }
+        $baseLineHeight = $this->styleManager->getLineHeight();
+        $maxHeight = $baseLineHeight;
+
+        $columns = min(count($row), count($columnWidths));
+        for ($i = 0; $i < $columns; $i++) {
+            if (!isset($row[$i], $columnWidths[$i])) {
+                continue;
             }
+            $cell = $row[$i];
+            $cellWidth = $columnWidths[$i] - ($padding * 2);
+            if ($cellWidth <= 0) {
+                $cellWidth = $columnWidths[$i];
+            }
+
+            $cellOptions = $this->getTableCellOptions($cell);
+            [$styleOptions, $unusedBg] = $this->partitionCellOptions($cellOptions);
+
+            $this->styleManager->push();
+            if ($styleOptions !== []) {
+                $this->styleManager->applyOptions($styleOptions, $this);
+            }
+            $text = $this->getTableCellText($cell);
+            $lines = $wrapText ? $this->wrapText($text, max(0.0, $cellWidth)) : [$text];
+            $cellLineHeight = $this->styleManager->getLineHeight();
+            $lineCount = max(1, count($lines));
+            $cellHeight = $lineCount * $cellLineHeight;
+            $maxHeight = max($maxHeight, $cellHeight);
+            $this->styleManager->pop();
         }
-        $totalHeight = max($maxHeight + ($padding * 2), $lineHeight * 1.5);
-        if ($minHeight !== null) $totalHeight = max($totalHeight, $minHeight);
+
+        $totalHeight = max($maxHeight + ($padding * 2), $baseLineHeight * 1.5);
+        if ($minHeight !== null) {
+            $totalHeight = max($totalHeight, $minHeight);
+        }
 
         $this->styleManager->pop();
         return $totalHeight;
@@ -990,13 +1060,33 @@ final class PdfBuilder
             if ($borderSpec['hasBorder']) {
                 $this->drawCellBorder($x, $y, $cellWidth, $rowHeight, $borderSpec);
             }
-            if (isset($row[$i])) {
-                $text = is_string($row[$i]) ? $row[$i] : (string)$row[$i];
-                $align = $columnAligns[$i];
-                $cellCenterY = $y + ($rowHeight / 2);
-                $textBaselineY = $cellCenterY - $this->getTextVerticalCenterOffset();
-                $this->drawCellText($text, $x + $padding, $textBaselineY, $cellWidth - ($padding * 2), $align, $wrapText);
+            if (!isset($row[$i])) {
+                $x += $cellWidth;
+                continue;
             }
+
+            $cell = $row[$i];
+            $cellOptions = $this->getTableCellOptions($cell);
+            [$styleOptions, $bgSpec] = $this->partitionCellOptions($cellOptions);
+
+            if ($bgSpec !== null) {
+                $cellBgColor = $this->normalizeColor($bgSpec);
+                if ($cellBgColor !== null) {
+                    $this->drawBackgroundRect($x, $y, $cellWidth, $rowHeight, $cellBgColor);
+                }
+            }
+
+            $this->styleManager->push();
+            if ($styleOptions !== []) {
+                $this->styleManager->applyOptions($styleOptions, $this);
+            }
+            $text = $this->getTableCellText($cell);
+            $align = $columnAligns[$i];
+            $cellCenterY = $y + ($rowHeight / 2);
+            $textBaselineY = $cellCenterY - $this->getTextVerticalCenterOffset();
+            $this->drawCellText($text, $x + $padding, $textBaselineY, max(0.0, $cellWidth - ($padding * 2)), $align, $wrapText);
+            $this->styleManager->pop();
+
             $x += $cellWidth;
         }
     }

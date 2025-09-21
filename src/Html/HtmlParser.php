@@ -37,7 +37,7 @@ final class HtmlParser
             }
         }
 
-        return new HtmlDocument($roots);
+        return new HtmlDocument($roots, $this->extractStylesheets($dom));
     }
 
     /**
@@ -102,5 +102,25 @@ final class HtmlParser
     {
         $this->idSeq++;
         return 'n' . $this->idSeq;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractStylesheets(\DOMDocument $dom): array
+    {
+        $stylesheets = [];
+        $styleNodes = $dom->getElementsByTagName('style');
+        foreach ($styleNodes as $styleNode) {
+            if (!($styleNode instanceof \DOMElement)) {
+                continue;
+            }
+            $content = trim((string)$styleNode->textContent);
+            if ($content !== '') {
+                $stylesheets[] = $content;
+            }
+        }
+
+        return $stylesheets;
     }
 }

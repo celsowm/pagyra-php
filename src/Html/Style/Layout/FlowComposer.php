@@ -222,7 +222,12 @@ final class FlowComposer
                 if ($cellTag === 'td') {
                     $isHeader = false;
                 }
-                $row[] = $this->normalizeWhitespace($this->collectPlainText($child));
+                $cellId = (string)($child['nodeId'] ?? '');
+                $row[] = [
+                    'text' => $this->normalizeWhitespace($this->collectPlainText($child)),
+                    'nodeId' => $cellId,
+                    'tag' => $cellTag,
+                ];
             }
             if ($row !== []) {
                 $rows[] = [

@@ -16,11 +16,24 @@ final class HtmlDocument
     private array $elementIndex = [];
 
     /**
-     * @param array<int, array<string, mixed>> $roots
+     * @var array<int, string>
      */
-    public function __construct(array $roots)
+    private array $stylesheets = [];
+
+    /**
+     * @param array<int, array<string, mixed>> $roots
+     * @param array<int, string> $stylesheets
+     */
+    public function __construct(array $roots, array $stylesheets = [])
     {
         $this->roots = $roots;
+        $this->stylesheets = [];
+        foreach ($stylesheets as $css) {
+            $css = trim((string)$css);
+            if ($css !== '') {
+                $this->stylesheets[] = $css;
+            }
+        }
         $this->indexElements($this->roots);
     }
 
@@ -38,6 +51,14 @@ final class HtmlDocument
     public function getElement(string $nodeId): ?array
     {
         return $this->elementIndex[$nodeId] ?? null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getEmbeddedStylesheets(): array
+    {
+        return $this->stylesheets;
     }
 
     /**
