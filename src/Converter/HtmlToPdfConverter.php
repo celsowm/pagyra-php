@@ -237,7 +237,19 @@ final class HtmlToPdfConverter
             $startByLevel
         );
 
+        $marginTop = (float)($options['marginTop'] ?? 0.0);
+        $marginBottom = (float)($options['marginBottom'] ?? 0.0);
+        unset($options['marginTop'], $options['marginBottom']);
+
+        if ($marginTop > 0.0) {
+            $pdf->addSpacer($marginTop);
+        }
+
         $pdf->addList($items, $options);
+
+        if ($marginBottom > 0.0) {
+            $pdf->addSpacer($marginBottom);
+        }
     }
 
     /**
@@ -340,6 +352,8 @@ final class HtmlToPdfConverter
         array $startByLevel
     ): array {
         $options = [];
+        $paragraph = [];
+        $fontSize = 12.0;
 
         if ($style instanceof ComputedStyle) {
             $paragraph = $this->buildParagraphOptions($style);
@@ -348,6 +362,19 @@ final class HtmlToPdfConverter
             }
             if (isset($paragraph['lineHeight'])) {
                 $options['lineHeight'] = $paragraph['lineHeight'];
+            }
+            if (isset($paragraph['size'])) {
+                $fontSize = (float)$paragraph['size'];
+            }
+            $margin = $this->extractMarginBox($style, $fontSize);
+            if (abs($margin['left']) > 1e-6) {
+                $options['indent'] = ($options['indent'] ?? 0.0) + $margin['left'];
+            }
+            if (abs($margin['top']) > 1e-6) {
+                $options['marginTop'] = $margin['top'];
+            }
+            if (abs($margin['bottom']) > 1e-6) {
+                $options['marginBottom'] = $margin['bottom'];
             }
         }
 
@@ -386,6 +413,63 @@ final class HtmlToPdfConverter
         }
 
         return $options;
+    }
+
+    /**
+     * @return array{top: float, right: float, bottom: float, left: float}
+     */
+    private function extractMarginBox(ComputedStyle $style, float $reference): array
+    {
+        $map = $style->toArray();
+        $margins = ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0];
+
+        if (isset($map['margin'])) {
+            $rawValues = preg_split('/\s+/', trim((string)$map['margin'])) ?: [];
+            $values = [];
+            foreach ($rawValues as $value) {
+                $value = trim((string)$value);
+                if ($value === '') {
+                    continue;
+                }
+                $values[] = $value;
+            }
+            if ($values !== []) {
+                $count = count($values);
+                if ($count === 1) {
+                    $values = array_fill(0, 4, $values[0]);
+                } elseif ($count === 2) {
+                    $values = [$values[0], $values[1], $values[0], $values[1]];
+                } elseif ($count === 3) {
+                    $values = [$values[0], $values[1], $values[2], $values[1]];
+                } else {
+                    $values = array_slice($values, 0, 4);
+                }
+                $sides = ['top', 'right', 'bottom', 'left'];
+                foreach ($sides as $index => $side) {
+                    $margins[$side] = $this->parseMarginComponent($values[$index], $reference, $margins[$side]);
+                }
+            }
+        }
+
+        foreach (['top', 'right', 'bottom', 'left'] as $side) {
+            $prop = 'margin-' . $side;
+            if (!isset($map[$prop])) {
+                continue;
+            }
+            $margins[$side] = $this->parseMarginComponent($map[$prop], $reference, $margins[$side]);
+        }
+
+        return $margins;
+    }
+
+    private function parseMarginComponent(string $value, float $reference, float $fallback): float
+    {
+        $normalized = strtolower(trim($value));
+        if ($normalized === '' || $normalized === 'auto' || $normalized === 'inherit') {
+            return $fallback;
+        }
+
+        return $this->parseLengthOptional($value, $reference, $fallback);
     }
 
     private function detectListType(string $tag, array $attributes, ?ComputedStyle $style): string
