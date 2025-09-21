@@ -35,6 +35,7 @@ final class HtmlToPdfConverter
     {
         $document = $this->htmlParser->parse($html);
         $stylesheet = $css ?? $this->extractEmbeddedCss($document);
+        $stylesheet = $this->mergeWithDefaultStylesheet($stylesheet);
         $cssOm = $this->cssParser->parse($stylesheet);
         $computedStyles = $this->cssCascade->compute($document, $cssOm);
         $flows = $this->flowComposer->compose($document, $computedStyles);
@@ -551,6 +552,26 @@ final class HtmlToPdfConverter
         return $filtered[0];
     }
 
+    private function mergeWithDefaultStylesheet(string $stylesheet): string
+    {
+        $defaults = $this->getDefaultStylesheet();
+        $stylesheet = trim($stylesheet);
+        if ($defaults === '') {
+            return $stylesheet;
+        }
+        if ($stylesheet === '') {
+            return $defaults;
+        }
+        return $defaults . "\n" . $stylesheet;
+    }
+
+    private function getDefaultStylesheet(): string
+    {
+        return <<<'CSS'
+strong, b { font-weight: bold; }
+em, i { font-style: italic; }
+CSS;
+    }
     private function extractEmbeddedCss(HtmlDocument $document): string
     {
         $stylesheets = $document->getEmbeddedStylesheets();
