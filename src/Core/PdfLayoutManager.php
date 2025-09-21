@@ -43,6 +43,48 @@ final class PdfLayoutManager
         $this->resetCursor();
     }
 
+
+    public function snapshotState(): array
+    {
+        return [
+            'layoutStack' => $this->layoutStack,
+            'cursorY' => $this->cursorY,
+        ];
+    }
+
+    public function restoreState(array $state): void
+    {
+        $this->layoutStack = $state['layoutStack'];
+        $this->currentContext = end($this->layoutStack);
+        $this->cursorY = $state['cursorY'];
+        $this->pdf->mLeft = $this->currentContext['mLeft'];
+        $this->pdf->mRight = $this->currentContext['mRight'];
+    }
+
+    public function updateBaseBottomMargin(float $bottom): void
+    {
+        if (empty($this->layoutStack)) {
+            return;
+        }
+
+        $bottom = max(0.0, $bottom);
+        $this->layoutStack[0]['mBottom'] = $bottom;
+        $this->layoutStack[0]['height'] = $this->pageHeight - $this->layoutStack[0]['mTop'] - $bottom;
+
+        foreach ($this->layoutStack as $index => &$context) {
+            if ($index === 0) {
+                continue;
+            }
+            if ($context['mBottom'] < $bottom) {
+                $context['mBottom'] = $bottom;
+            }
+            $context['height'] = $this->pageHeight - $context['mTop'] - $context['mBottom'];
+        }
+        unset($context);
+
+        $this->currentContext = end($this->layoutStack);
+    }
+
     public function pushContext(float $x, float $width, ?float $topMargin = null): void
     {
         $parent = $this->currentContext;
@@ -85,6 +127,10 @@ final class PdfLayoutManager
     public function checkPageBreak(float $neededHeight = 0.0): void
     {
         if (($this->cursorY - $neededHeight) < $this->currentContext['mBottom']) {
+            if ($this->pdf->isMeasurementMode() || $this->pdf->arePageBreaksSuppressed()) {
+                $this->cursorY = $this->currentContext['mBottom'];
+                return;
+            }
             $this->pdf->internal_newPage();
             $this->resetCursor();
         }

@@ -79,17 +79,28 @@ final class PdfBlockRenderer
         $this->pdf->mRight = $this->pdf->getPageWidth() - ($x + $width - $padding[1]);
         $this->pdf->setCursorY($contentStartY);
 
-        foreach ($elements as $element) {
-            match ($element['type']) {
-                'paragraph' => $this->pdf->addParagraphText($element['content'], $element['options']),
-                'image' => $this->pdf->addImageBlock($element['alias'], $element['options']),
-                'table' => $this->pdf->addTableData($element['data'], $element['options']),
-                'list' => $this->pdf->addList($element['items'], $element['options']),
-                'spacer' => $this->pdf->addSpacer($element['height']),
-                'hr' => $this->pdf->addHorizontalLine($element['options']),
-                'block' => $element['builder']->end(),
-                default => null,
-            };
+        $suppressBreaks = $isAbsolute;
+        if ($suppressBreaks) {
+            $this->pdf->suppressPageBreaks();
+        }
+
+        try {
+            foreach ($elements as $element) {
+                match ($element['type']) {
+                    'paragraph' => $this->pdf->addParagraphText($element['content'], $element['options']),
+                    'image' => $this->pdf->addImageBlock($element['alias'], $element['options']),
+                    'table' => $this->pdf->addTableData($element['data'], $element['options']),
+                    'list' => $this->pdf->addList($element['items'], $element['options']),
+                    'spacer' => $this->pdf->addSpacer($element['height']),
+                    'hr' => $this->pdf->addHorizontalLine($element['options']),
+                    'block' => $element['builder']->end(),
+                    default => null,
+                };
+            }
+        } finally {
+            if ($suppressBreaks) {
+                $this->pdf->resumePageBreaks();
+            }
         }
 
         $contentEndY = $this->pdf->getCursorY();

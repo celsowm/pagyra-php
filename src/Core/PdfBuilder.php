@@ -19,7 +19,6 @@ use Celsowm\PagyraPhp\Table\PdfTableBuilder;
 use Celsowm\PagyraPhp\Text\PdfTextRenderer;
 use Celsowm\PagyraPhp\Writer\PdfWriter;
 
-
 final class PdfBuilder
 {
     private PdfTextRenderer $textRenderer;
@@ -60,6 +59,26 @@ final class PdfBuilder
     private float $pageHeaderSpacing = 0.0;
 
     private bool $pageHeaderPushesContent = false;
+
+    private bool $pageFooterDefined = false;
+
+    private float $pageFooterHeight = 0.0;
+
+    private float $pageFooterBottom = 0.0;
+
+    private float $pageFooterSpacing = 0.0;
+
+    private bool $pageFooterPushesContent = false;
+
+    private float $pageFooterOffset = 0.0;
+
+    private bool $measurementMode = false;
+
+    private int $pageHeaderContentLength = 0;
+
+    private int $measurementDepth = 0;
+    private int $pageBreakSuppression = 0;
+
 
     public function __construct(float $w = 595.28, float $h = 841.89)
     {
@@ -115,6 +134,28 @@ final class PdfBuilder
         $this->layoutManager->setCursorY($y);
     }
 
+    public function isMeasurementMode(): bool
+    {
+        return $this->measurementMode;
+    }
+
+    public function suppressPageBreaks(): void
+    {
+        $this->pageBreakSuppression++;
+    }
+
+    public function resumePageBreaks(): void
+    {
+        if ($this->pageBreakSuppression > 0) {
+            $this->pageBreakSuppression--;
+        }
+    }
+
+    public function arePageBreaksSuppressed(): bool
+    {
+        return $this->pageBreakSuppression > 0;
+    }
+
     public function setObject(int $id, string $content): void
     {
         $this->writer->setObject($id, $content);
@@ -138,15 +179,17 @@ final class PdfBuilder
     }
     public function appendToPageContent(string $ops): void
     {
-        if ($this->currentPage !== null) {
-            $this->pageContents[$this->currentPage] .= $ops;
+        if ($this->measurementMode || $this->currentPage === null) {
+            return;
         }
+        $this->pageContents[$this->currentPage] .= $ops;
     }
     public function registerPageResource(string $type, string $label, ?int $value = 0): void
     {
-        if ($this->currentPage !== null) {
-            $this->pageResources[$this->currentPage][$type][$label] = $value;
+        if ($this->measurementMode || $this->currentPage === null) {
+            return;
         }
+        $this->pageResources[$this->currentPage][$type][$label] = $value;
     }
     public function resolveAliasByStyle(string $baseAlias, string $style): string
     {
@@ -185,7 +228,7 @@ final class PdfBuilder
 
     public function addLinkAbs(float $x, float $y, float $width, float $height, string $url): void
     {
-        if ($this->currentPage === null) {
+        if ($this->measurementMode || $this->currentPage === null) {
             return;
         }
         $annotId = $this->newObjectId();
@@ -305,6 +348,22 @@ final class PdfBuilder
             );
             $this->layoutManager->setCursorY($this->getPageHeight() - $this->pageHeaderOffset);
         }
+
+        $desiredBottomMargin = $this->baseMargins['bottom'];
+
+        if ($this->pageFooterDefined) {
+            if ($this->pageFooterPushesContent) {
+                $this->pageFooterOffset = max(
+                    $desiredBottomMargin,
+                    $this->pageFooterBottom + $this->pageFooterHeight + $this->pageFooterSpacing
+                );
+                $desiredBottomMargin = $this->pageFooterOffset;
+            } else {
+                $this->pageFooterOffset = $desiredBottomMargin;
+            }
+        }
+
+        $this->layoutManager->updateBaseBottomMargin($desiredBottomMargin);
     }
 
     public function setHeader(callable $callback, array $options = []): void
@@ -312,7 +371,7 @@ final class PdfBuilder
         if ($this->pageHeaderDefined) {
             throw new \LogicException('Page header already defined.');
         }
-        if ($this->currentPage === null) {
+        if ($this->measurementMode || $this->currentPage === null) {
             throw new \LogicException('No active page to attach header.');
         }
 
@@ -345,6 +404,10 @@ final class PdfBuilder
         $renderer = new PdfBlockRenderer($this);
         $height = $renderer->render($definition['elements'], $definition['options']);
 
+        if ($this->currentPage !== null) {
+            $this->pageHeaderContentLength = strlen($this->pageContents[$this->currentPage] ?? '');
+        }
+
         $this->pageHeaderDefined = true;
         $this->pageHeaderHeight = $height;
         $this->pageHeaderTop = $y;
@@ -359,6 +422,84 @@ final class PdfBuilder
         }
     }
 
+    public function setFooter(callable $callback, array $options = []): void
+    {
+        if ($this->pageFooterDefined) {
+            throw new \LogicException('Page footer already defined.');
+        }
+        if ($this->measurementMode || $this->currentPage === null) {
+            throw new \LogicException('No active page to attach footer.');
+        }
+
+        $existingContent = $this->pageContents[$this->currentPage] ?? '';
+        if (trim($existingContent) !== '') {
+            $contentLength = strlen($existingContent);
+            $headerLength = $this->pageHeaderContentLength;
+            $headerOnlyContent = ($headerLength > 0 && $contentLength === $headerLength);
+            if (!$headerOnlyContent) {
+                throw new \LogicException('Call setFooter() before adding content to the first page.');
+            }
+        }
+
+        $pushContent = !isset($options['pushContent']) || (bool)$options['pushContent'];
+        $spacing = isset($options['contentSpacing']) ? max(0.0, (float)$options['contentSpacing']) : 6.0;
+        $x = isset($options['x']) ? (float)$options['x'] : $this->baseMargins['left'];
+        $bottomOffset = isset($options['bottom']) ? max(0.0, (float)$options['bottom']) : $this->baseMargins['bottom'];
+        $explicitY = array_key_exists('y', $options) ? (float)$options['y'] : null;
+
+        $blockOptions = $options;
+        unset($blockOptions['pushContent'], $blockOptions['contentSpacing'], $blockOptions['bottom']);
+        $blockOptions['position'] = 'fixed';
+        $blockOptions['x'] = $x;
+        if (!isset($blockOptions['width'])) {
+            $blockOptions['width'] = '100%';
+        }
+
+        $builder = new PdfBlockBuilder($this, $blockOptions);
+        $callback($builder);
+        $definition = $builder->getDefinition();
+        if (empty($definition['elements'])) {
+            return;
+        }
+
+        $measureOptions = $definition['options'];
+        $measureOptions['position'] = 'relative';
+        unset($measureOptions['x'], $measureOptions['y']);
+        $height = $this->measureBlockHeight($definition['elements'], $measureOptions);
+
+        if ($explicitY !== null) {
+            $renderY = $explicitY;
+            $footerBottom = max(0.0, $this->getPageHeight() - $renderY - $height);
+        } else {
+            $footerBottom = $bottomOffset;
+            $topFromBottom = $footerBottom + $height;
+            $renderY = max(0.0, $this->getPageHeight() - $topFromBottom);
+        }
+
+        $renderOptions = $definition['options'];
+        $renderOptions['position'] = 'fixed';
+        $renderOptions['x'] = $x;
+        $renderOptions['y'] = $renderY;
+        if (!isset($renderOptions['width'])) {
+            $renderOptions['width'] = '100%';
+        }
+
+        $renderer = new PdfBlockRenderer($this);
+        $renderedHeight = $renderer->render($definition['elements'], $renderOptions);
+
+        $this->pageFooterDefined = true;
+        $this->pageFooterHeight = $renderedHeight;
+        $this->pageFooterBottom = $footerBottom;
+        $this->pageFooterSpacing = $pushContent ? $spacing : 0.0;
+        $this->pageFooterPushesContent = $pushContent;
+        $this->pageFooterOffset = $pushContent
+            ? max($this->baseMargins['bottom'], $footerBottom + $renderedHeight + $spacing)
+            : $this->baseMargins['bottom'];
+
+        if ($pushContent) {
+            $this->layoutManager->updateBaseBottomMargin($this->pageFooterOffset);
+        }
+    }
 
     public function setFont(string $alias, float $size, ?float $lineHeight = null): void
     {
@@ -668,9 +809,15 @@ final class PdfBuilder
             if ($run->text === '') continue;
 
             $parts = preg_split('/\R/u', $run->text);
+            if ($parts === false) {
+                $parts = [$run->text];
+            }
             $lastPartIdx = count($parts) - 1;
             foreach ($parts as $j => $part) {
                 $pieces = preg_split('/(\s+)/u', $part, -1, PREG_SPLIT_DELIM_CAPTURE);
+                if ($pieces === false) {
+                    $pieces = [$part];
+                }
                 foreach ($pieces as $p) {
                     if ($p === '') continue;
                     $isSpace = preg_match('/^\s+$/u', $p);
@@ -1527,6 +1674,9 @@ final class PdfBuilder
 
     public function registerFixedElement(array $elements, array $options, float $x, float $y): void
     {
+        if ($this->measurementMode) {
+            return;
+        }
         $key = md5(serialize([$elements, $options]));
         if (!isset($this->fixedElements[$key])) {
             $this->fixedElements[$key] = [
@@ -1538,6 +1688,41 @@ final class PdfBuilder
         }
     }
 
+    private function enterMeasurementMode(): void
+    {
+        $this->measurementDepth++;
+        if ($this->measurementDepth === 1) {
+            $this->measurementMode = true;
+        }
+    }
+
+    private function exitMeasurementMode(): void
+    {
+        if ($this->measurementDepth > 0) {
+            $this->measurementDepth--;
+        }
+        if ($this->measurementDepth === 0) {
+            $this->measurementMode = false;
+        }
+    }
+
+    private function measureBlockHeight(array $elements, array $options): float
+    {
+        $layoutState = $this->layoutManager->snapshotState();
+        $mLeft = $this->mLeft;
+        $mRight = $this->mRight;
+
+        $this->enterMeasurementMode();
+        try {
+            $renderer = new PdfBlockRenderer($this);
+            return $renderer->render($elements, $options);
+        } finally {
+            $this->layoutManager->restoreState($layoutState);
+            $this->mLeft = $mLeft;
+            $this->mRight = $mRight;
+            $this->exitMeasurementMode();
+        }
+    }
     public function internal_newPage(): void
     {
         $pageId = $this->newObjectId();
@@ -1882,7 +2067,6 @@ final class PdfBuilder
             $width = $columnWidths[$i];
             $this->layoutManager->pushContext($currentX, $width);
             $this->layoutManager->setCursorY($startY);
-
 
             $this->renderColumnContent($columnContent, $width);
             $columnHeights[] = $startY - $this->layoutManager->getCursorY();
