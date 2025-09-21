@@ -72,7 +72,35 @@ final class HtmlToPdfConverter
                 continue;
             }
 
+            $marginTop = 0.0;
+            $marginBottom = 0.0;
+            if ($style instanceof ComputedStyle) {
+                $margins = $this->extractMarginBox($style, $baseFontSize);
+                if ($margins['left'] > 0.0) {
+                    $indent = ($paragraphOptions['indent'] ?? 0.0) + $margins['left'];
+                    $paragraphOptions['indent'] = $indent;
+                    $paragraphOptions['hangIndent'] = $paragraphOptions['hangIndent'] ?? $indent;
+                    if ($paragraphOptions['hangIndent'] < $indent) {
+                        $paragraphOptions['hangIndent'] = $indent;
+                    }
+                }
+                if ($margins['top'] > 0.0) {
+                    $marginTop = $margins['top'];
+                }
+                if ($margins['bottom'] > 0.0) {
+                    $marginBottom = $margins['bottom'];
+                }
+            }
+
+            if ($marginTop > 0.0) {
+                $pdf->addSpacer($marginTop);
+            }
+
             $pdf->addParagraphRuns($runs, $paragraphOptions);
+
+            if ($marginBottom > 0.0) {
+                $pdf->addSpacer($marginBottom);
+            }
         }
     }
 
