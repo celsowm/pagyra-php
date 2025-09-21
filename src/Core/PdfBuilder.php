@@ -47,6 +47,20 @@ final class PdfBuilder
     private PdfImageManager $imageManager;
     private array $fixedElements = [];
 
+    private array $baseMargins = ['left' => 56.0, 'top' => 56.0, 'right' => 56.0, 'bottom' => 56.0];
+
+    private bool $pageHeaderDefined = false;
+
+    private float $pageHeaderHeight = 0.0;
+
+    private float $pageHeaderOffset = 0.0;
+
+    private float $pageHeaderTop = 0.0;
+
+    private float $pageHeaderSpacing = 0.0;
+
+    private bool $pageHeaderPushesContent = false;
+
     public function __construct(float $w = 595.28, float $h = 841.89)
     {
         $this->writer = new PdfWriter();
@@ -276,8 +290,75 @@ final class PdfBuilder
 
     public function setMargins(float $left, float $top, float $right, float $bottom): void
     {
+        $this->baseMargins = [
+            'left' => $left,
+            'top' => $top,
+            'right' => $right,
+            'bottom' => $bottom,
+        ];
         $this->layoutManager->setBaseMargins($top, $right, $bottom, $left);
+
+        if ($this->pageHeaderDefined && $this->pageHeaderPushesContent) {
+            $this->pageHeaderOffset = max(
+                $this->baseMargins['top'],
+                $this->pageHeaderTop + $this->pageHeaderHeight + $this->pageHeaderSpacing
+            );
+            $this->layoutManager->setCursorY($this->getPageHeight() - $this->pageHeaderOffset);
+        }
     }
+
+    public function setHeader(callable $callback, array $options = []): void
+    {
+        if ($this->pageHeaderDefined) {
+            throw new \LogicException('Page header already defined.');
+        }
+        if ($this->currentPage === null) {
+            throw new \LogicException('No active page to attach header.');
+        }
+
+        $existingContent = $this->pageContents[$this->currentPage] ?? '';
+        if (trim($existingContent) !== '') {
+            throw new \LogicException('Call setHeader() before adding content to the first page.');
+        }
+
+        $pushContent = !isset($options['pushContent']) || (bool)$options['pushContent'];
+        $spacing = isset($options['contentSpacing']) ? max(0.0, (float)$options['contentSpacing']) : 6.0;
+        $x = isset($options['x']) ? (float)$options['x'] : $this->baseMargins['left'];
+        $y = isset($options['y']) ? max(0.0, (float)$options['y']) : 0.0;
+
+        $blockOptions = $options;
+        unset($blockOptions['pushContent'], $blockOptions['contentSpacing']);
+        $blockOptions['position'] = 'fixed';
+        $blockOptions['x'] = $x;
+        $blockOptions['y'] = $y;
+        if (!isset($blockOptions['width'])) {
+            $blockOptions['width'] = '100%';
+        }
+
+        $builder = new PdfBlockBuilder($this, $blockOptions);
+        $callback($builder);
+        $definition = $builder->getDefinition();
+        if (empty($definition['elements'])) {
+            return;
+        }
+
+        $renderer = new PdfBlockRenderer($this);
+        $height = $renderer->render($definition['elements'], $definition['options']);
+
+        $this->pageHeaderDefined = true;
+        $this->pageHeaderHeight = $height;
+        $this->pageHeaderTop = $y;
+        $this->pageHeaderSpacing = $pushContent ? $spacing : 0.0;
+        $this->pageHeaderPushesContent = $pushContent;
+        $this->pageHeaderOffset = $pushContent
+            ? max($this->baseMargins['top'], $y + $height + $spacing)
+            : $this->baseMargins['top'];
+
+        if ($pushContent) {
+            $this->setCursorY($this->getPageHeight() - $this->pageHeaderOffset);
+        }
+    }
+
 
     public function setFont(string $alias, float $size, ?float $lineHeight = null): void
     {
@@ -1478,7 +1559,11 @@ final class PdfBuilder
                     ])
                 );
             }
-            $this->setCursorY($originalCursorY);
+            if ($this->pageHeaderDefined && $this->pageHeaderPushesContent) {
+                $this->setCursorY($this->getPageHeight() - $this->pageHeaderOffset);
+            } else {
+                $this->setCursorY($originalCursorY);
+            }
         }
     }
 

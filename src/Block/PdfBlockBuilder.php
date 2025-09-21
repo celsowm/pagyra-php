@@ -62,6 +62,11 @@ final class PdfBlockBuilder
         return $this;
     }
 
+    public function getDefinition(): array
+    {
+        return ['elements' => $this->elements, 'options' => $this->options];
+    }
+
     public function end(): PdfBuilder
     {
         $renderer = new PdfBlockRenderer($this->pdf);
