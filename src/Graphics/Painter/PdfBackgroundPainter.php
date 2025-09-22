@@ -49,13 +49,6 @@ final class PdfBackgroundPainter
         ?float $alpha = null
     ): void {
 
-        var_dump([
-            'painter:radialRect',
-            'mm' => $this->pdf->isMeasurementMode(),
-            'rect' => ['x' => $x, 'y' => $y, 'w' => $w, 'h' => $h],
-            'grad' => $grad,
-        ]);
-
         $coords = $grad['coords'] ?? $this->defaultRadialCoords($x, $y, $w, $h, $grad);
         $fnId   = $this->factory->buildStitchingFn($grad['stops']);
         $ext    = $grad['extend'] ?? [true, true];
