@@ -1,17 +1,20 @@
 {
     "name": "celsowm/pagyra-php",
-    "description": "A pdf lib",
+    "description": "A powerful oop PDF generator and HTML to PDF converter in PHP",
     "type": "library",
+    "license": "MIT",
     "autoload": {
         "psr-4": {
             "Celsowm\\PagyraPhp\\": "src/"
         }
+    },
+    "require": {
+        "php": ">=8.2"
     },
     "authors": [
         {
             "name": "celsowm",
             "email": "celsowm@gmail.com"
         }
-    ],
-    "require": {}
+    ]
 }
