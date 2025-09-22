@@ -28,6 +28,7 @@ final class PdfBackgroundPainter
         ?array $radius = null,
         ?float $alpha = null
     ): void {
+
         $coords = $grad['coords'] ?? $this->coordsFromAngle($x, $y, $w, $h, (float)($grad['angle'] ?? 0));
         $fnId   = $this->factory->buildStitchingFn($grad['stops']);
         $ext    = $grad['extend'] ?? [true, true];
@@ -47,6 +48,14 @@ final class PdfBackgroundPainter
         ?array $radius = null,
         ?float $alpha = null
     ): void {
+
+        var_dump([
+            'painter:radialRect',
+            'mm' => $this->pdf->isMeasurementMode(),
+            'rect' => ['x' => $x, 'y' => $y, 'w' => $w, 'h' => $h],
+            'grad' => $grad,
+        ]);
+
         $coords = $grad['coords'] ?? $this->defaultRadialCoords($x, $y, $w, $h, $grad);
         $fnId   = $this->factory->buildStitchingFn($grad['stops']);
         $ext    = $grad['extend'] ?? [true, true];
@@ -59,21 +68,30 @@ final class PdfBackgroundPainter
 
     private function emitPaintOps(float $x, float $y, float $w, float $h, ?array $radius, ?float $alpha, string $shName): void
     {
+        $page = $this->pdf->getCurrentPage();
+        $before = strlen($this->pdf->pageContents[$page] ?? '');
+
         $ops = "q\n";
 
         if (is_float($alpha) && $alpha < 1.0) {
-            // usa o ExtGState transparente da tua base (se já existir)
             if (method_exists($this->pdf, 'ensureExtGState')) {
                 $gs = $this->pdf->ensureExtGState(max(0.0, min(1.0, $alpha)));
+                // ATENÇÃO: se ensureExtGState retornar SÓ o nome (/GS1), não precisa id
+                // Se o teu registerPageResource exigir id também, ajuste p/ ($type,$name,$id)
                 $this->pdf->registerPageResource('ExtGState', $gs);
                 $ops .= "{$gs} gs\n";
             }
         }
 
         $ops .= $this->buildClipPath($x, $y, $w, $h, $radius);
-        $ops .= "{$shName} sh\nQ\n";
+        $ops .= "{$shName} sh\nQ\n";  // ⬅️ operador correto p/ shading
 
-        $this->pdf->writeOps($ops);
+        // Se teu PdfBuilder não tiver writeOps(), use appendToPageContent($ops)
+        if (method_exists($this->pdf, 'writeOps')) {
+            $this->pdf->writeOps($ops);
+        } else {
+            $this->pdf->appendToPageContent($ops);
+        }
     }
 
     private function coordsFromAngle(float $x, float $y, float $w, float $h, float $deg): array

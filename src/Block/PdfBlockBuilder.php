@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Celsowm\PagyraPhp\Block;
 use Celsowm\PagyraPhp\Block\PdfBlockRenderer;
 use Celsowm\PagyraPhp\Core\PdfBuilder;
+use Celsowm\PagyraPhp\Graphics\Painter\PdfBackgroundPainter;
 
 
 final class PdfBlockBuilder
@@ -11,11 +12,13 @@ final class PdfBlockBuilder
     private PdfBuilder $pdf;
     private array $elements = [];
     private array $options;
+    private ?PdfBackgroundPainter $bgPainter;
 
-    public function __construct(PdfBuilder $pdf, array $options = [])
+    public function __construct(PdfBuilder $pdf, array $options = [], ?PdfBackgroundPainter $bgPainter = null)
     {
         $this->pdf = $pdf;
         $this->options = $options;
+        $this->bgPainter = $bgPainter;
     }
 
     public function addParagraph(string $text, array $opts = []): self
@@ -69,7 +72,7 @@ final class PdfBlockBuilder
 
     public function end(): PdfBuilder
     {
-        $renderer = new PdfBlockRenderer($this->pdf);
+        $renderer = new PdfBlockRenderer($this->pdf, $this->bgPainter);
         $renderer->render($this->elements, $this->options);
         return $this->pdf;
     }
