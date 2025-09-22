@@ -25,7 +25,6 @@ final class PdfBlockRenderer
         $this->imageManager = $pdf->getImageManager();
         $this->bgPainter = $bgPainter;
     }
-
     public function render(array $elements, array $options): float
     {
         $position   = $options['position'] ?? 'relative';
@@ -73,10 +72,67 @@ final class PdfBlockRenderer
             }
         }
 
+        // Inner width (minus horizontal margins)
         $width  -= ($margin[1] + $margin[3]);
+
+        // Where the block starts (outer box top)
         $startY = $isAbsolute ? $y : $this->pdf->getCursorY();
+
+        // ===== 1) MEASURE PASS (to know background rect before drawing text) =====
+        $saved = [
+            'mLeft'   => $this->pdf->mLeft,
+            'mRight'  => $this->pdf->mRight,
+            'cursorY' => $this->pdf->getCursorY(),
+        ];
+
+        // Set the same inner box used for content rendering
+        $this->pdf->mLeft  = $x + $padding[3];
+        $this->pdf->mRight = $this->pdf->getPageWidth() - ($x + $width - $padding[1]);
+
+        // Content area top
         $contentStartY = $startY - $padding[0];
 
+        // Cursor at content start for measurement
+        $this->pdf->setCursorY($contentStartY);
+
+        // Measure content height (library should not emit during measure)
+        $measuredContentHeight = $this->pdf->measureBlockHeight($elements, $options);
+
+        // Restore state after measuring
+        $this->pdf->mLeft  = $saved['mLeft'];
+        $this->pdf->mRight = $saved['mRight'];
+        $this->pdf->setCursorY($saved['cursorY']);
+
+        // Compute total block height
+        $totalHeight = $padding[0] + $measuredContentHeight + $padding[2];
+
+        if (($options['minHeight'] ?? null) !== null) {
+            $totalHeight = max($totalHeight, (float)$options['minHeight']);
+        }
+        if (($options['maxHeight'] ?? null) !== null && $totalHeight > $options['maxHeight']) {
+            $totalHeight = (float)$options['maxHeight'];
+        }
+
+        // Background rectangle (outer box)
+        $rectX = $x;
+        $rectY = $startY - $totalHeight;
+        $rectW = $width;
+        $rectH = $totalHeight;
+        $radius = $borderSpec['radius'] ?? null;
+
+        // ===== 2) PAINT BACKGROUND FIRST =====
+        if ($bgGradient && $this->bgPainter instanceof PdfBackgroundPainter) {
+            if (($bgGradient['type'] ?? 'linear') === 'radial') {
+                $this->bgPainter->radialRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
+            } else {
+                $this->bgPainter->linearRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
+            }
+        } else {
+            $this->drawBackground($rectX, $rectY, $rectW, $rectH, $bgColor, $radius);
+        }
+
+        // ===== 3) CONTENT RENDER PASS =====
+        // Reapply inner box and content start
         $originalState = [
             'mLeft'   => $this->pdf->mLeft,
             'mRight'  => $this->pdf->mRight,
@@ -111,37 +167,12 @@ final class PdfBlockRenderer
             }
         }
 
-        $contentEndY   = $this->pdf->getCursorY();
-        $contentHeight = $contentStartY - $contentEndY;
-        $totalHeight   = $padding[0] + $contentHeight + $padding[2];
-
-        if (($options['minHeight'] ?? null) !== null) {
-            $totalHeight = max($totalHeight, (float)$options['minHeight']);
-        }
-        if (($options['maxHeight'] ?? null) !== null && $totalHeight > $options['maxHeight']) {
-            $totalHeight = (float)$options['maxHeight'];
-        }
-
-        $rectX = $x;
-        $rectY = $startY - $totalHeight;
-        $rectW = $width;
-        $rectH = $totalHeight;
-        $radius = $borderSpec['radius'] ?? null;
-
-        if ($bgGradient && $this->bgPainter instanceof PdfBackgroundPainter) {
-            if (($bgGradient['type'] ?? 'linear') === 'radial') {
-                $this->bgPainter->radialRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
-            } else {
-                $this->bgPainter->linearRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
-            }
-        } else {
-            $this->drawBackground($rectX, $rectY, $rectW, $rectH, $bgColor, $radius);
-        }
-
+        // ===== 4) BORDER (on top of bg/content edges) =====
         if ($borderSpec['hasBorder']) {
             $this->drawBorder($rectX, $rectY, $rectW, $rectH, $borderSpec);
         }
 
+        // Restore outer state and advance cursor
         $this->pdf->mLeft  = $originalState['mLeft'];
         $this->pdf->mRight = $originalState['mRight'];
 

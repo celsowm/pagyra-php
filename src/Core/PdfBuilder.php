@@ -1714,23 +1714,94 @@ final class PdfBuilder
         }
     }
 
-    private function measureBlockHeight(array $elements, array $options): float
+    public function measureBlockHeight(array $elements, array $options): float
     {
         $layoutState = $this->layoutManager->snapshotState();
-        $mLeft = $this->mLeft;
-        $mRight = $this->mRight;
+        $origLeft  = $this->mLeft;
+        $origRight = $this->mRight;
 
         $this->enterMeasurementMode();
+
         try {
-            $renderer = new PdfBlockRenderer($this);
-            return $renderer->render($elements, $options);
+
+            $borderSpec = $this->normalizeBorderSpec($options['border'] ?? null, $options['padding'] ?? null);
+            $padding    = $borderSpec['padding'];
+            $margin     = $this->normalizePadding($options['margin'] ?? 0);
+
+            $avail = $this->getContentAreaWidth();
+            $wSpec = $options['width'] ?? '100%';
+
+            $blockW = match (true) {
+                is_string($wSpec) && str_ends_with($wSpec, '%')
+                => $avail * max(0.0, min(1.0, (float) rtrim($wSpec, '%') / 100.0)),
+                is_numeric($wSpec)
+                => min((float)$wSpec, $avail),
+                default
+                => $avail,
+            };
+
+            $align = strtolower($options['align'] ?? 'left');
+            $effectiveW = $blockW + $margin[1] + $margin[3];
+
+            $x = match ($align) {
+                'center' => $this->mLeft + ($avail - $effectiveW) / 2.0 + $margin[3],
+                'right'  => $this->mLeft + $avail - $effectiveW + $margin[3],
+                default  => $this->mLeft + $margin[3],
+            };
+
+            $startY = $this->getCursorY() - $margin[0];
+
+            $this->mLeft  = $x + $padding[3];
+            $this->mRight = $this->getPageWidth() - ($x + $blockW - $padding[1]);
+
+            $this->setCursorY($startY - $padding[0]);
+
+            foreach ($elements as $el) {
+                $type = $el['type'] ?? null;
+
+                $fn = match ($type) {
+                    'paragraph' => function () use ($el) {
+                        $this->addParagraphText((string)($el['content'] ?? ''), (array)($el['options'] ?? []));
+                    },
+                    'image' => function () use ($el) {
+                        $this->addImageBlock((string)($el['alias'] ?? ''), (array)($el['options'] ?? []));
+                    },
+                    'table' => function () use ($el) {
+                        $this->addTableData((array)($el['data'] ?? []), (array)($el['options'] ?? []));
+                    },
+                    'list' => function () use ($el) {
+                        $this->addList($el['items'] ?? [], (array)($el['options'] ?? []));
+                    },
+                    'spacer' => function () use ($el) {
+                        $this->addSpacer((float)($el['height'] ?? 0.0));
+                    },
+                    'hr' => function () use ($el) {
+                        $this->addHorizontalLine((array)($el['options'] ?? []));
+                    },
+                    'block' => function () use ($el) {
+                        if (isset($el['builder']) && method_exists($el['builder'], 'getDefinition')) {
+                            $def = $el['builder']->getDefinition();
+                            $this->measureBlockHeight((array)($def['elements'] ?? []), (array)($def['options'] ?? []));
+                        }
+                    },
+                    default => function () { /* no-op p/ tipos desconhecidos */
+                    },
+                };
+
+                $fn();
+            }
+
+            $contentBottomY = $this->getCursorY();
+            $contentHeight  = $startY - $contentBottomY; // já exclui padding-top
+            return max(0.0, $padding[0] + $contentHeight + $padding[2]);
         } finally {
             $this->layoutManager->restoreState($layoutState);
-            $this->mLeft = $mLeft;
-            $this->mRight = $mRight;
+            $this->mLeft  = $origLeft;
+            $this->mRight = $origRight;
             $this->exitMeasurementMode();
         }
     }
+
     public function internal_newPage(): void
     {
         $pageId = $this->newObjectId();
@@ -1739,7 +1810,8 @@ final class PdfBuilder
         $this->pageResources[$pageId] = ['Font' => [], 'ExtGState' => [], 'XObject' => [], 'Shading' => []];
         $this->currentPage = $pageId;
 
-        if (!empty($this->fixedElements)) {
+        // NÃO renderiza fixos durante measurement (evita reentrância/loops)
+        if (!$this->measurementMode && !empty($this->fixedElements)) {
             $originalCursorY = $this->getCursorY();
             foreach ($this->fixedElements as $fixedElement) {
                 $renderer = new PdfBlockRenderer($this);
@@ -1795,11 +1867,18 @@ final class PdfBuilder
             if (isset($this->pageResources[$pid]['XObject'])) {
                 foreach ($this->pageResources[$pid]['XObject'] as $label => $objId) $xoPairs[] = "{$label} {$objId} 0 R";
             }
+            $shPairs = [];
+            if (isset($this->pageResources[$pid]['Shading'])) {
+                foreach ($this->pageResources[$pid]['Shading'] as $label => $objId) {
+                    $shPairs[] = "{$label} {$objId} 0 R";
+                }
+            }
 
             $resParts = [];
             if (!empty($fontPairs)) $resParts[] = "/Font << " . implode(' ', $fontPairs) . " >>";
             if (!empty($gsPairs)) $resParts[] = "/ExtGState << " . implode(' ', $gsPairs) . " >>";
             if (!empty($xoPairs)) $resParts[] = "/XObject << " . implode(' ', $xoPairs) . " >>";
+            if (!empty($shPairs))   $resParts[] = "/Shading << " . implode(' ', $shPairs) . " >>";
             $resources = empty($resParts) ? "<< >>" : "<< " . implode(' ', $resParts) . " >>";
 
             $annotRefs = [];
