@@ -1,11 +1,13 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Block;
+
 use Celsowm\PagyraPhp\Core\PdfBuilder;
 use Celsowm\PagyraPhp\Image\PdfImageManager;
 use Celsowm\PagyraPhp\Text\PdfTextRenderer;
-
+use Celsowm\PagyraPhp\Graphics\Painter\PdfBackgroundPainter;
 
 final class PdfBlockRenderer
 {
@@ -13,22 +15,28 @@ final class PdfBlockRenderer
     private PdfTextRenderer $textRenderer;
     private PdfImageManager $imageManager;
 
-    public function __construct(PdfBuilder $pdf)
+    /** Painter injetável (opcional para manter compat) */
+    private ?PdfBackgroundPainter $bgPainter;
+
+    public function __construct(PdfBuilder $pdf, ?PdfBackgroundPainter $bgPainter = null)
     {
         $this->pdf = $pdf;
         $this->textRenderer = $pdf->getTextRenderer();
         $this->imageManager = $pdf->getImageManager();
+        $this->bgPainter = $bgPainter;
     }
 
     public function render(array $elements, array $options): float
     {
-        $position = $options['position'] ?? 'relative';
+        $position   = $options['position'] ?? 'relative';
         $borderSpec = $this->pdf->normalizeBorderSpec($options['border'] ?? null, $options['padding'] ?? null);
-        $padding = $borderSpec['padding'];
-        $margin = $this->normalizeMargin($options['margin'] ?? 0);
-        $bgColor = $this->pdf->normalizeColor($options['bgcolor'] ?? null);
-        $width = $this->calculateWidth($options['width'] ?? '100%');
+        $padding    = $borderSpec['padding'];
+        $margin     = $this->normalizeMargin($options['margin'] ?? 0);
 
+        $bgColor    = $this->pdf->normalizeColor($options['bgcolor'] ?? null);
+        $bgGradient = $options['bggradient'] ?? null;
+
+        $width = $this->calculateWidth($options['width'] ?? '100%');
         $x = $this->calculateX($width, $options['align'] ?? 'left', $margin);
 
         $y = $this->pdf->getCursorY();
@@ -65,17 +73,17 @@ final class PdfBlockRenderer
             }
         }
 
-        $width -= ($margin[1] + $margin[3]);
+        $width  -= ($margin[1] + $margin[3]);
         $startY = $isAbsolute ? $y : $this->pdf->getCursorY();
         $contentStartY = $startY - $padding[0];
 
         $originalState = [
-            'mLeft' => $this->pdf->mLeft,
-            'mRight' => $this->pdf->mRight,
+            'mLeft'   => $this->pdf->mLeft,
+            'mRight'  => $this->pdf->mRight,
             'cursorY' => $this->pdf->getCursorY(),
         ];
 
-        $this->pdf->mLeft = $x + $padding[3];
+        $this->pdf->mLeft  = $x + $padding[3];
         $this->pdf->mRight = $this->pdf->getPageWidth() - ($x + $width - $padding[1]);
         $this->pdf->setCursorY($contentStartY);
 
@@ -88,13 +96,13 @@ final class PdfBlockRenderer
             foreach ($elements as $element) {
                 match ($element['type']) {
                     'paragraph' => $this->pdf->addParagraphText($element['content'], $element['options']),
-                    'image' => $this->pdf->addImageBlock($element['alias'], $element['options']),
-                    'table' => $this->pdf->addTableData($element['data'], $element['options']),
-                    'list' => $this->pdf->addList($element['items'], $element['options']),
-                    'spacer' => $this->pdf->addSpacer($element['height']),
-                    'hr' => $this->pdf->addHorizontalLine($element['options']),
-                    'block' => $element['builder']->end(),
-                    default => null,
+                    'image'     => $this->pdf->addImageBlock($element['alias'], $element['options']),
+                    'table'     => $this->pdf->addTableData($element['data'], $element['options']),
+                    'list'      => $this->pdf->addList($element['items'], $element['options']),
+                    'spacer'    => $this->pdf->addSpacer($element['height']),
+                    'hr'        => $this->pdf->addHorizontalLine($element['options']),
+                    'block'     => $element['builder']->end(),
+                    default     => null,
                 };
             }
         } finally {
@@ -103,9 +111,9 @@ final class PdfBlockRenderer
             }
         }
 
-        $contentEndY = $this->pdf->getCursorY();
+        $contentEndY   = $this->pdf->getCursorY();
         $contentHeight = $contentStartY - $contentEndY;
-        $totalHeight = $padding[0] + $contentHeight + $padding[2];
+        $totalHeight   = $padding[0] + $contentHeight + $padding[2];
 
         if (($options['minHeight'] ?? null) !== null) {
             $totalHeight = max($totalHeight, (float)$options['minHeight']);
@@ -114,12 +122,27 @@ final class PdfBlockRenderer
             $totalHeight = (float)$options['maxHeight'];
         }
 
-        $this->drawBackground($x, $startY - $totalHeight, $width, $totalHeight, $bgColor, $borderSpec['radius'] ?? null);
-        if ($borderSpec['hasBorder']) {
-            $this->drawBorder($x, $startY - $totalHeight, $width, $totalHeight, $borderSpec);
+        $rectX = $x;
+        $rectY = $startY - $totalHeight;
+        $rectW = $width;
+        $rectH = $totalHeight;
+        $radius = $borderSpec['radius'] ?? null;
+
+        if ($bgGradient && $this->bgPainter instanceof PdfBackgroundPainter) {
+            if (($bgGradient['type'] ?? 'linear') === 'radial') {
+                $this->bgPainter->radialRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
+            } else {
+                $this->bgPainter->linearRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
+            }
+        } else {
+            $this->drawBackground($rectX, $rectY, $rectW, $rectH, $bgColor, $radius);
         }
 
-        $this->pdf->mLeft = $originalState['mLeft'];
+        if ($borderSpec['hasBorder']) {
+            $this->drawBorder($rectX, $rectY, $rectW, $rectH, $borderSpec);
+        }
+
+        $this->pdf->mLeft  = $originalState['mLeft'];
         $this->pdf->mRight = $originalState['mRight'];
 
         if ($isAbsolute) {
@@ -155,8 +178,8 @@ final class PdfBlockRenderer
         $effectiveWidth = $blockWidth + $margin[1] + $margin[3];
         return match (strtolower($align)) {
             'center' => $this->pdf->mLeft + ($availableWidth - $effectiveWidth) / 2.0 + $margin[3],
-            'right' => $this->pdf->mLeft + $availableWidth - $effectiveWidth + $margin[3],
-            default => $this->pdf->mLeft + $margin[3],
+            'right'  => $this->pdf->mLeft + $availableWidth - $effectiveWidth + $margin[3],
+            default  => $this->pdf->mLeft + $margin[3],
         };
     }
 

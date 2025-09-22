@@ -1736,7 +1736,7 @@ final class PdfBuilder
         $pageId = $this->newObjectId();
         $this->pages[] = $pageId;
         $this->pageContents[$pageId] = '';
-        $this->pageResources[$pageId] = ['Font' => [], 'ExtGState' => [], 'XObject' => []];
+        $this->pageResources[$pageId] = ['Font' => [], 'ExtGState' => [], 'XObject' => [], 'Shading' => []];
         $this->currentPage = $pageId;
 
         if (!empty($this->fixedElements)) {
@@ -2179,6 +2179,12 @@ final class PdfBuilder
             if ($c === 4) return array_map('floatval', $padding);
         }
         return [0.0, 0.0, 0.0, 0.0];
+    }
+
+    public function writeOps(string $ops): void
+    {
+        if ($this->currentPage === null) return;
+        $this->pageContents[$this->currentPage] .= $ops;
     }
 
     public function addImage(string $alias, string $filePath): void
