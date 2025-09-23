@@ -37,9 +37,7 @@ final class PdfBuilder
     private array $pageResources = [];
     private ?int $currentPage = null;
     private array $fonts = [];
-    private array $fontIds = [];
     private array $usedGids = [];
-    private array $fontVariants = [];
     private array $extGStateMap = [];
     private array $extGStateByAlpha = [];
     private int $extGStateSeq = 0;
@@ -181,7 +179,7 @@ final class PdfBuilder
         }
         $this->pageContents[$this->currentPage] .= $ops;
     }
-    
+
     public function registerPageResource(string $type, string $label, ?int $value = 0): void
     {
         if ($this->measurementMode || $this->currentPage === null) {
