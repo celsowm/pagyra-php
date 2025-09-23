@@ -9,7 +9,6 @@ use Celsowm\PagyraPhp\Block\PdfBlockRenderer;
 
 class HeaderManager
 {
-    private PdfBuilder $pdf;
     private bool $isDefined = false;
     private $callback;
     private array $options;
@@ -17,11 +16,10 @@ class HeaderManager
     private float $top = 0.0;
     private float $spacing = 0.0;
     private bool $pushesContent = false;
-    private int $firstPageId;
+    private ?int $firstPageId = null;
 
-    public function __construct(PdfBuilder $pdf)
+    public function __construct(private PdfBuilder $pdf)
     {
-        $this->pdf = $pdf;
     }
 
     public function set(callable $callback, array $options = []): void
@@ -30,28 +28,23 @@ class HeaderManager
             throw new \LogicException('Page header already defined.');
         }
 
-        if ($this->pdf->isMeasurementMode() || $this->pdf->getCurrentPage() === null) {
-            throw new \LogicException('No active page to attach header.');
-        }
-
-        $existingContent = $this->pdf->pageContents[$this->pdf->getCurrentPage()] ?? '';
-        if (trim($existingContent) !== '') {
-            throw new \LogicException('Call setHeader() before adding content to the first page.');
-        }
-
         $this->callback = $callback;
         $this->options = $options;
-        $this->pushesContent = !isset($options['pushContent']) || (bool)$options['pushContent'];
+        $this->pushesContent = !empty($options['pushContent']);
         $this->spacing = isset($options['contentSpacing']) ? max(0.0, (float)$options['contentSpacing']) : 6.0;
         $this->top = isset($options['y']) ? max(0.0, (float)$options['y']) : 0.0;
 
         $this->calculateDimensions();
-
         $this->isDefined = true;
-        $this->firstPageId = $this->pdf->getCurrentPage();
 
-        // Render immediately on the current page
-        $this->render();
+        $hadPage = ($this->pdf->getCurrentPage() !== null);
+        $this->pdf->onHeaderFooterChanged();
+
+        if ($hadPage) {
+            $this->firstPageId = $this->pdf->getCurrentPage();
+        } else {
+            $this->firstPageId = $this->pdf->getCurrentPage();
+        }
     }
 
     private function calculateDimensions(): void
@@ -93,12 +86,8 @@ class HeaderManager
             return;
         }
 
-        // Avoid re-rendering on the first page if it was already rendered by set()
-        if (isset($this->firstPageId) && $this->pdf->getCurrentPage() === $this->firstPageId) {
-            $isNewPage = count(array_filter($this->pdf->pageContents, function ($content) {
-                return trim($content) !== '';
-            })) <= 1;
-            if (!$isNewPage) return;
+        if ($this->firstPageId !== null && $this->pdf->getCurrentPage() === $this->firstPageId) {
+            return;
         }
 
         $blockOptions = $this->options;

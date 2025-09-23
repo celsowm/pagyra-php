@@ -287,13 +287,6 @@ final class PdfBuilder
     public function setHeader(callable $callback, array $options = []): void
     {
         $this->headerManager->set($callback, $options);
-        // After setting the header, we need to recalculate margins
-        $this->setMargins(
-            $this->baseMargins['left'],
-            $this->baseMargins['top'],
-            $this->baseMargins['right'],
-            $this->baseMargins['bottom']
-        );
     }
 
     public function getContentTopOffset(): float
@@ -304,13 +297,22 @@ final class PdfBuilder
     public function setFooter(callable $callback, array $options = []): void
     {
         $this->footerManager->set($callback, $options);
-        // After setting the footer, we need to recalculate margins
+    }
+
+    public function onHeaderFooterChanged(): void
+    {
         $this->setMargins(
             $this->baseMargins['left'],
             $this->baseMargins['top'],
             $this->baseMargins['right'],
             $this->baseMargins['bottom']
         );
+
+        $hadPage = ($this->getCurrentPage() !== null);
+        $this->ensureFirstPage();
+        if ($hadPage) {
+            $this->renderFixedElements();
+        }
     }
 
     public function setFont(string $alias, float $size, ?float $lineHeight = null): void
@@ -1598,6 +1600,26 @@ final class PdfBuilder
         }
     }
 
+    private function renderFixedElements(): void
+    {
+        if ($this->isMeasurementMode() || $this->getCurrentPage() === null) {
+            return;
+        }
+        $this->headerManager->render();
+        $this->footerManager->render();
+        $this->fixedElementManager->renderAll();
+    }
+
+    private function ensureFirstPage(): void
+    {
+        if ($this->isMeasurementMode()) {
+            return;
+        }
+        if ($this->getCurrentPage() === null) {
+            $this->internal_newPage();
+        }
+    }
+
     public function internal_newPage(): void
     {
         $pageId = $this->newObjectId();
@@ -1606,9 +1628,7 @@ final class PdfBuilder
         $this->pageResources[$pageId] = ['Font' => [], 'ExtGState' => [], 'XObject' => [], 'Shading' => []];
         $this->currentPage = $pageId;
 
-        $this->headerManager->render();
-        $this->footerManager->render();
-        $this->fixedElementManager->renderAll();
+        $this->renderFixedElements();
     }
 
     public function output(): string
