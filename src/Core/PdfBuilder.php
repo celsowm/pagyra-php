@@ -22,13 +22,16 @@ use Celsowm\PagyraPhp\Writer\PdfWriter;
 
 final class PdfBuilder
 {
+
+    private PdfWriter $writer;
+
     private PdfTextRenderer $textRenderer;
     private PdfStyleManager $styleManager;
     private PdfLayoutManager $layoutManager;
-    private PdfWriter $writer;
     private PdfColor $colorManager;
     private PdfFontManager $fontManager;
     private PdfExtGStateManager $extGStateManager;
+    private PdfImageManager $imageManager;
 
     public float $mLeft;
     public float $mRight;
@@ -41,7 +44,7 @@ final class PdfBuilder
     private array $usedGids = [];
     private array $pageAnnotations = [];
     private array $uriActions = [];
-    private PdfImageManager $imageManager;
+    
     private array $fixedElements = [];
 
     private array $baseMargins = ['left' => 56.0, 'top' => 56.0, 'right' => 56.0, 'bottom' => 56.0];
