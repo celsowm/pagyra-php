@@ -67,13 +67,9 @@ final class PdfBackgroundPainter
         $ops = "q\n";
 
         if (is_float($alpha) && $alpha < 1.0) {
-            if (method_exists($this->pdf, 'ensureExtGState')) {
-                $gs = $this->pdf->ensureExtGState(max(0.0, min(1.0, $alpha)));
-                // ATENÇÃO: se ensureExtGState retornar SÓ o nome (/GS1), não precisa id
-                // Se o teu registerPageResource exigir id também, ajuste p/ ($type,$name,$id)
-                $this->pdf->registerPageResource('ExtGState', $gs);
-                $ops .= "{$gs} gs\n";
-            }
+            [$gsName, $gsId] = $this->pdf->getExtGStateManager()->ensureAlphaRef($alpha);
+            $this->pdf->registerPageResource('ExtGState', $gsName, $gsId);
+            $ops .= "{$gsName} gs\n";
         }
 
         $ops .= $this->buildClipPath($x, $y, $w, $h, $radius);

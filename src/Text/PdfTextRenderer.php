@@ -196,46 +196,82 @@ final class PdfTextRenderer
         return $ops;
     }
 
-    private function emitShadowTextOps(string $label, float $size, float $skew, float $x, float $y, string $utf8, ?array $elemsTJ, ?array $shadow, PdfStyleManager $styleManager): string
-    {
-        if ($shadow === null) return '';
-        $dx = $shadow['dx'];
-        $dy = $shadow['dy'];
-        $blur = $shadow['blur'];
-        $samp = $shadow['samples'];
-        $one = function (float $offX, float $offY) use ($label, $size, $skew, $x, $y, $utf8, $elemsTJ, $shadow, $styleManager): string {
-            $ops = "q\n";
-            if ($shadow['alpha'] < 1.0) {
-                $gs = $this->pdf->ensureExtGState($shadow['alpha']);
-                if ($this->pdf->getCurrentPage() !== null) {
-                    $this->pdf->registerPageResource('ExtGState', $gs);
-                }
-                $ops .= "{$gs} gs\n";
+    private function emitShadowTextOps(
+        string $label,
+        float $size,
+        float $skew,
+        float $x,
+        float $y,
+        string $utf8,
+        ?array $elemsTJ,
+        ?array $shadow,
+        PdfStyleManager $styleManager
+    ): string {
+        if ($shadow === null) {
+            return '';
+        }
+
+        $dx     = (float)($shadow['dx']     ?? 0.0);
+        $dy     = (float)($shadow['dy']     ?? 0.0);
+        $blur   = (float)($shadow['blur']   ?? 0.0);
+        $samp   = (int)  ($shadow['samples'] ?? 1);
+        $alpha  = (float)($shadow['alpha']  ?? 1.0);
+        $color  =         $shadow['color']  ?? '#000000';
+
+        // Pré-resolve ExtGState uma única vez (SRP: via manager) e registra o recurso na página
+        $gsName = null;
+        if ($alpha < 1.0) {
+            [$gsName, $gsId] = $this->pdf->getExtGStateManager()->ensureAlphaRef($alpha);
+            if ($this->pdf->getCurrentPage() !== null) {
+                $this->pdf->registerPageResource('ExtGState', $gsName, $gsId);
+            }
+        }
+
+        // Pré-monta trechos estáveis de operadores
+        $fontOp      = sprintf("%s %.3F Tf\n", $label, $size);
+        $colorOps    = $this->pdf->colorOps($color);
+        $spacingOps  = $this->textStateSpacingOps($styleManager->getLetterSpacing());
+        $textOps     = ($elemsTJ !== null)
+            ? "[ " . implode(' ', $elemsTJ) . " ] TJ\n"
+            : $this->utf8ToHexStringForTJ($utf8, ltrim($label, '/')) . " Tj\n";
+
+        // Função para uma amostra (offset)
+        $one = function (float $offX, float $offY) use (
+            $gsName,
+            $fontOp,
+            $colorOps,
+            $spacingOps,
+            $textOps,
+            $skew,
+            $x,
+            $y
+        ): string {
+            $ops  = "q\n";
+            if ($gsName) {
+                $ops .= "{$gsName} gs\n";
             }
             $ops .= "BT\n";
-            $ops .= sprintf("%s %.3F Tf\n", $label, $size);
+            $ops .= $fontOp;
             $ops .= "0 Tr\n";
-            $ops .= $this->pdf->colorOps($shadow['color']);
+            $ops .= $colorOps;
             $ops .= sprintf("1 0 %.5F 1 %.3F %.3F Tm\n", $skew, $x + $offX, $y + $offY);
-            $ops .= $this->textStateSpacingOps($styleManager->getLetterSpacing());
-            if ($elemsTJ !== null) {
-                $ops .= "[ " . implode(' ', $elemsTJ) . " ] TJ\n";
-            } else {
-                $ops .= $this->utf8ToHexStringForTJ($utf8, ltrim($label, '/')) . " Tj\n";
-            }
+            $ops .= $spacingOps;
+            $ops .= $textOps;
             $ops .= "ET\nQ\n";
             return $ops;
         };
+
+        // Sem blur: 1 amostra; com blur: N amostras em círculo de raio R
+        if ($blur <= 0.0001 || $samp <= 1) {
+            return $one($dx, $dy);
+        }
+
+        $R = $blur;
+        $N = max(1, $samp);
         $opsAll = '';
-        if ($blur <= 0.0001) {
-            $opsAll .= $one($dx, $dy);
-        } else {
-            $R = $blur;
-            $N = $samp;
-            for ($i = 0; $i < $N; $i++) {
-                $ang = 2.0 * M_PI * ($i / $N);
-                $opsAll .= $one($dx + $R * cos($ang), $dy + $R * sin($ang));
-            }
+        for ($i = 0; $i < $N; $i++) {
+            $ang = 2.0 * M_PI * ($i / $N);
+            $opsAll .= $one($dx + $R * cos($ang), $dy + $R * sin($ang));
         }
         return $opsAll;
     }

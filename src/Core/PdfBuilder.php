@@ -14,7 +14,7 @@ use Celsowm\PagyraPhp\Text\PdfParagraphBuilder;
 use Celsowm\PagyraPhp\Text\PdfRun;
 use Celsowm\PagyraPhp\Core\PdfStreamBuilder;
 use Celsowm\PagyraPhp\Style\PdfStyleManager;
-use Celsowm\PagyraPhp\Font\PdfTTFParser;
+use Celsowm\PagyraPhp\Graphics\State\PdfExtGStateManager;
 use Celsowm\PagyraPhp\Font\PdfFontManager;
 use Celsowm\PagyraPhp\Table\PdfTableBuilder;
 use Celsowm\PagyraPhp\Text\PdfTextRenderer;
@@ -28,6 +28,7 @@ final class PdfBuilder
     private PdfWriter $writer;
     private PdfColor $colorManager;
     private PdfFontManager $fontManager;
+    private PdfExtGStateManager $extGStateManager;
 
     public float $mLeft;
     public float $mRight;
@@ -89,6 +90,7 @@ final class PdfBuilder
         $this->styleManager = new PdfStyleManager();
         $this->layoutManager = new PdfLayoutManager($this, $w, $h);
         $this->imageManager = new PdfImageManager($this);
+        $this->extGStateManager = new PdfExtGStateManager($this);
 
         $this->setMargins(56, 56, 56, 56);
         $this->internal_newPage();
@@ -138,6 +140,17 @@ final class PdfBuilder
     public function setCursorY(float $y): void
     {
         $this->layoutManager->setCursorY($y);
+    }
+
+    public function getExtGStateManager(): PdfExtGStateManager
+    {
+        return $this->extGStateManager;
+    }
+
+    /** @deprecated Use getExtGStateManager()->ensureAlpha($alpha) */
+    public function ensureExtGState(float $alpha): string
+    {
+        return $this->extGStateManager->ensureAlpha($alpha);
     }
 
     public function isMeasurementMode(): bool
@@ -196,20 +209,6 @@ final class PdfBuilder
     public function strokeColorOps($spec): string
     {
         return $this->colorManager->getStrokeOps($spec);
-    }
-
-    public function ensureExtGState(float $alpha): string
-    {
-        $key = sprintf('%.3F', $alpha);
-        if (isset($this->extGStateByAlpha[$key])) {
-            return $this->extGStateByAlpha[$key];
-        }
-        $name = '/GS' . (++$this->extGStateSeq);
-        $id = $this->newObjectId();
-        $this->setObject($id, "<< /Type /ExtGState /ca {$key} /CA {$key} >>");
-        $this->extGStateMap[$name] = $id;
-        $this->extGStateByAlpha[$key] = $name;
-        return $name;
     }
 
     public function addLinkAbs(float $x, float $y, float $width, float $height, string $url): void
@@ -1341,9 +1340,9 @@ final class PdfBuilder
 
         $ops = "q\n";
         if (isset($opts['alpha']) && (float)$opts['alpha'] < 1.0) {
-            $gs = $this->ensureExtGState(max(0.0, min(1.0, (float)$opts['alpha'])));
-            $this->registerPageResource('ExtGState', $gs);
-            $ops .= "{$gs} gs\n";
+            [$gsName, $gsId] = $this->getExtGStateManager()->ensureAlphaRef((float)$opts['alpha']);
+            $this->registerPageResource('ExtGState', $gsName, $gsId);
+            $ops .= "{$gsName} gs\n";
         }
         $ops .= sprintf("%.3F 0 0 %.3F %.3F %.3F cm\n", $w, $h, $x, $y);
         $ops .= $img['name'] . " Do\nQ\n";
