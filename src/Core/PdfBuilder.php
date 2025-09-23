@@ -13,6 +13,9 @@ use Celsowm\PagyraPhp\Text\PdfListRenderer;
 use Celsowm\PagyraPhp\Text\PdfParagraphBuilder;
 use Celsowm\PagyraPhp\Text\PdfRun;
 use Celsowm\PagyraPhp\Core\PdfStreamBuilder;
+use Celsowm\PagyraPhp\Core\HeaderManager;
+use Celsowm\PagyraPhp\Core\FooterManager;
+use Celsowm\PagyraPhp\Core\FixedElementManager;
 use Celsowm\PagyraPhp\Style\PdfStyleManager;
 use Celsowm\PagyraPhp\Graphics\State\PdfExtGStateManager;
 use Celsowm\PagyraPhp\Font\PdfFontManager;
@@ -44,28 +47,16 @@ final class PdfBuilder
     private array $usedGids = [];
     private array $pageAnnotations = [];
     private array $uriActions = [];
-    
-    private array $fixedElements = [];
 
-    private array $baseMargins = ['left' => 56.0, 'top' => 56.0, 'right' => 56.0, 'bottom' => 56.0];
+    public array $baseMargins = ['left' => 56.0, 'top' => 56.0, 'right' => 56.0, 'bottom' => 56.0];
 
-    private bool $pageHeaderDefined = false;
-    private float $pageHeaderHeight = 0.0;
-    private float $pageHeaderOffset = 0.0;
-    private float $pageHeaderTop = 0.0;
-    private float $pageHeaderSpacing = 0.0;
-    private bool $pageHeaderPushesContent = false;
-    private bool $pageFooterDefined = false;
-    private float $pageFooterHeight = 0.0;
-    private float $pageFooterBottom = 0.0;
-    private float $pageFooterSpacing = 0.0;
-    private bool $pageFooterPushesContent = false;
-    private float $pageFooterOffset = 0.0;
-    private int $pageHeaderContentLength = 0;
     private int $pageBreakSuppression = 0;
 
     private bool $measurementMode = false;
     private int $measurementDepth = 0;
+    private HeaderManager $headerManager;
+    private FooterManager $footerManager;
+    private FixedElementManager $fixedElementManager;
 
 
     public function __construct(float $w = 595.28, float $h = 841.89)
@@ -78,6 +69,9 @@ final class PdfBuilder
         $this->layoutManager = new PdfLayoutManager($this, $w, $h);
         $this->imageManager = new PdfImageManager($this);
         $this->extGStateManager = new PdfExtGStateManager($this);
+        $this->headerManager = new HeaderManager($this);
+        $this->footerManager = new FooterManager($this);
+        $this->fixedElementManager = new FixedElementManager($this);
 
         $this->setMargins(56, 56, 56, 56);
         $this->internal_newPage();
@@ -87,6 +81,16 @@ final class PdfBuilder
     public function getFontManager(): PdfFontManager
     {
         return $this->fontManager;
+    }
+
+    public function getHeaderManager(): HeaderManager
+    {
+        return $this->headerManager;
+    }
+
+    public function getFooterManager(): FooterManager
+    {
+        return $this->footerManager;
     }
 
     public function getStyleManager(): PdfStyleManager
@@ -271,172 +275,42 @@ final class PdfBuilder
         ];
         $this->layoutManager->setBaseMargins($top, $right, $bottom, $left);
 
-        if ($this->pageHeaderDefined && $this->pageHeaderPushesContent) {
-            $this->pageHeaderOffset = max(
-                $this->baseMargins['top'],
-                $this->pageHeaderTop + $this->pageHeaderHeight + $this->pageHeaderSpacing
-            );
-            $this->layoutManager->setCursorY($this->getPageHeight() - $this->pageHeaderOffset);
+        $headerOffset = $this->headerManager->getOffset($this->baseMargins['top']);
+        if ($this->headerManager->isDefined() && $this->headerManager->pushesContent()) {
+            $this->layoutManager->setCursorY($this->getPageHeight() - $headerOffset);
         }
 
-        $desiredBottomMargin = $this->baseMargins['bottom'];
-
-        if ($this->pageFooterDefined) {
-            if ($this->pageFooterPushesContent) {
-                $this->pageFooterOffset = max(
-                    $desiredBottomMargin,
-                    $this->pageFooterBottom + $this->pageFooterHeight + $this->pageFooterSpacing
-                );
-                $desiredBottomMargin = $this->pageFooterOffset;
-            } else {
-                $this->pageFooterOffset = $desiredBottomMargin;
-            }
-        }
-
-        $this->layoutManager->updateBaseBottomMargin($desiredBottomMargin);
+        $footerOffset = $this->footerManager->getOffset($this->baseMargins['bottom']);
+        $this->layoutManager->updateBaseBottomMargin($footerOffset);
     }
 
     public function setHeader(callable $callback, array $options = []): void
     {
-        if ($this->pageHeaderDefined) {
-            throw new \LogicException('Page header already defined.');
-        }
-        if ($this->measurementMode || $this->currentPage === null) {
-            throw new \LogicException('No active page to attach header.');
-        }
-
-        $existingContent = $this->pageContents[$this->currentPage] ?? '';
-        if (trim($existingContent) !== '') {
-            throw new \LogicException('Call setHeader() before adding content to the first page.');
-        }
-
-        $pushContent = !isset($options['pushContent']) || (bool)$options['pushContent'];
-        $spacing = isset($options['contentSpacing']) ? max(0.0, (float)$options['contentSpacing']) : 6.0;
-        $x = isset($options['x']) ? (float)$options['x'] : $this->baseMargins['left'];
-        $y = isset($options['y']) ? max(0.0, (float)$options['y']) : 0.0;
-
-        $blockOptions = $options;
-        unset($blockOptions['pushContent'], $blockOptions['contentSpacing']);
-        $blockOptions['position'] = 'fixed';
-        $blockOptions['x'] = $x;
-        $blockOptions['y'] = $y;
-        if (!isset($blockOptions['width'])) {
-            $blockOptions['width'] = '100%';
-        }
-
-        $builder = new PdfBlockBuilder($this, $blockOptions);
-        $callback($builder);
-        $definition = $builder->getDefinition();
-        if (empty($definition['elements'])) {
-            return;
-        }
-
-        $renderer = new PdfBlockRenderer($this);
-        $height = $renderer->render($definition['elements'], $definition['options']);
-
-        if ($this->currentPage !== null) {
-            $this->pageHeaderContentLength = strlen($this->pageContents[$this->currentPage] ?? '');
-        }
-
-        $this->pageHeaderDefined = true;
-        $this->pageHeaderHeight = $height;
-        $this->pageHeaderTop = $y;
-        $this->pageHeaderSpacing = $pushContent ? $spacing : 0.0;
-        $this->pageHeaderPushesContent = $pushContent;
-        $this->pageHeaderOffset = $pushContent
-            ? max($this->baseMargins['top'], $y + $height + $spacing)
-            : $this->baseMargins['top'];
-
-        if ($pushContent) {
-            $this->setCursorY($this->getPageHeight() - $this->pageHeaderOffset);
-        }
+        $this->headerManager->set($callback, $options);
+        // After setting the header, we need to recalculate margins
+        $this->setMargins(
+            $this->baseMargins['left'],
+            $this->baseMargins['top'],
+            $this->baseMargins['right'],
+            $this->baseMargins['bottom']
+        );
     }
 
     public function getContentTopOffset(): float
     {
-        if ($this->pageHeaderDefined && $this->pageHeaderPushesContent) {
-            return $this->pageHeaderOffset;
-        }
-        return $this->baseMargins['top'];
+        return $this->headerManager->getOffset($this->baseMargins['top']);
     }
 
     public function setFooter(callable $callback, array $options = []): void
     {
-        if ($this->pageFooterDefined) {
-            throw new \LogicException('Page footer already defined.');
-        }
-        if ($this->measurementMode || $this->currentPage === null) {
-            throw new \LogicException('No active page to attach footer.');
-        }
-
-        $existingContent = $this->pageContents[$this->currentPage] ?? '';
-        if (trim($existingContent) !== '') {
-            $contentLength = strlen($existingContent);
-            $headerLength = $this->pageHeaderContentLength;
-            $headerOnlyContent = ($headerLength > 0 && $contentLength === $headerLength);
-            if (!$headerOnlyContent) {
-                throw new \LogicException('Call setFooter() before adding content to the first page.');
-            }
-        }
-
-        $pushContent = !isset($options['pushContent']) || (bool)$options['pushContent'];
-        $spacing = isset($options['contentSpacing']) ? max(0.0, (float)$options['contentSpacing']) : 6.0;
-        $x = isset($options['x']) ? (float)$options['x'] : $this->baseMargins['left'];
-        $bottomOffset = isset($options['bottom']) ? max(0.0, (float)$options['bottom']) : $this->baseMargins['bottom'];
-        $explicitY = array_key_exists('y', $options) ? (float)$options['y'] : null;
-
-        $blockOptions = $options;
-        unset($blockOptions['pushContent'], $blockOptions['contentSpacing'], $blockOptions['bottom']);
-        $blockOptions['position'] = 'fixed';
-        $blockOptions['x'] = $x;
-        if (!isset($blockOptions['width'])) {
-            $blockOptions['width'] = '100%';
-        }
-
-        $builder = new PdfBlockBuilder($this, $blockOptions);
-        $callback($builder);
-        $definition = $builder->getDefinition();
-        if (empty($definition['elements'])) {
-            return;
-        }
-
-        $measureOptions = $definition['options'];
-        $measureOptions['position'] = 'relative';
-        unset($measureOptions['x'], $measureOptions['y']);
-        $height = $this->measureBlockHeight($definition['elements'], $measureOptions);
-
-        if ($explicitY !== null) {
-            $renderY = $explicitY;
-            $footerBottom = max(0.0, $this->getPageHeight() - $renderY - $height);
-        } else {
-            $footerBottom = $bottomOffset;
-            $topFromBottom = $footerBottom + $height;
-            $renderY = max(0.0, $this->getPageHeight() - $topFromBottom);
-        }
-
-        $renderOptions = $definition['options'];
-        $renderOptions['position'] = 'fixed';
-        $renderOptions['x'] = $x;
-        $renderOptions['y'] = $renderY;
-        if (!isset($renderOptions['width'])) {
-            $renderOptions['width'] = '100%';
-        }
-
-        $renderer = new PdfBlockRenderer($this);
-        $renderedHeight = $renderer->render($definition['elements'], $renderOptions);
-
-        $this->pageFooterDefined = true;
-        $this->pageFooterHeight = $renderedHeight;
-        $this->pageFooterBottom = $footerBottom;
-        $this->pageFooterSpacing = $pushContent ? $spacing : 0.0;
-        $this->pageFooterPushesContent = $pushContent;
-        $this->pageFooterOffset = $pushContent
-            ? max($this->baseMargins['bottom'], $footerBottom + $renderedHeight + $spacing)
-            : $this->baseMargins['bottom'];
-
-        if ($pushContent) {
-            $this->layoutManager->updateBaseBottomMargin($this->pageFooterOffset);
-        }
+        $this->footerManager->set($callback, $options);
+        // After setting the footer, we need to recalculate margins
+        $this->setMargins(
+            $this->baseMargins['left'],
+            $this->baseMargins['top'],
+            $this->baseMargins['right'],
+            $this->baseMargins['bottom']
+        );
     }
 
     public function setFont(string $alias, float $size, ?float $lineHeight = null): void
@@ -1615,21 +1489,10 @@ final class PdfBuilder
 
     public function registerFixedElement(array $elements, array $options, float $x, float $y): void
     {
-        if ($this->measurementMode) {
-            return;
-        }
-        $key = md5(serialize([$elements, $options]));
-        if (!isset($this->fixedElements[$key])) {
-            $this->fixedElements[$key] = [
-                'elements' => $elements,
-                'options' => $options,
-                'x' => $x,
-                'y' => $y
-            ];
-        }
+        $this->fixedElementManager->add($elements, $options, $x, $y);
     }
 
-    private function enterMeasurementMode(): void
+    public function enterMeasurementMode(): void
     {
         $this->measurementDepth++;
         if ($this->measurementDepth === 1) {
@@ -1637,7 +1500,7 @@ final class PdfBuilder
         }
     }
 
-    private function exitMeasurementMode(): void
+    public function exitMeasurementMode(): void
     {
         if ($this->measurementDepth > 0) {
             $this->measurementDepth--;
@@ -1743,26 +1606,9 @@ final class PdfBuilder
         $this->pageResources[$pageId] = ['Font' => [], 'ExtGState' => [], 'XObject' => [], 'Shading' => []];
         $this->currentPage = $pageId;
 
-        // NÃO renderiza fixos durante measurement (evita reentrância/loops)
-        if (!$this->measurementMode && !empty($this->fixedElements)) {
-            $originalCursorY = $this->getCursorY();
-            foreach ($this->fixedElements as $fixedElement) {
-                $renderer = new PdfBlockRenderer($this);
-                $renderer->render(
-                    $fixedElement['elements'],
-                    array_merge($fixedElement['options'], [
-                        'position' => 'absolute',
-                        'x' => $fixedElement['x'],
-                        'y' => $fixedElement['y']
-                    ])
-                );
-            }
-            if ($this->pageHeaderDefined && $this->pageHeaderPushesContent) {
-                $this->setCursorY($this->getPageHeight() - $this->pageHeaderOffset);
-            } else {
-                $this->setCursorY($originalCursorY);
-            }
-        }
+        $this->headerManager->render();
+        $this->footerManager->render();
+        $this->fixedElementManager->renderAll();
     }
 
     public function output(): string
