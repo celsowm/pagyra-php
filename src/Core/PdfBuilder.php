@@ -294,6 +294,8 @@ final class PdfBuilder
             $this->baseMargins['right'],
             $this->baseMargins['bottom']
         );
+
+        $this->headerManager->render();
     }
 
     public function getContentTopOffset(): float
@@ -311,6 +313,8 @@ final class PdfBuilder
             $this->baseMargins['right'],
             $this->baseMargins['bottom']
         );
+
+        $this->footerManager->render();
     }
 
     public function setFont(string $alias, float $size, ?float $lineHeight = null): void
@@ -1605,9 +1609,7 @@ final class PdfBuilder
         $this->pageContents[$pageId] = '';
         $this->pageResources[$pageId] = ['Font' => [], 'ExtGState' => [], 'XObject' => [], 'Shading' => []];
         $this->currentPage = $pageId;
-
-        $this->headerManager->render();
-        $this->footerManager->render();
+        
         $this->fixedElementManager->renderAll();
     }
 
