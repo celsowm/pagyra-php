@@ -1,18 +1,23 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Text;
+
 use Celsowm\PagyraPhp\Core\PdfBuilder;
+use Celsowm\PagyraPhp\Font\PdfFontManager;
 use Celsowm\PagyraPhp\Style\PdfStyleManager;
 
 
 final class PdfTextRenderer
 {
     private PdfBuilder $pdf;
+    private PdfFontManager $fontManager;
 
-    public function __construct(PdfBuilder $pdf)
+    public function __construct(PdfBuilder $pdf, PdfFontManager $fontManager)
     {
         $this->pdf = $pdf;
+        $this->fontManager = $fontManager;
     }
 
     public function measureTextStyled(string $s, PdfStyleManager $styleManager): float
@@ -22,8 +27,8 @@ final class PdfTextRenderer
             return 0.0;
         }
         $style = $styleManager->getStyle();
-        $alias = $this->pdf->resolveAliasByStyle($baseAlias, $style);
-        $fonts = $this->pdf->getFonts();
+        $alias = $this->fontManager->resolveAliasByStyle($baseAlias, $style);
+        $fonts = $this->fontManager->getFonts();
         $font = $fonts[$alias] ?? $fonts[$baseAlias];
         $cps = $this->utf8ToCodepoints($s);
         $wUnits = 0;
@@ -53,7 +58,7 @@ final class PdfTextRenderer
         $letterSpacing = $styleManager->getLetterSpacing();
         $textColor = $styleManager->getTextColor() ?? ['space' => 'gray', 'v' => [0.0]];
 
-        $aliasResolved = $this->pdf->resolveAliasByStyle($currentFontAlias, $style);
+        $aliasResolved = $this->fontManager->resolveAliasByStyle($currentFontAlias, $style);
         $label = '/' . $aliasResolved;
         $this->pdf->registerPageResource('Font', $label);
 
@@ -116,14 +121,14 @@ final class PdfTextRenderer
 
     private function utf8ToHexStringForTJ(string $utf8, string $alias): string
     {
-        $fonts = $this->pdf->getFonts();
+        $fonts = $this->fontManager->getFonts();
         $font = $fonts[$alias];
         $cps = $this->utf8ToCodepoints($utf8);
         $gids = [];
         foreach ($cps as $cp) {
             $gid = $font['cmap'][$cp] ?? 0;
             $gids[] = $gid;
-            $this->pdf->updateUsedGid($alias, $gid, $cp);
+            $this->fontManager->updateUsedGid($alias, $gid, $cp);
         }
         $hex = $gids ? strtoupper(bin2hex(pack('n*', ...$gids))) : '';
         return "<{$hex}>";

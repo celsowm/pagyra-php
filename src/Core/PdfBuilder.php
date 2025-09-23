@@ -15,6 +15,7 @@ use Celsowm\PagyraPhp\Text\PdfRun;
 use Celsowm\PagyraPhp\Core\PdfStreamBuilder;
 use Celsowm\PagyraPhp\Style\PdfStyleManager;
 use Celsowm\PagyraPhp\Font\PdfTTFParser;
+use Celsowm\PagyraPhp\Font\PdfFontManager;
 use Celsowm\PagyraPhp\Table\PdfTableBuilder;
 use Celsowm\PagyraPhp\Text\PdfTextRenderer;
 use Celsowm\PagyraPhp\Writer\PdfWriter;
@@ -26,6 +27,7 @@ final class PdfBuilder
     private PdfLayoutManager $layoutManager;
     private PdfWriter $writer;
     private PdfColor $colorManager;
+    private PdfFontManager $fontManager;
 
     public float $mLeft;
     public float $mRight;
@@ -84,7 +86,8 @@ final class PdfBuilder
     {
         $this->writer = new PdfWriter();
         $this->colorManager = new PdfColor();
-        $this->textRenderer = new PdfTextRenderer($this);
+        $this->fontManager = new PdfFontManager($this);
+        $this->textRenderer = new PdfTextRenderer($this, $this->fontManager);
         $this->styleManager = new PdfStyleManager();
         $this->layoutManager = new PdfLayoutManager($this, $w, $h);
         $this->imageManager = new PdfImageManager($this);
@@ -92,6 +95,11 @@ final class PdfBuilder
         $this->setMargins(56, 56, 56, 56);
         $this->internal_newPage();
         $this->bootstrapDefaultFont();
+    }
+
+    public function getFontManager(): PdfFontManager
+    {
+        return $this->fontManager;
     }
 
     public function getStyleManager(): PdfStyleManager
@@ -161,22 +169,11 @@ final class PdfBuilder
         $this->writer->setObject($id, $content);
     }
 
-    public function getFonts(): array
-    {
-        return $this->fonts;
-    }
-
     public function getCurrentPage(): ?int
     {
         return $this->currentPage;
     }
 
-    public function updateUsedGid(string $alias, int $gid, int $cp): void
-    {
-        if (!isset($this->usedGids[$alias][$gid])) {
-            $this->usedGids[$alias][$gid] = $cp;
-        }
-    }
     public function appendToPageContent(string $ops): void
     {
         if ($this->measurementMode || $this->currentPage === null) {
@@ -184,22 +181,13 @@ final class PdfBuilder
         }
         $this->pageContents[$this->currentPage] .= $ops;
     }
+    
     public function registerPageResource(string $type, string $label, ?int $value = 0): void
     {
         if ($this->measurementMode || $this->currentPage === null) {
             return;
         }
         $this->pageResources[$this->currentPage][$type][$label] = $value;
-    }
-    public function resolveAliasByStyle(string $baseAlias, string $style): string
-    {
-        $style = strtoupper($style);
-        $key = (str_contains($style, 'B') ? 'B' : '') . (str_contains($style, 'I') ? 'I' : '');
-        if ($key === '') {
-            $key = 'R';
-        }
-        $v = $this->fontVariants[$baseAlias][$key] ?? null;
-        return $v ?: $baseAlias;
     }
 
     public function colorOps($spec): string
@@ -287,48 +275,12 @@ final class PdfBuilder
 
     public function addTTFFont(string $alias, string $ttfPath): void
     {
-        if (!is_file($ttfPath) || !is_readable($ttfPath)) {
-            throw new \RuntimeException("Arquivo TTF não encontrado ou sem permissão: {$ttfPath}");
-        }
-        $raw = file_get_contents($ttfPath);
-        if ($raw === false || strlen($raw) < 100) {
-            throw new \RuntimeException("Arquivo TTF parece inválido: {$ttfPath}");
-        }
-        $parser = new PdfTTFParser($raw);
-        $head = $parser->parseHead();
-        $hhea = $parser->parseHhea();
-        $maxp = $parser->parseMaxp();
-        $hmtx = $parser->parseHmtx($hhea['numberOfHMetrics'], $maxp['numGlyphs']);
-        $name = $parser->parseNamePostScript();
-        $name = $name ? $this->sanitizePSName($name) : $this->sanitizePSName('EmbeddedTTF-' . $alias);
-        $cmap = $parser->parseCmap();
-        $italicAngle = 0.0;
-        try {
-            $post = $parser->parsePost();
-            $italicAngle = (float)$post['italicAngle'];
-        } catch (\Throwable $e) {
-        }
-        $this->fonts[$alias] = [
-            'ttf' => $raw,
-            'name' => $name,
-            'unitsPerEm' => max(16, (int)$head['unitsPerEm']),
-            'ascent' => $hhea['ascent'],
-            'descent' => $hhea['descent'],
-            'bbox' => $head['bbox'],
-            'adv' => $hmtx['adv'],
-            'gidCount' => $maxp['numGlyphs'],
-            'cmap' => $cmap,
-            'italicAngle' => $italicAngle,
-        ];
-        $this->usedGids[$alias] = [0 => 0];
+        $this->fontManager->addTTFFont($alias, $ttfPath);
     }
 
     public function bindFontVariants(string $baseAlias, array $map): void
     {
-        $this->fontVariants[$baseAlias] = array_merge(
-            ['R' => $baseAlias, 'B' => null, 'I' => null, 'BI' => null],
-            array_change_key_case($map, CASE_UPPER)
-        );
+        $this->fontManager->bindFontVariants($baseAlias, $map);
     }
 
     public function setMargins(float $left, float $top, float $right, float $bottom): void
@@ -511,7 +463,8 @@ final class PdfBuilder
 
     public function setFont(string $alias, float $size, ?float $lineHeight = null): void
     {
-        if (!isset($this->fonts[$alias])) {
+        // Modificar para usar o novo manager para validação
+        if (!$this->fontManager->fontExists($alias)) {
             throw new \LogicException("Fonte '{$alias}' não foi adicionada com addTTFFont().");
         }
         $this->styleManager->setFont($alias, $size, $lineHeight);
@@ -1841,7 +1794,7 @@ final class PdfBuilder
             }
         }
 
-        $type0Ids = $this->emitFontObjects();
+        $type0Ids = $this->fontManager->emitFontObjects();
 
         foreach ($this->extGStateMap as $name => $id) {
             if (($alphaKey = array_search($name, $this->extGStateByAlpha)) !== false) {
