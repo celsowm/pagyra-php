@@ -17,6 +17,7 @@ class FooterManager
     private float $bottom = 0.0;
     private float $spacing = 0.0;
     private bool $pushesContent = false;
+    private int $firstPageId;
 
     public function __construct(PdfBuilder $pdf)
     {
@@ -33,16 +34,6 @@ class FooterManager
             throw new \LogicException('No active page to attach footer.');
         }
 
-        $existingContent = $this->pdf->pageContents[$this->pdf->getCurrentPage()] ?? '';
-        if (trim($existingContent) !== '') {
-            $contentLength = strlen($existingContent);
-            $headerLength = $this->pdf->getHeaderManager()->getContentLength();
-            $headerOnlyContent = ($headerLength > 0 && $contentLength === $headerLength);
-            if (!$headerOnlyContent) {
-                throw new \LogicException('Call setFooter() before adding content to the first page.');
-            }
-        }
-
         $this->callback = $callback;
         $this->options = $options;
         $this->pushesContent = !isset($options['pushContent']) || (bool)$options['pushContent'];
@@ -51,6 +42,10 @@ class FooterManager
 
         $this->calculateDimensions();
         $this->isDefined = true;
+        $this->firstPageId = $this->pdf->getCurrentPage();
+
+        // Render immediately on the current page
+        $this->render();
     }
 
     private function calculateDimensions(): void
@@ -73,6 +68,14 @@ class FooterManager
     {
         if (!$this->isDefined) {
             return;
+        }
+
+        // Avoid re-rendering on the first page if it was already rendered by set()
+        if (isset($this->firstPageId) && $this->pdf->getCurrentPage() === $this->firstPageId) {
+            $isNewPage = count(array_filter($this->pdf->pageContents, function ($content) {
+                return trim($content) !== '';
+            })) <= 1;
+            if (!$isNewPage) return;
         }
 
         $explicitY = array_key_exists('y', $this->options) ? (float)$this->options['y'] : null;

@@ -17,7 +17,7 @@ class HeaderManager
     private float $top = 0.0;
     private float $spacing = 0.0;
     private bool $pushesContent = false;
-    private int $contentLength = 0;
+    private int $firstPageId;
 
     public function __construct(PdfBuilder $pdf)
     {
@@ -48,6 +48,10 @@ class HeaderManager
         $this->calculateDimensions();
 
         $this->isDefined = true;
+        $this->firstPageId = $this->pdf->getCurrentPage();
+
+        // Render immediately on the current page
+        $this->render();
     }
 
     private function calculateDimensions(): void
@@ -81,23 +85,20 @@ class HeaderManager
             $this->pdf->exitMeasurementMode();
             $this->pdf->resumePageBreaks();
         }
-
-        // Now, really render it to capture the content length
-        $currentPage = $this->pdf->getCurrentPage();
-        if ($currentPage !== null) {
-            $initialContent = $this->pdf->pageContents[$currentPage] ?? '';
-            $renderer->render($definition['elements'], $definition['options']);
-            $finalContent = $this->pdf->pageContents[$currentPage] ?? '';
-            $this->contentLength = strlen($finalContent) - strlen($initialContent);
-            // Reset content, it will be added for real in render()
-            $this->pdf->pageContents[$currentPage] = $initialContent;
-        }
     }
 
     public function render(): void
     {
         if (!$this->isDefined) {
             return;
+        }
+
+        // Avoid re-rendering on the first page if it was already rendered by set()
+        if (isset($this->firstPageId) && $this->pdf->getCurrentPage() === $this->firstPageId) {
+            $isNewPage = count(array_filter($this->pdf->pageContents, function ($content) {
+                return trim($content) !== '';
+            })) <= 1;
+            if (!$isNewPage) return;
         }
 
         $blockOptions = $this->options;
@@ -124,11 +125,6 @@ class HeaderManager
     public function isDefined(): bool
     {
         return $this->isDefined;
-    }
-
-    public function getContentLength(): int
-    {
-        return $this->contentLength;
     }
 
     public function pushesContent(): bool
