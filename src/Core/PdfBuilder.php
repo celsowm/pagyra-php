@@ -39,9 +39,6 @@ final class PdfBuilder
     private ?int $currentPage = null;
     private array $fonts = [];
     private array $usedGids = [];
-    private array $extGStateMap = [];
-    private array $extGStateByAlpha = [];
-    private int $extGStateSeq = 0;
     private array $pageAnnotations = [];
     private array $uriActions = [];
     private PdfImageManager $imageManager;
@@ -50,35 +47,22 @@ final class PdfBuilder
     private array $baseMargins = ['left' => 56.0, 'top' => 56.0, 'right' => 56.0, 'bottom' => 56.0];
 
     private bool $pageHeaderDefined = false;
-
     private float $pageHeaderHeight = 0.0;
-
     private float $pageHeaderOffset = 0.0;
-
     private float $pageHeaderTop = 0.0;
-
     private float $pageHeaderSpacing = 0.0;
-
     private bool $pageHeaderPushesContent = false;
-
     private bool $pageFooterDefined = false;
-
     private float $pageFooterHeight = 0.0;
-
     private float $pageFooterBottom = 0.0;
-
     private float $pageFooterSpacing = 0.0;
-
     private bool $pageFooterPushesContent = false;
-
     private float $pageFooterOffset = 0.0;
+    private int $pageHeaderContentLength = 0;
+    private int $pageBreakSuppression = 0;
 
     private bool $measurementMode = false;
-
-    private int $pageHeaderContentLength = 0;
-
     private int $measurementDepth = 0;
-    private int $pageBreakSuppression = 0;
 
 
     public function __construct(float $w = 595.28, float $h = 841.89)
@@ -145,12 +129,6 @@ final class PdfBuilder
     public function getExtGStateManager(): PdfExtGStateManager
     {
         return $this->extGStateManager;
-    }
-
-    /** @deprecated Use getExtGStateManager()->ensureAlpha($alpha) */
-    public function ensureExtGState(float $alpha): string
-    {
-        return $this->extGStateManager->ensureAlpha($alpha);
     }
 
     public function isMeasurementMode(): bool
@@ -1525,9 +1503,11 @@ final class PdfBuilder
 
         $ops = "q\n";
         if (isset($opts['alpha']) && (float)$opts['alpha'] < 1.0) {
-            $gs = $this->ensureExtGState(max(0.0, min(1.0, (float)$opts['alpha'])));
-            $this->registerPageResource('ExtGState', $gs);
-            $ops .= "{$gs} gs\n";
+            [$gsName, $gsId] = $this->getExtGStateManager()->ensureAlphaRef(
+                max(0.0, min(1.0, (float)$opts['alpha']))
+            );
+            $this->registerPageResource('ExtGState', $gsName, $gsId);
+            $ops .= "{$gsName} gs\n";
         }
         $ops .= sprintf("%.3F 0 0 %.3F %.3F %.3F cm\n", $w, $h, $x, $y);
         $ops .= $img['name'] . " Do\nQ\n";
@@ -1792,13 +1772,6 @@ final class PdfBuilder
         }
 
         $type0Ids = $this->fontManager->emitFontObjects();
-
-        foreach ($this->extGStateMap as $name => $id) {
-            if (($alphaKey = array_search($name, $this->extGStateByAlpha)) !== false) {
-                $this->writer->setObject($id, "<< /Type /ExtGState /ca {$alphaKey} /CA {$alphaKey} >>");
-            }
-        }
-
         $pagesId = $this->writer->newObjectId();
 
         foreach ($this->pages as $pid) {
@@ -1810,8 +1783,10 @@ final class PdfBuilder
                 if (isset($type0Ids[ltrim($label, '/')])) $fontPairs[] = "{$label} {$type0Ids[ltrim($label, '/')]} 0 R";
             }
             $gsPairs = [];
-            foreach ($this->pageResources[$pid]['ExtGState'] as $label => $_) {
-                if (isset($this->extGStateMap[$label])) $gsPairs[] = "{$label} {$this->extGStateMap[$label]} 0 R";
+            foreach ($this->pageResources[$pid]['ExtGState'] as $label => $objId) {
+                if (is_int($objId) && $objId > 0) {
+                    $gsPairs[] = "{$label} {$objId} 0 R";
+                }
             }
             $xoPairs = [];
             if (isset($this->pageResources[$pid]['XObject'])) {
