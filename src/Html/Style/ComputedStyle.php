@@ -6,13 +6,47 @@ namespace Celsowm\PagyraPhp\Html\Style;
 final class ComputedStyle
 {
     /**
-     * @var array<string, array{value: string, specificity: array{0:int,1:int,2:int}, order: int}>
+     * @var array<string, array{value: string, specificity: array<int, int>, order: int}>
      */
     private array $properties = [];
 
+    private static array $inheritableProperties = [
+        'color',
+        'font',
+        'font-family',
+        'font-size',
+        'font-style',
+        'font-weight',
+        'letter-spacing',
+        'line-height',
+        'list-style',
+        'list-style-image',
+        'list-style-position',
+        'list-style-type',
+        'text-align',
+        'text-indent',
+        'text-transform',
+        'white-space',
+        'word-spacing',
+    ];
+
+    public function inheritFrom(ComputedStyle $parentStyle): void
+    {
+        foreach ($parentStyle->properties as $name => $meta) {
+            if (in_array($name, self::$inheritableProperties, true)) {
+                // Inherited properties have the lowest specificity and order.
+                $this->properties[$name] = [
+                    'value' => $meta['value'],
+                    'specificity' => [0, 0, 0],
+                    'order' => -1,
+                ];
+            }
+        }
+    }
+
     /**
      * @param array<string, string> $declarations
-     * @param array{0:int,1:int,2:int} $specificity
+     * @param array<int, int> $specificity
      */
     public function applyDeclarations(array $declarations, array $specificity, int $order): void
     {
@@ -34,8 +68,8 @@ final class ComputedStyle
     }
 
     /**
-     * @param array{0:int,1:int,2:int} $existingSpec
-     * @param array{0:int,1:int,2:int} $incomingSpec
+     * @param array<int, int> $existingSpec
+     * @param array<int, int> $incomingSpec
      */
     private function shouldOverride(array $existingSpec, int $existingOrder, array $incomingSpec, int $incomingOrder): bool
     {

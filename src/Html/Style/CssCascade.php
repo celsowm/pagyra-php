@@ -24,29 +24,56 @@ final class CssCascade
         $computed = [];
         $rules = $cssOM->getRules();
 
-        $document->eachElement(function (array $node) use (&$computed, $rules): void {
-            $nodeId = (string)($node['nodeId'] ?? '');
-            if ($nodeId === '') {
-                return;
-            }
-
-            $style = new ComputedStyle();
-            foreach ($rules as $rule) {
-                if ($this->matcher->matches($node, $rule['selector'])) {
-                    $specificity = $this->matcher->calculateSpecificity($rule['selector']);
-                    $style->applyDeclarations($rule['declarations'], $specificity, $rule['order']);
-                }
-            }
-
-            $inlineDeclarations = $this->parseInlineStyle($node['attributes']['style'] ?? null);
-            if ($inlineDeclarations !== []) {
-                $style->applyDeclarations($inlineDeclarations, [1000, 0, 0], PHP_INT_MAX);
-            }
-
-            $computed[$nodeId] = $style;
-        });
+        foreach ($document->getRoots() as $rootNode) {
+            $this->computeForNodeAndChildren($rootNode, null, $rules, $computed);
+        }
 
         return $computed;
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     * @param array<int, array<string, mixed>> $rules
+     * @param array<string, ComputedStyle> $computed
+     */
+    private function computeForNodeAndChildren(array $node, ?ComputedStyle $parentStyle, array $rules, array &$computed): void
+    {
+        $type = $node['type'] ?? null;
+        if ($type !== 'element') {
+            return;
+        }
+        $nodeId = (string)($node['nodeId'] ?? '');
+        if ($nodeId === '') {
+            return;
+        }
+
+        $style = new ComputedStyle();
+
+        // 1. Inheritance
+        if ($parentStyle !== null) {
+            $style->inheritFrom($parentStyle);
+        }
+
+        // 2. Apply rules from stylesheets
+        foreach ($rules as $rule) {
+            if ($this->matcher->matches($node, $rule['selector'])) {
+                $specificity = $this->matcher->calculateSpecificity($rule['selector']);
+                $style->applyDeclarations($rule['declarations'], $specificity, $rule['order']);
+            }
+        }
+
+        // 3. Apply inline styles (highest specificity)
+        $inlineDeclarations = $this->parseInlineStyle($node['attributes']['style'] ?? null);
+        if ($inlineDeclarations !== []) {
+            $style->applyDeclarations($inlineDeclarations, [1, 0, 0, 0], PHP_INT_MAX); // Inline style specificity
+        }
+
+        $computed[$nodeId] = $style;
+
+        // Recurse for children
+        foreach ($node['children'] ?? [] as $childNode) {
+            $this->computeForNodeAndChildren($childNode, $style, $rules, $computed);
+        }
     }
 
     /**
