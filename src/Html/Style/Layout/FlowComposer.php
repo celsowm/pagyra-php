@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Html\Style\Layout;
@@ -72,9 +73,7 @@ final class FlowComposer
                 return;
             }
 
-            if ($tag === 'div' && $this->hasNestedBlockChild($node)) {
-                return;
-            }
+            // REMOVED THE DIV CHECK that was here before.
 
             $nodeId = (string)($node['nodeId'] ?? '');
             if ($nodeId === '') {
@@ -82,9 +81,21 @@ final class FlowComposer
             }
 
             $runs = $this->collectRuns($node);
-            if ($runs === []) {
+
+            // --- START OF THE CRITICAL FIX ---
+            // A block is valid if it has text (runs) OR if it has styling
+            // that makes it visible (background, padding, border etc.)
+            $style = $styles[$nodeId] ?? null;
+            $hasVisibleStyle = false;
+            if ($style) {
+                $map = $style->toArray();
+                $hasVisibleStyle = isset($map['background']) || isset($map['background-color']) || isset($map['background-image']) || !empty($map['padding']) || !empty($map['border']);
+            }
+
+            if ($runs === [] && !$hasVisibleStyle) {
                 return;
             }
+            // --- END OF THE CRITICAL FIX ---
 
             $flows[] = [
                 'type' => 'block',

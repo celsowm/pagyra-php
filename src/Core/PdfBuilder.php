@@ -1584,6 +1584,9 @@ final class PdfBuilder
                             $this->measureBlockHeight((array)($def['elements'] ?? []), (array)($def['options'] ?? []));
                         }
                     },
+                    'runs' => function () use ($el) {
+                        $this->addParagraphRuns((array)($el['runs'] ?? []), (array)($el['options'] ?? []));
+                    },
                     default => function () { /* no-op p/ tipos desconhecidos */
                     },
                 };
@@ -1609,7 +1612,7 @@ final class PdfBuilder
         $this->pageContents[$pageId] = '';
         $this->pageResources[$pageId] = ['Font' => [], 'ExtGState' => [], 'XObject' => [], 'Shading' => []];
         $this->currentPage = $pageId;
-        
+
         $this->fixedElementManager->renderAll();
     }
 

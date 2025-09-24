@@ -1,7 +1,9 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Block;
+
 use Celsowm\PagyraPhp\Block\PdfBlockRenderer;
 use Celsowm\PagyraPhp\Core\PdfBuilder;
 use Celsowm\PagyraPhp\Graphics\Painter\PdfBackgroundPainter;
@@ -62,6 +64,12 @@ final class PdfBlockBuilder
         $nested = new PdfBlockBuilder($this->pdf, []);
         $callback($nested);
         $this->elements[] = ['type' => 'block', 'builder' => $nested];
+        return $this;
+    }
+
+    public function addParagraphRuns(array $runs, array $opts = []): self
+    {
+        $this->elements[] = ['type' => 'runs', 'runs' => $runs, 'options' => $opts];
         return $this;
     }
 

@@ -158,6 +158,7 @@ final class PdfBlockRenderer
                     'spacer'    => $this->pdf->addSpacer($element['height']),
                     'hr'        => $this->pdf->addHorizontalLine($element['options']),
                     'block'     => $element['builder']->end(),
+                    'runs'      => $this->pdf->addParagraphRuns($element['runs'], $element['options']),
                     default     => null,
                 };
             }

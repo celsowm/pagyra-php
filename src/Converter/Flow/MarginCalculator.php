@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Converter\Flow;
@@ -7,9 +8,7 @@ use Celsowm\PagyraPhp\Html\Style\ComputedStyle;
 
 final class MarginCalculator
 {
-    public function __construct(private LengthConverter $lengthConverter)
-    {
-    }
+    public function __construct(private LengthConverter $lengthConverter) {}
 
     /**
      * @return array{top: float, right: float, bottom: float, left: float}
@@ -56,6 +55,35 @@ final class MarginCalculator
         }
 
         return $margins;
+    }
+
+    public function extractPaddingBox(ComputedStyle $style, float $reference): array
+    {
+        $map = $style->toArray();
+        $pad = ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0];
+
+        if (isset($map['padding'])) {
+            $vals = preg_split('/\s+/', trim((string)$map['padding'])) ?: [];
+            $vals = array_values(array_filter(array_map('trim', $vals), fn($v) => $v !== ''));
+            $c = count($vals);
+            if ($c === 1)       $vals = [$vals[0], $vals[0], $vals[0], $vals[0]];
+            elseif ($c === 2)   $vals = [$vals[0], $vals[1], $vals[0], $vals[1]];
+            elseif ($c === 3)   $vals = [$vals[0], $vals[1], $vals[2], $vals[1]];
+            else                $vals = array_slice($vals, 0, 4);
+
+            foreach (['top', 'right', 'bottom', 'left'] as $i => $side) {
+                $pad[$side] = $this->lengthConverter->parseLengthOptional($vals[$i], $reference, $pad[$side]);
+            }
+        }
+
+        foreach (['top', 'right', 'bottom', 'left'] as $side) {
+            $prop = 'padding-' . $side;
+            if (isset($map[$prop])) {
+                $pad[$side] = $this->lengthConverter->parseLengthOptional($map[$prop], $reference, $pad[$side]);
+            }
+        }
+
+        return $pad;
     }
 
     private function parseMarginComponent(string $value, float $reference, float $fallback): float

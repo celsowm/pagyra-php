@@ -46,6 +46,7 @@ final class FlowRenderer
         HtmlDocument $document,
         array $computedStyles
     ): void {
+
         $type = strtolower((string)($flow['type'] ?? ''));
         if ($type === 'table') {
             $this->tableRenderer->render($flow, $pdf, $computedStyles);

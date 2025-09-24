@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Converter\Flow;
@@ -6,73 +7,86 @@ namespace Celsowm\PagyraPhp\Converter\Flow;
 use Celsowm\PagyraPhp\Core\PdfBuilder;
 use Celsowm\PagyraPhp\Html\HtmlDocument;
 use Celsowm\PagyraPhp\Html\Style\ComputedStyle;
+use Celsowm\PagyraPhp\Css\CssGradientParser;
+use Celsowm\PagyraPhp\Graphics\Painter\PdfBackgroundPainter;
+use Celsowm\PagyraPhp\Graphics\Gradient\PdfGradientFactory;
+use Celsowm\PagyraPhp\Graphics\Shading\PdfShadingRegistry;
+use Celsowm\PagyraPhp\Block\PdfBlockBuilder;
 
 final class BlockFlowRenderer
 {
     public function __construct(
         private ParagraphBuilder $paragraphBuilder,
         private MarginCalculator $marginCalculator
-    ) {
-    }
+    ) {}
 
     /**
      * @param array<string, mixed> $flow
      * @param array<string, ComputedStyle> $computedStyles
      */
-    public function render(
-        array $flow,
-        PdfBuilder $pdf,
-        HtmlDocument $document,
-        array $computedStyles
-    ): void {
+    public function render(array $flow, PdfBuilder $pdf, HtmlDocument $document, array $computedStyles): void
+    {
         $style = $flow['style'] ?? null;
-        $paragraphOptions = ($style instanceof ComputedStyle)
-            ? $this->paragraphBuilder->buildParagraphOptions($style)
-            : [];
+        if (!($style instanceof ComputedStyle)) {
+            return;
+        }
 
-        $baseMarkers = $this->paragraphBuilder->styleMarkersFromOptions($paragraphOptions);
+        $paragraphOptions = $this->paragraphBuilder->buildParagraphOptions($style);
         $baseFontSize = (float)($paragraphOptions['size'] ?? 12.0);
         $runSpecs = is_array($flow['runs'] ?? null) ? $flow['runs'] : [];
         $runs = $this->paragraphBuilder->buildRunsFromFlow(
             $runSpecs,
             $computedStyles,
             $document,
-            $baseMarkers,
+            $this->paragraphBuilder->styleMarkersFromOptions($paragraphOptions),
             $baseFontSize
         );
 
-        if ($runs === []) {
-            return;
+        // Get block-level styling
+        $margins = $this->marginCalculator->extractMarginBox($style, $baseFontSize);
+        $padding = $this->marginCalculator->extractPaddingBox($style, $baseFontSize);
+
+        $blockOptions = [
+            'width'   => '100%',
+            'padding' => [$padding['top'], $padding['right'], $padding['bottom'], $padding['left']],
+            'margin'  => [$margins['top'], $margins['right'], $margins['bottom'], $margins['left']],
+        ];
+
+        $map = $style->toArray();
+        $bgGradient = null;
+        $painter = null;
+
+        // Check for gradients
+        $bgImageValue = $map['background-image'] ?? ($map['background'] ?? null);
+        if (is_string($bgImageValue) && str_contains($bgImageValue, 'linear-gradient')) {
+            $gp = new CssGradientParser();
+            $bgGradient = $gp->parseLinear($bgImageValue);
         }
 
-        $marginTop = 0.0;
-        $marginBottom = 0.0;
-        if ($style instanceof ComputedStyle) {
-            $margins = $this->marginCalculator->extractMarginBox($style, $baseFontSize);
-            if ($margins['left'] > 0.0) {
-                $indent = ($paragraphOptions['indent'] ?? 0.0) + $margins['left'];
-                $paragraphOptions['indent'] = $indent;
-                $paragraphOptions['hangIndent'] = $paragraphOptions['hangIndent'] ?? $indent;
-                if ($paragraphOptions['hangIndent'] < $indent) {
-                    $paragraphOptions['hangIndent'] = $indent;
-                }
+        if ($bgGradient !== null) {
+            $blockOptions['bggradient'] = $bgGradient;
+            $painter = new PdfBackgroundPainter($pdf, new PdfGradientFactory($pdf), new PdfShadingRegistry($pdf));
+        } else {
+            // Check for solid background color
+            $bgColorValue = $map['background-color'] ?? ($map['background'] ?? null);
+            if (
+                is_string($bgColorValue) &&
+                !str_contains($bgColorValue, 'gradient') &&
+                strtolower($bgColorValue) !== 'transparent' &&
+                strtolower($bgColorValue) !== 'none'
+            ) {
+                $blockOptions['bgcolor'] = $bgColorValue;
             }
-            if ($margins['top'] > 0.0) {
-                $marginTop = $margins['top'];
-            }
-            if ($margins['bottom'] > 0.0) {
-                $marginBottom = $margins['bottom'];
-            }
         }
 
-        if ($marginTop > 0.0) {
-            $pdf->addSpacer($marginTop);
+        // Use PdfBlockBuilder to render the block's container and background
+        $block = new PdfBlockBuilder($pdf, $blockOptions, $painter);
+
+        // Add the text content (runs), if any exist
+        if ($runs !== []) {
+            $block->addParagraphRuns($runs, $paragraphOptions);
         }
 
-        $pdf->addParagraphRuns($runs, $paragraphOptions);
-
-        if ($marginBottom > 0.0) {
-            $pdf->addSpacer($marginBottom);
-        }
+        $block->end();
     }
 }
