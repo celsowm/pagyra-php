@@ -30,9 +30,19 @@ final class StylesheetResolver
 
     private function getDefaultStylesheet(): string
     {
-        return <<<'CSS'
+    return <<<'CSS'
+/* inline */
 strong, b { font-weight: bold; }
 em, i { font-style: italic; }
+
+/* headings (equivalentes às defaults dos browsers) */
+h1 { font-size: 24pt; font-weight: bold;}
+h2 { font-size: 18pt; }
+h3 { font-size: 14pt; }
+h4 { font-size: 12pt; }
+h5 { font-size: 10pt; }
+h6 { font-size: 9pt; }
+
 CSS;
     }
 
