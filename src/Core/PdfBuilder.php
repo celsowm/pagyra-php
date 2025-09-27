@@ -138,6 +138,21 @@ final class PdfBuilder
         return $this->extGStateManager;
     }
 
+    public function getLayoutManager(): PdfLayoutManager
+    {
+        return $this->layoutManager;
+    }
+
+    public function getLeftMargin(): float
+    {
+        return $this->mLeft;
+    }
+
+    public function getRightMargin(): float
+    {
+        return $this->mRight;
+    }
+
     public function isMeasurementMode(): bool
     {
         return $this->measurementMode;
@@ -452,6 +467,7 @@ final class PdfBuilder
 
     public function addParagraphRuns(array $runs, array $opts = []): void
     {
+
         if ($this->styleManager->getCurrentFontAlias() === null) {
             throw new \LogicException("Defina uma fonte com setFont() antes de adicionar texto.");
         }
@@ -465,7 +481,16 @@ final class PdfBuilder
         $padding = $borderSpec['padding'];
         $baseX = $this->mLeft + $padding[3];
         $wrapWidth = $this->layoutManager->getContentAreaWidth() - $padding[1] - $padding[3];
-        $initialCursorY = $this->layoutManager->getCursorY();
+        
+        // Ajuste horizontal com containerPadding (quando vindo de um bloco com padding)
+        if (isset($opts['containerPadding']) && is_array($opts['containerPadding'])) {
+            $cp = array_values($opts['containerPadding']);
+            $cp += [0,0,0,0];
+            $baseX     += (float)$cp[3];
+            $wrapWidth -= (float)$cp[1] + (float)$cp[3];
+            if ($wrapWidth < 0) { $wrapWidth = 0.0; }
+        }
+$initialCursorY = $this->layoutManager->getCursorY();
         $__borderFragments = [];
         $__fragTop = $initialCursorY;
         $__fragPage = $this->currentPage;
@@ -679,6 +704,45 @@ final class PdfBuilder
         return $sum;
     }
 
+    private function computeLineMetrics(float $lineHeight): array
+    {
+        $size = max(0.001, $this->styleManager->getCurrentFontSize());
+        $alias = $this->styleManager->getCurrentFontAlias();
+        $style = $this->styleManager->getStyle();
+        $fonts = $this->fontManager->getFonts();
+        $resolvedAlias = null;
+        if ($alias !== null) {
+            $resolvedAlias = $this->fontManager->resolveAliasByStyle($alias, $style);
+        }
+
+        $fontData = null;
+        if ($resolvedAlias !== null && isset($fonts[$resolvedAlias])) {
+            $fontData = $fonts[$resolvedAlias];
+        } elseif ($alias !== null && isset($fonts[$alias])) {
+            $fontData = $fonts[$alias];
+        }
+
+        if ($fontData !== null) {
+            $units = max(1.0, (float)$fontData['unitsPerEm']);
+            $ascentPx = ((float)$fontData['ascent'] / $units) * $size;
+            $descentPx = (abs((float)$fontData['descent']) / $units) * $size;
+        } else {
+            $ascentPx = $size * 0.8;
+            $descentPx = max($size - $ascentPx, $size * 0.2);
+        }
+
+        $glyphHeight = $ascentPx + $descentPx;
+        $leading = $lineHeight - $glyphHeight;
+
+        return [
+            'baselineOffset' => ($leading / 2.0) + $ascentPx,
+            'ascent' => $ascentPx,
+            'descent' => $descentPx,
+            'leading' => $leading,
+            'glyphHeight' => $glyphHeight,
+        ];
+    }
+
     private function emitRunsLine(
         array $tokens,
         string $align,
@@ -710,18 +774,24 @@ final class PdfBuilder
             'right' => $baseX + $actualIndent + ($targetWidth - $lineWidth),
             default => $baseX + $actualIndent,
         };
-        $y = $this->layoutManager->getCursorY();
+        $lineTop = $this->layoutManager->getCursorY();
+
+        $lineMetrics = $this->computeLineMetrics($lineH);
+        $baselineOffset = $lineMetrics['baselineOffset'];
+        $baselineY = $lineTop - $baselineOffset;
 
         if ($bgColor !== null) {
             $maxSz = $this->styleManager->getCurrentFontSize();
-            $this->drawBackgroundRect($baseX, $y - ($maxSz * 0.25), $wrapWidth, $lineH, $bgColor);
+            $this->drawBackgroundRect($baseX, $baselineY - ($maxSz * 0.25), $wrapWidth, $lineH, $bgColor);
         }
 
         $spaces = array_values(array_filter($renderTokens, fn($t) => $t['type'] === 'space'));
         $extraPerGap = 0.0;
         if ($justify && count($spaces) > 0) {
             $extra = $targetWidth - $lineWidth;
-            if ($extra > 0.001) $extraPerGap = $extra / count($spaces);
+            if ($extra > 0.001) {
+                $extraPerGap = $extra / count($spaces);
+            }
         }
 
         if ($markerSpec !== null && $isFirst) {
@@ -743,13 +813,13 @@ final class PdfBuilder
             $boxRight = $baseX + $actualIndent;
             $boxLeft = $boxRight - max($mWidth, $measured + $mGap);
             $mx = ($mAlign === 'right') ? $boxRight - $measured - $mGap : $boxLeft;
-            $this->textRenderer->writeTextLine($mx, $y, $mText, $this->styleManager, null);
+            $this->textRenderer->writeTextLine($mx, $baselineY, $mText, $this->styleManager, null);
             $this->styleManager->pop();
         }
 
         foreach ($renderTokens as $tok) {
             if ($tok['type'] === 'inline') {
-                $tok['renderer']($x, $y);
+                $tok['renderer']($x, $baselineY);
                 $x += $this->measureTokenWidth($tok);
                 continue;
             }
@@ -770,29 +840,41 @@ final class PdfBuilder
                     $this->styleManager->getCurrentFontSize() * $scale
                 );
             }
-            $dy = isset($opt['baselineShift']) ? (float)$opt['baselineShift'] : ($isSup ? ($lineH * 0.35) : ($isSub ? - ($lineH * 0.15) : 0.0));
+
+            $dy = isset($opt['baselineShift'])
+                ? (float)$opt['baselineShift']
+                : ($isSup ? ($lineH * 0.35) : ($isSub ? -($lineH * 0.15) : 0.0));
 
             $tokWidth = $this->textRenderer->measureTextStyled($tok['text'], $this->styleManager);
             if ($runBG !== null) {
-                $this->drawBackgroundRect($x, $y + $dy - ($this->styleManager->getCurrentFontSize() * 0.25), $tokWidth, $this->styleManager->getLineHeight(), $runBG);
+                $this->drawBackgroundRect(
+                    $x,
+                    $baselineY + $dy - ($this->styleManager->getCurrentFontSize() * 0.25),
+                    $tokWidth,
+                    $this->styleManager->getLineHeight(),
+                    $runBG
+                );
             }
 
-            $this->textRenderer->writeTextLine($x, $y + $dy, $tok['text'], $this->styleManager, $shadow);
+            $this->textRenderer->writeTextLine($x, $baselineY + $dy, $tok['text'], $this->styleManager, $shadow);
 
             if ($href !== null) {
                 $linkHeight = $this->styleManager->getLineHeight();
-                $linkY = ($y + $dy) - ($linkHeight * 0.25);
+                $linkY = ($baselineY + $dy) - ($linkHeight * 0.25);
                 $this->addLinkAbs($x, $linkY, $tokWidth, $linkHeight, $href);
             }
 
             $x += $tokWidth;
             if ($tok['type'] === 'space') {
                 $x += $this->styleManager->getWordSpacing();
-                if ($extraPerGap > 0.0) $x += $extraPerGap;
+                if ($extraPerGap > 0.0) {
+                    $x += $extraPerGap;
+                }
             }
 
             $this->styleManager->pop();
         }
+
         $this->layoutManager->advanceCursor($lineH);
         $this->layoutManager->checkPageBreak();
     }
@@ -1078,17 +1160,11 @@ final class PdfBuilder
 
     private function getTextVerticalCenterOffset(): float
     {
-        $alias = $this->styleManager->getCurrentFontAlias();
-        $size = $this->styleManager->getCurrentFontSize();
-        if ($alias === null) return $size * 0.3;
-
-        $font = $this->fonts[$alias] ?? null;
-        if ($font !== null) {
-            $offset = (($font['ascent'] + $font['descent']) / 2 / $font['unitsPerEm']) * $size;
-            return $offset;
-        }
-        return $size * 0.3;
+        $lineHeight = $this->styleManager->getLineHeight();
+        $metrics = $this->computeLineMetrics($lineHeight);
+        return $metrics['baselineOffset'] - ($lineHeight / 2.0);
     }
+
 
     private function drawTableRow(array $row, array $columnWidths, array $columnAligns, float $rowHeight, float $padding, array $borderSpec, ?array $bgColor, bool $wrapText): void
     {

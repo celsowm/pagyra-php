@@ -59,11 +59,20 @@ final class PdfBlockBuilder
         return $this;
     }
 
-    public function addBlock(callable $callback): self
+    public function addBlock(array|callable $optsOrCallback, ?callable $callback = null): self
     {
-        $nested = new PdfBlockBuilder($this->pdf, []);
-        $callback($nested);
-        $this->elements[] = ['type' => 'block', 'builder' => $nested];
+        if (is_callable($optsOrCallback)) {
+            $callback = $optsOrCallback;
+            $opts = [];
+        } else {
+            $opts = $optsOrCallback ?? [];
+        }
+
+        $nested = new PdfBlockBuilder($this->pdf, $opts, $this->bgPainter);
+        if ($callback) {
+            $callback($nested);
+        }
+        $this->elements[] = ['type' => 'block', 'builder' => $nested, 'options' => $opts];
         return $this;
     }
 

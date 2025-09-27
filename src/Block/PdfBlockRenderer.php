@@ -9,7 +9,7 @@ use Celsowm\PagyraPhp\Image\PdfImageManager;
 use Celsowm\PagyraPhp\Text\PdfTextRenderer;
 use Celsowm\PagyraPhp\Graphics\Painter\PdfBackgroundPainter;
 
-final class PdfBlockRenderer
+final class PdfBlockRenderer /* nested-blocks-supported */
 {
     private PdfBuilder $pdf;
     private PdfTextRenderer $textRenderer;
@@ -96,15 +96,32 @@ final class PdfBlockRenderer
         $this->pdf->setCursorY($contentStartY);
 
         // Measure content height (library should not emit during measure)
-        $measuredContentHeight = $this->pdf->measureBlockHeight($elements, $options);
+        
+        // --- De-dup textual content: if there is at least one 'runs' element,
+        // skip 'paragraph' and nested 'block' textual duplicates.
+        $elementsFiltered = $elements;
+        $hasRuns = false;
+        if (is_array($elementsFiltered)) {
+            foreach ($elementsFiltered as $__e) {
+                if ((($__e['type'] ?? null) === 'runs')) { $hasRuns = true; break; }
+            }
+            if ($hasRuns) {
+                $elementsFiltered = array_values(array_filter($elementsFiltered, function($el){
+                    $t = $el['type'] ?? null;
+                    return !($t === 'paragraph' || $t === 'block');
+                }));
+            }
+        }
+        // --------------------------------------------------------------
+        $measuredContentHeight = $this->pdf->measureBlockHeight($elementsFiltered, $options);
 
         // Restore state after measuring
         $this->pdf->mLeft  = $saved['mLeft'];
         $this->pdf->mRight = $saved['mRight'];
         $this->pdf->setCursorY($saved['cursorY']);
 
-        // Compute total block height
-        $totalHeight = $padding[0] + $measuredContentHeight + $padding[2];
+        // Compute total block height based on measurement (already includes padding)
+        $totalHeight = max($measuredContentHeight, $padding[0] + $padding[2]);
 
         if (($options['minHeight'] ?? null) !== null) {
             $totalHeight = max($totalHeight, (float)$options['minHeight']);
@@ -149,7 +166,14 @@ final class PdfBlockRenderer
         }
 
         try {
-            foreach ($elements as $element) {
+            foreach ($elementsFiltered as $element) {
+                // Garanta que alinhamentos respeitem o padding do bloco
+                if (isset($element['options']) && is_array($element['options'])) {
+                    if (in_array($element['type'], ['paragraph','runs'], true)) {
+                        $element['options']['containerPadding'] = [$padding[0], $padding[1], $padding[2], $padding[3]];
+                    }
+                }
+
                 match ($element['type']) {
                     'paragraph' => $this->pdf->addParagraphText($element['content'], $element['options']),
                     'image'     => $this->pdf->addImageBlock($element['alias'], $element['options']),
@@ -236,3 +260,4 @@ final class PdfBlockRenderer
         $this->pdf->drawParagraphBorders($box, $spec);
     }
 }
+

@@ -15,9 +15,11 @@ final class FlowComposer
     public function compose(HtmlDocument $document, array $styles): array
     {
         $flows = [];
+        $__registry = [];
 
-        $document->eachElement(function (array $node) use (&$flows, $styles): void {
+        $document->eachElement(function (array $node) use (&$flows, $styles, & $__registry): void {
             $tag = strtolower((string)($node['tag'] ?? ''));
+            $nidTmp = (string)($node['nodeId'] ?? ''); if ($nidTmp !== '') { $__registry[$nidTmp] = $node; }
             if ($tag === 'style' || $tag === 'script') {
                 return;
             }
@@ -28,12 +30,24 @@ final class FlowComposer
                     return;
                 }
                 $nodeId = (string)($node['nodeId'] ?? '');
-                $flows[] = [
+                $ancestorIds = [];
+            foreach (($node['ancestors'] ?? []) as $__anc) {
+                $aid = (string)($__anc['nodeId'] ?? '');
+                if ($aid !== '') { $ancestorIds[] = $aid; }
+            }
+            // compute ancestorIds
+            $ancestorIds = [];
+            foreach (($node['ancestors'] ?? []) as $__anc) {
+                $aid = (string)($__anc['nodeId'] ?? ''); if ($aid !== '') { $ancestorIds[] = $aid; }
+            }
+            $flows[] = [
                     'type' => 'table',
                     'tag' => 'table',
                     'nodeId' => $nodeId,
                     'rows' => $rows,
                     'style' => $styles[$nodeId] ?? null,
+                'ancestorIds' => $ancestorIds,
+                'ancestorIds' => $ancestorIds,
                 ];
                 return;
             }
@@ -106,6 +120,7 @@ final class FlowComposer
             ];
         });
 
+        $flows = $this->reparentUsingAncestors($flows);
         return $flows;
     }
 
@@ -128,7 +143,19 @@ final class FlowComposer
         return false;
     }
 
-    private function hasAncestorTag(array $node, string $tag): bool
+    
+
+    private function hasBlockAncestor(array $node): bool
+    {
+        foreach ($node['ancestors'] ?? [] as $ancestor) {
+            $atag = strtolower((string)($ancestor['tag'] ?? ''));
+            if ($this->isBlockTag($atag)) {
+                return true;
+            }
+        }
+        return false;
+    }
+private function hasAncestorTag(array $node, string $tag): bool
     {
         foreach ($node['ancestors'] ?? [] as $ancestor) {
             if (strtolower((string)($ancestor['tag'] ?? '')) === $tag) {
@@ -311,6 +338,7 @@ final class FlowComposer
             return;
         }
         $tag = strtolower((string)($node['tag'] ?? ''));
+            $nidTmp = (string)($node['nodeId'] ?? ''); if ($nidTmp !== '') { $__registry[$nidTmp] = $node; }
         if ($tag === 'tr') {
             $row = [];
             $isHeader = true;
@@ -369,5 +397,150 @@ final class FlowComposer
             return '';
         }
         return preg_replace('/\s+/', ' ', $trimmed) ?? '';
+    }
+
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function collectBlockChildren(array $node, array $styles): array
+    {
+        $childrenFlows = [];
+        foreach ($node['children'] ?? [] as $child) {
+            if (($child['type'] ?? '') !== 'element') {
+                continue;
+            }
+            $tag = strtolower((string)($child['tag'] ?? ''));
+
+            if ($tag === 'style' || $tag === 'script') {
+                continue;
+            }
+
+            $childId = (string)($child['nodeId'] ?? '');
+            if ($childId === '') continue;
+
+            // Lists
+            if ($tag === 'ul' || $tag === 'ol') {
+                $items = $this->collectListItems($child, $styles);
+                if ($items !== []) {
+                    $childrenFlows[] = [
+                        'type'       => 'list',
+                        'tag'        => $tag,
+                        'nodeId'     => $childId,
+                        'items'      => $items,
+                        'style'      => $styles[$childId] ?? null,
+                        'attributes' => $child['attributes'] ?? [],
+                    ];
+                }
+                continue;
+            }
+
+            // Tables
+            if ($tag === 'table') {
+                $rows = $this->extractTableRows($child);
+                if ($rows !== []) {
+                    $childrenFlows[] = [
+                        'type'       => 'table',
+                        'tag'        => $tag,
+                        'nodeId'     => $childId,
+                        'rows'       => $rows,
+                        'style'      => $styles[$childId] ?? null,
+                        'attributes' => $child['attributes'] ?? [],
+                    ];
+                }
+                continue;
+            }
+
+            // Generic block elements
+            if ($this->isBlockTag($tag)) {
+                $runs = $this->collectRuns($child);
+                $childFlow = [
+                    'type'       => 'block',
+                    'tag'        => $tag,
+                    'nodeId'     => $childId,
+                    'runs'       => $runs,
+                    'style'      => $styles[$childId] ?? null,
+                    'attributes' => $child['attributes'] ?? [],
+                ];
+                $grand = $this->collectBlockChildren($child, $styles);
+                if ($grand !== []) {
+                    $childFlow['children'] = $grand;
+                }
+                if ($runs !== [] || $grand !== []) {
+                    $childrenFlows[] = $childFlow;
+                }
+            }
+        }
+        return $childrenFlows;
+    }
+
+
+
+    /**
+     * Post-process flat top-level flows to re-parent child blocks based on ancestorIds (nearest ancestor among flows).
+     * This recovers hierarchy even if Document::eachElement() yielded only top-level elements.
+     *
+     * @param array<int, array<string,mixed>> $flows
+     * @return array<int, array<string,mixed>>
+     */
+    private function reparentUsingAncestors(array $flows): array
+    {
+        // Map nodeId => index
+        $byId = [];
+        foreach ($flows as $idx => $f) {
+            $nid = (string)($f['nodeId'] ?? '');
+            if ($nid !== '') $byId[$nid] = $idx;
+        }
+
+        $toRemove = [];
+        for ($i = 0; $i < count($flows); $i++) {
+            $f = $flows[$i];
+            $nid = (string)($f['nodeId'] ?? '');
+            if ($nid === '') continue;
+            $anc = $f['ancestorIds'] ?? null;
+            $parentIdx = null;
+
+            // Prefer the nearest ancestor (last in list) that is at top-level
+            if (is_array($anc) && $anc !== []) {
+                for ($k = count($anc)-1; $k >= 0; $k--) {
+                    $cand = (string)$anc[$k];
+                    if ($cand !== '' && isset($byId[$cand])) {
+                        $parentIdx = $byId[$cand];
+                        break;
+                    }
+                }
+            }
+
+            // Fallback heuristic: if previous flow looks like a container (div/section/etc.) with visible style, adopt
+            if ($parentIdx === null && $i > 0) {
+                $prev = $flows[$i-1];
+                $ptag = strtolower((string)($prev['tag'] ?? ''));
+                $pstyle = $prev['style'] ?? null;
+                $visible = false;
+                if ($pstyle && method_exists($pstyle, 'toArray')) {
+                    $map = $pstyle->toArray();
+                    $visible = !empty($map['padding']) || !empty($map['background']) || !empty($map['background-image']) || !empty($map['border']);
+                }
+                $isContainer = in_array($ptag, ['div','section','article','main','header','footer','nav','aside'], true);
+                if ($isContainer && $visible) {
+                    $parentIdx = $i-1;
+                }
+            }
+
+            if ($parentIdx !== null && $parentIdx !== $i) {
+                if (!isset($flows[$parentIdx]['children']) || !is_array($flows[$parentIdx]['children'])) {
+                    $flows[$parentIdx]['children'] = [];
+                }
+                $flows[$parentIdx]['children'][] = $f;
+                $toRemove[$i] = true;
+            }
+        }
+
+        // Build final list without moved children
+        $out = [];
+        foreach ($flows as $i => $f) {
+            if (!isset($toRemove[$i])) $out[] = $f;
+        }
+        return $out;
     }
 }
