@@ -86,12 +86,54 @@ final class PdfTTFParser
         return ['adv' => $adv];
     }
 
-    public function parsePost(): array
+    private function decodeNameString(string $raw, int $platformId, int $encodingId): string
     {
-        $s = $this->slice('post');
-        $italicFixed = PdfByteReader::beS32($s, 4);
-        $italicAngle = $italicFixed / 65536.0;
-        return ['italicAngle' => $italicAngle];
+        $value = '';
+        if ($platformId === 0 || $platformId === 3 || ($platformId === 2 && $encodingId === 1)) {
+            $decoded = @iconv('UTF-16BE', 'UTF-8', $raw);
+            if (is_string($decoded)) {
+                $value = $decoded;
+            }
+        }
+        if ($value === '') {
+            $value = $raw;
+        }
+        $value = trim($value);
+        $clean = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $value);
+        return is_string($clean) ? $clean : '';
+    }
+
+    /**
+     * @return array<int, array{platformId:int, encodingId:int, languageId:int, nameId:int, value:string}>
+     */
+    public function parseNameRecords(): array
+    {
+        $s = $this->slice('name');
+        $count = PdfByteReader::be16($s, 2);
+        $strOff = PdfByteReader::be16($s, 4);
+        $records = [];
+        for ($i = 0; $i < $count; $i++) {
+            $rec = 6 + ($i * 12);
+            $platformId = PdfByteReader::be16($s, $rec);
+            $encodingId = PdfByteReader::be16($s, $rec + 2);
+            $languageId = PdfByteReader::be16($s, $rec + 4);
+            $nameId = PdfByteReader::be16($s, $rec + 6);
+            $len = PdfByteReader::be16($s, $rec + 8);
+            $off = PdfByteReader::be16($s, $rec + 10);
+            $raw = substr($s, $strOff + $off, $len);
+            $value = $this->decodeNameString($raw, $platformId, $encodingId);
+            if ($value === '') {
+                continue;
+            }
+            $records[] = [
+                'platformId' => $platformId,
+                'encodingId' => $encodingId,
+                'languageId' => $languageId,
+                'nameId' => $nameId,
+                'value' => $value,
+            ];
+        }
+        return $records;
     }
 
     public function parseNamePostScript(): ?string

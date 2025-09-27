@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Celsowm\PagyraPhp\Converter\Flow;
 
 use Celsowm\PagyraPhp\Core\PdfBuilder;
+use Celsowm\PagyraPhp\Font\Resolve\FontResolver;
 use Celsowm\PagyraPhp\Html\HtmlDocument;
 use Celsowm\PagyraPhp\Html\Style\ComputedStyle;
 use Celsowm\PagyraPhp\Css\CssGradientParser;
@@ -17,7 +18,8 @@ final class BlockFlowRenderer
     public function __construct(
         private ParagraphBuilder $paragraphBuilder,
         private MarginCalculator $marginCalculator,
-        private LengthConverter $lengthConverter
+        private LengthConverter $lengthConverter,
+        private FontResolver $fontResolver
     ) {}
 
     
@@ -31,6 +33,8 @@ final class BlockFlowRenderer
             }
             $style = new ComputedStyle();
         }
+
+        $this->paragraphBuilder->beginFontContext($pdf, $this->fontResolver);
 
         $paragraphOptions = $this->paragraphBuilder->buildParagraphOptions($style);
         $baseFontSize = (float)($paragraphOptions['size'] ?? 12.0);
@@ -112,6 +116,8 @@ final class BlockFlowRenderer
         }
 
         $block->end();
+
+        $this->paragraphBuilder->endFontContext();
     }
 
     private function renderChildFlows(array $children, PdfBlockBuilder $parent, PdfBuilder $pdf, HtmlDocument $document, array $computedStyles): void

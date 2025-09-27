@@ -4,13 +4,15 @@ declare(strict_types=1);
 namespace Celsowm\PagyraPhp\Converter\Flow;
 
 use Celsowm\PagyraPhp\Core\PdfBuilder;
+use Celsowm\PagyraPhp\Font\Resolve\FontResolver;
 use Celsowm\PagyraPhp\Html\Style\ComputedStyle;
 
 final class TableFlowRenderer
 {
     public function __construct(
         private ParagraphBuilder $paragraphBuilder,
-        private LengthConverter $lengthConverter
+        private LengthConverter $lengthConverter,
+        private FontResolver $fontResolver
     ) {
     }
 
@@ -25,131 +27,136 @@ final class TableFlowRenderer
             return;
         }
 
-        $tableData = [];
-        $headerRowIndex = null;
-        $headerMarkers = ['bold' => false, 'italic' => false, 'underline' => false];
-        $headerBgCandidates = [];
-        $headerColorCandidates = [];
+        $this->paragraphBuilder->beginFontContext($pdf, $this->fontResolver);
+        try {
+            $tableData = [];
+            $headerRowIndex = null;
+            $headerMarkers = ['bold' => false, 'italic' => false, 'underline' => false];
+            $headerBgCandidates = [];
+            $headerColorCandidates = [];
 
-        $tableStyle = $flow['style'] ?? null;
-        $tableFontSize = 12.0;
-        $tableFontSizeDeclared = false;
-        $tableLineHeight = null;
-        $tableLineHeightDeclared = false;
+            $tableStyle = $flow['style'] ?? null;
+            $tableFontSize = 12.0;
+            $tableFontSizeDeclared = false;
+            $tableLineHeight = null;
+            $tableLineHeightDeclared = false;
 
-        if ($tableStyle instanceof ComputedStyle) {
-            $map = $tableStyle->toArray();
-            if (isset($map['font-size']) && strtolower($map['font-size']) !== 'inherit') {
-                $tableFontSize = $this->lengthConverter->parseLengthOptional($map['font-size'], 12.0, 12.0);
-                $tableFontSizeDeclared = true;
+            if ($tableStyle instanceof ComputedStyle) {
+                $map = $tableStyle->toArray();
+                if (isset($map['font-size']) && strtolower($map['font-size']) !== 'inherit') {
+                    $tableFontSize = $this->lengthConverter->parseLengthOptional($map['font-size'], 12.0, 12.0);
+                    $tableFontSizeDeclared = true;
+                }
+                if (isset($map['line-height'])) {
+                    $tableLineHeight = $this->lengthConverter->parseLengthOptional(
+                        $map['line-height'],
+                        $tableFontSize,
+                        1.2 * $tableFontSize,
+                        true
+                    );
+                    $tableLineHeightDeclared = true;
+                }
             }
-            if (isset($map['line-height'])) {
-                $tableLineHeight = $this->lengthConverter->parseLengthOptional(
-                    $map['line-height'],
-                    $tableFontSize,
-                    1.2 * $tableFontSize,
-                    true
-                );
-                $tableLineHeightDeclared = true;
-            }
-        }
 
-        foreach ($rows as $index => $row) {
-            if (!isset($row['cells'])) {
-                continue;
-            }
-            $isHeader = !empty($row['isHeader']);
-            $cells = [];
-            foreach ($row['cells'] as $cell) {
-                if (is_array($cell)) {
-                    $text = is_string($cell['text'] ?? null) ? $cell['text'] : (string)($cell['text'] ?? '');
-                    $nodeId = (string)($cell['nodeId'] ?? '');
-                    $styleMap = ($nodeId !== '' && isset($computedStyles[$nodeId]))
-                        ? $computedStyles[$nodeId]->toArray()
-                        : [];
-                    $cellOptions = $this->mapCellStyleToOptions($styleMap, $tableFontSize);
-                    if ($cellOptions !== []) {
-                        $cells[] = ['text' => $text, 'options' => $cellOptions];
+            foreach ($rows as $index => $row) {
+                if (!isset($row['cells'])) {
+                    continue;
+                }
+                $isHeader = !empty($row['isHeader']);
+                $cells = [];
+                foreach ($row['cells'] as $cell) {
+                    if (is_array($cell)) {
+                        $text = is_string($cell['text'] ?? null) ? $cell['text'] : (string)($cell['text'] ?? '');
+                        $nodeId = (string)($cell['nodeId'] ?? '');
+                        $styleMap = ($nodeId !== '' && isset($computedStyles[$nodeId]))
+                            ? $computedStyles[$nodeId]->toArray()
+                            : [];
+                        $cellOptions = $this->mapCellStyleToOptions($styleMap, $tableFontSize);
+                        if ($cellOptions !== []) {
+                            $cells[] = ['text' => $text, 'options' => $cellOptions];
+                        } else {
+                            $cells[] = $text;
+                        }
+                        if ($isHeader && $styleMap !== []) {
+                            $this->collectHeaderStyleData(
+                                $styleMap,
+                                $tableFontSize,
+                                $headerMarkers,
+                                $headerBgCandidates,
+                                $headerColorCandidates
+                            );
+                        }
                     } else {
-                        $cells[] = $text;
+                        $cells[] = is_string($cell) ? $cell : (string)$cell;
                     }
-                    if ($isHeader && $styleMap !== []) {
-                        $this->collectHeaderStyleData(
-                            $styleMap,
-                            $tableFontSize,
-                            $headerMarkers,
-                            $headerBgCandidates,
-                            $headerColorCandidates
-                        );
-                    }
-                } else {
-                    $cells[] = is_string($cell) ? $cell : (string)$cell;
+                }
+                $tableData[] = $cells;
+                if ($isHeader && $headerRowIndex === null) {
+                    $headerRowIndex = $index;
                 }
             }
-            $tableData[] = $cells;
-            if ($isHeader && $headerRowIndex === null) {
-                $headerRowIndex = $index;
-            }
-        }
 
-        if ($tableData === []) {
-            return;
-        }
+            if ($tableData === []) {
+                return;
+            }
 
-        $options = [];
-        if ($headerRowIndex !== null) {
-            $options['headerRow'] = $headerRowIndex;
-            $headerStyle = $this->paragraphBuilder->markersToStyleString($headerMarkers);
-            if ($headerStyle !== '') {
-                $options['headerStyle'] = $headerStyle;
-            }
-            $headerBg = $this->pickUniformColor($headerBgCandidates);
-            if ($headerBg !== null) {
-                $options['headerBgColor'] = $headerBg;
-            }
-            $headerColor = $this->pickUniformColor($headerColorCandidates);
-            if ($headerColor !== null) {
-                $options['headerColor'] = $headerColor;
-            }
-        }
-
-        if ($tableStyle instanceof ComputedStyle) {
-            $map = $tableStyle->toArray();
-            if (isset($map['text-align'])) {
-                $align = strtolower($map['text-align']);
-                if (in_array($align, ['left', 'right', 'center'], true)) {
-                    $options['align'] = $align;
+            $options = [];
+            if ($headerRowIndex !== null) {
+                $options['headerRow'] = $headerRowIndex;
+                $headerStyle = $this->paragraphBuilder->markersToStyleString($headerMarkers);
+                if ($headerStyle !== '') {
+                    $options['headerStyle'] = $headerStyle;
+                }
+                $headerBg = $this->pickUniformColor($headerBgCandidates);
+                if ($headerBg !== null) {
+                    $options['headerBgColor'] = $headerBg;
+                }
+                $headerColor = $this->pickUniformColor($headerColorCandidates);
+                if ($headerColor !== null) {
+                    $options['headerColor'] = $headerColor;
                 }
             }
-            if (!isset($options['headerBgColor']) && isset($map['background-color']) && strtolower($map['background-color']) !== 'transparent') {
-                $options['headerBgColor'] = $map['background-color'];
+
+            if ($tableStyle instanceof ComputedStyle) {
+                $map = $tableStyle->toArray();
+                if (isset($map['text-align'])) {
+                    $align = strtolower($map['text-align']);
+                    if (in_array($align, ['left', 'right', 'center'], true)) {
+                        $options['align'] = $align;
+                    }
+                }
+                if (!isset($options['headerBgColor']) && isset($map['background-color']) && strtolower($map['background-color']) !== 'transparent') {
+                    $options['headerBgColor'] = $map['background-color'];
+                }
             }
-        }
 
-        if (!isset($options['fontSize']) && $tableFontSizeDeclared) {
-            $options['fontSize'] = $tableFontSize;
-        }
-        if ($tableLineHeightDeclared && $tableLineHeight !== null) {
-            $options['lineHeight'] = $tableLineHeight;
-        }
-
-        $pdf->addTable($tableData, $options);
-
-        $marginBottom = 0.0;
-        if ($tableStyle instanceof ComputedStyle) {
-            $map = $tableStyle->toArray();
-            if (isset($map['margin-bottom']) && strtolower($map['margin-bottom']) !== 'auto') {
-                $marginBottom = max(
-                    0.0,
-                    $this->lengthConverter->parseLengthOptional($map['margin-bottom'], $tableFontSize, 0.0)
-                );
+            if (!isset($options['fontSize']) && $tableFontSizeDeclared) {
+                $options['fontSize'] = $tableFontSize;
             }
-        }
+            if ($tableLineHeightDeclared && $tableLineHeight !== null) {
+                $options['lineHeight'] = $tableLineHeight;
+            }
 
-        $lineGap = $pdf->getStyleManager()->getLineHeight();
-        $spacer = max($marginBottom, $lineGap);
-        if ($spacer > 0.0) {
-            $pdf->addSpacer($spacer);
+            $pdf->addTable($tableData, $options);
+
+            $marginBottom = 0.0;
+            if ($tableStyle instanceof ComputedStyle) {
+                $map = $tableStyle->toArray();
+                if (isset($map['margin-bottom']) && strtolower($map['margin-bottom']) !== 'auto') {
+                    $marginBottom = max(
+                        0.0,
+                        $this->lengthConverter->parseLengthOptional($map['margin-bottom'], $tableFontSize, 0.0)
+                    );
+                }
+            }
+
+            $lineGap = $pdf->getStyleManager()->getLineHeight();
+            $spacer = max($marginBottom, $lineGap);
+            if ($spacer > 0.0) {
+                $pdf->addSpacer($spacer);
+            }
+        } finally {
+            $this->paragraphBuilder->endFontContext();
         }
     }
 

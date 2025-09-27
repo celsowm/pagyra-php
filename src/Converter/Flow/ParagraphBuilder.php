@@ -3,14 +3,33 @@ declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Converter\Flow;
 
+use Celsowm\PagyraPhp\Core\PdfBuilder;
+use Celsowm\PagyraPhp\Font\Resolve\FontResolver;
 use Celsowm\PagyraPhp\Html\HtmlDocument;
 use Celsowm\PagyraPhp\Html\Style\ComputedStyle;
 use Celsowm\PagyraPhp\Text\PdfRun;
 
 final class ParagraphBuilder
 {
-    public function __construct(private LengthConverter $lengthConverter)
+    private ?FontResolver $fontResolver;
+    private ?PdfBuilder $currentPdf = null;
+
+    public function __construct(
+        private LengthConverter $lengthConverter,
+        ?FontResolver $fontResolver = null
+    ) {
+        $this->fontResolver = $fontResolver;
+    }
+
+    public function beginFontContext(PdfBuilder $pdf, FontResolver $fontResolver): void
     {
+        $this->currentPdf = $pdf;
+        $this->fontResolver = $fontResolver;
+    }
+
+    public function endFontContext(): void
+    {
+        $this->currentPdf = null;
     }
 
     public function buildParagraphOptions(ComputedStyle $style): array
@@ -74,6 +93,15 @@ final class ParagraphBuilder
 
         if (isset($map['text-decoration']) && str_contains(strtolower($map['text-decoration']), 'underline')) {
             $options['style'] = $this->appendStyleMarker($options['style'] ?? '', 'underline');
+        }
+
+        $fontFamily = $this->extractFontFamily($map);
+        if ($fontFamily !== null) {
+            $markers = $this->styleMarkersFromOptions($options);
+            $alias = $this->resolveFontAlias($fontFamily, $markers);
+            if ($alias !== null) {
+                $options['fontAlias'] = $alias;
+            }
         }
 
         return $options;
@@ -215,6 +243,14 @@ final class ParagraphBuilder
             }
         }
 
+        $fontFamily = $this->extractFontFamily($styleMap);
+        if ($fontFamily !== null) {
+            $alias = $this->resolveFontAlias($fontFamily, $markers);
+            if ($alias !== null) {
+                $options['fontAlias'] = $alias;
+            }
+        }
+
         return $options;
     }
 
@@ -343,6 +379,16 @@ final class ParagraphBuilder
             $options['style'] = $styleString;
         }
 
+        if (!isset($options['fontAlias'])) {
+            $fontFamily = $this->extractFontFamily($styleMap);
+            if ($fontFamily !== null) {
+                $alias = $this->resolveFontAlias($fontFamily, $markers);
+                if ($alias !== null) {
+                    $options['fontAlias'] = $alias;
+                }
+            }
+        }
+
         return $options;
     }
 
@@ -396,5 +442,28 @@ final class ParagraphBuilder
         }
 
         return null;
+    }
+
+    private function extractFontFamily(array $styleMap): ?string
+    {
+        if (isset($styleMap['font-family'])) {
+            $candidate = trim((string)$styleMap['font-family']);
+            if ($candidate !== '' && strtolower($candidate) !== 'inherit') {
+                return $candidate;
+            }
+        }
+        return null;
+    }
+
+    private function resolveFontAlias(?string $fontFamily, array $markers): ?string
+    {
+        if ($fontFamily === null || $fontFamily === '') {
+            return null;
+        }
+        if ($this->fontResolver === null || $this->currentPdf === null) {
+            return null;
+        }
+        $style = $this->markersToStyleString($markers);
+        return $this->fontResolver->resolve($this->currentPdf, $fontFamily, $style);
     }
 }

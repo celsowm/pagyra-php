@@ -10,6 +10,7 @@ use Celsowm\PagyraPhp\Converter\Flow\MarginCalculator;
 use Celsowm\PagyraPhp\Converter\Flow\ParagraphBuilder;
 use Celsowm\PagyraPhp\Converter\Flow\TableFlowRenderer;
 use Celsowm\PagyraPhp\Core\PdfBuilder;
+use Celsowm\PagyraPhp\Font\Resolve\FontResolver;
 use Celsowm\PagyraPhp\Html\HtmlDocument;
 use Celsowm\PagyraPhp\Html\Style\ComputedStyle;
 
@@ -25,15 +26,17 @@ final class FlowRenderer
         ?TableFlowRenderer $tableRenderer = null,
         ?ParagraphBuilder $paragraphBuilder = null,
         ?MarginCalculator $marginCalculator = null,
-        ?LengthConverter $lengthConverter = null
+        ?LengthConverter $lengthConverter = null,
+        ?FontResolver $fontResolver = null
     ) {
         $lengthConverter ??= new LengthConverter();
-        $paragraphBuilder ??= new ParagraphBuilder($lengthConverter);
+        $fontResolver ??= new FontResolver();
+        $paragraphBuilder ??= new ParagraphBuilder($lengthConverter, $fontResolver);
         $marginCalculator ??= new MarginCalculator($lengthConverter);
 
-        $this->blockRenderer = $blockRenderer ?? new BlockFlowRenderer($paragraphBuilder, $marginCalculator, $lengthConverter);
-        $this->listRenderer = $listRenderer ?? new ListFlowRenderer($paragraphBuilder, $marginCalculator);
-        $this->tableRenderer = $tableRenderer ?? new TableFlowRenderer($paragraphBuilder, $lengthConverter);
+        $this->blockRenderer = $blockRenderer ?? new BlockFlowRenderer($paragraphBuilder, $marginCalculator, $lengthConverter, $fontResolver);
+        $this->listRenderer = $listRenderer ?? new ListFlowRenderer($paragraphBuilder, $marginCalculator, $fontResolver);
+        $this->tableRenderer = $tableRenderer ?? new TableFlowRenderer($paragraphBuilder, $lengthConverter, $fontResolver);
     }
 
     /**

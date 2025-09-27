@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Celsowm\PagyraPhp\Converter\Flow;
 
 use Celsowm\PagyraPhp\Core\PdfBuilder;
+use Celsowm\PagyraPhp\Font\Resolve\FontResolver;
 use Celsowm\PagyraPhp\Html\HtmlDocument;
 use Celsowm\PagyraPhp\Html\Style\ComputedStyle;
 
@@ -11,7 +12,8 @@ final class ListFlowRenderer
 {
     public function __construct(
         private ParagraphBuilder $paragraphBuilder,
-        private MarginCalculator $marginCalculator
+        private MarginCalculator $marginCalculator,
+        private FontResolver $fontResolver
     ) {
     }
 
@@ -44,33 +46,38 @@ final class ListFlowRenderer
             }
         }
 
-        $startByLevel = [];
-        $conversion = $this->convertListSpec($flow, $computedStyles, $document, 0, $startByLevel);
-        $items = $conversion['items'];
-        if ($items === []) {
-            return;
-        }
+        $this->paragraphBuilder->beginFontContext($pdf, $this->fontResolver);
+        try {
+            $startByLevel = [];
+            $conversion = $this->convertListSpec($flow, $computedStyles, $document, 0, $startByLevel);
+            $items = $conversion['items'];
+            if ($items === []) {
+                return;
+            }
 
-        $typeByLevel = $conversion['types'];
-        $options = $this->buildListOptions(
-            $listTag,
-            $style instanceof ComputedStyle ? $style : null,
-            $typeByLevel,
-            $startByLevel
-        );
+            $typeByLevel = $conversion['types'];
+            $options = $this->buildListOptions(
+                $listTag,
+                $style instanceof ComputedStyle ? $style : null,
+                $typeByLevel,
+                $startByLevel
+            );
 
-        $marginTop = (float)($options['marginTop'] ?? 0.0);
-        $marginBottom = (float)($options['marginBottom'] ?? 0.0);
-        unset($options['marginTop'], $options['marginBottom']);
+            $marginTop = (float)($options['marginTop'] ?? 0.0);
+            $marginBottom = (float)($options['marginBottom'] ?? 0.0);
+            unset($options['marginTop'], $options['marginBottom']);
 
-        if ($marginTop > 0.0) {
-            $pdf->addSpacer($marginTop);
-        }
+            if ($marginTop > 0.0) {
+                $pdf->addSpacer($marginTop);
+            }
 
-        $pdf->addList($items, $options);
+            $pdf->addList($items, $options);
 
-        if ($marginBottom > 0.0) {
-            $pdf->addSpacer($marginBottom);
+            if ($marginBottom > 0.0) {
+                $pdf->addSpacer($marginBottom);
+            }
+        } finally {
+            $this->paragraphBuilder->endFontContext();
         }
     }
 
