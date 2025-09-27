@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 
 namespace Celsowm\PagyraPhp\Converter\Flow;
@@ -21,10 +20,7 @@ final class BlockFlowRenderer
         private LengthConverter $lengthConverter
     ) {}
 
-    /**
-     * @param array<string, mixed> $flow
-     * @param array<string, ComputedStyle> $computedStyles
-     */
+    
     public function render(array $flow, PdfBuilder $pdf, HtmlDocument $document, array $computedStyles): void
     {
         $style = $flow['style'] ?? null;
@@ -47,7 +43,7 @@ final class BlockFlowRenderer
             $baseFontSize
         );
 
-        // Get block-level styling
+        
         $margins = $this->marginCalculator->extractMarginBox($style, $baseFontSize);
         $__tag = $flow['tag'] ?? '?';
         $__id  = $flow['nodeId'] ?? '?';
@@ -67,7 +63,7 @@ final class BlockFlowRenderer
 
         [$blockOptions, $imageInstruction] = $this->prepareImageRendering($blockOptions, $imageResource, $style, $flow, $baseFontSize);
 
-        // Check for gradients
+        
         $bgImageValue = $map['background-image'] ?? ($map['background'] ?? null);
         if (is_string($bgImageValue) && str_contains($bgImageValue, 'linear-gradient')) {
             $gp = new CssGradientParser();
@@ -78,7 +74,7 @@ final class BlockFlowRenderer
             $blockOptions['bggradient'] = $bgGradient;
             $painter = new PdfBackgroundPainter($pdf, new PdfGradientFactory($pdf), new PdfShadingRegistry($pdf));
         } else {
-            // Check for solid background color
+            
             $bgColorValue = $map['background-color'] ?? ($map['background'] ?? null);
             if (
                 is_string($bgColorValue) &&
@@ -89,27 +85,34 @@ final class BlockFlowRenderer
                 $blockOptions['bgcolor'] = $bgColorValue;
             }
         }
+        
+        if (isset($map['text-align'])) {
+            $align = strtolower($map['text-align']);
+            if (in_array($align, ['left', 'right', 'center'], true)) {
+                $blockOptions['align'] = $align;
+            }
+        }
 
-        // Use PdfBlockBuilder to render the block's container and background
+
+        
         $block = new PdfBlockBuilder($pdf, $blockOptions, $painter);
 
         if ($imageInstruction !== null) {
             $this->renderImageInstruction($block, $imageInstruction);
         }
 
-        // Add the text content (runs), if any exist
+        
         if ($runs !== []) {
             $block->addParagraphRuns($runs, $paragraphOptions);
         }
 
-        // Render nested children inside this block (if any)
+        
         if (!empty($flow['children']) && is_array($flow['children'])) {
             $this->renderChildFlows($flow['children'], $block, $pdf, $document, $computedStyles);
         }
 
         $block->end();
     }
-
 
     private function renderChildFlows(array $children, PdfBlockBuilder $parent, PdfBuilder $pdf, HtmlDocument $document, array $computedStyles): void
     {
@@ -124,7 +127,7 @@ final class BlockFlowRenderer
                 continue;
             }
 
-            // type === 'block'
+            
             $style = $child['style'] ?? null;
             $opts  = [];
             $painter = null;
@@ -132,11 +135,11 @@ final class BlockFlowRenderer
             $imageInstructionChild = null;
 
             if ($style instanceof ComputedStyle) {
-                // CORREÇÃO: Calcular opções de parágrafo PRIMEIRO para obter o tamanho da fonte.
+                
                 $paraOptions = $this->paragraphBuilder->buildParagraphOptions($style);
                 $baseFontSize = (float)($paraOptions['size'] ?? 12.0);
 
-                // CORREÇÃO: Usar o tamanho da fonte correto para calcular margens e preenchimento.
+                
                 $margins = $this->marginCalculator->extractMarginBox($style, $baseFontSize);
                 $padding = $this->marginCalculator->extractPaddingBox($style, $baseFontSize);
                 $opts = [
@@ -157,7 +160,7 @@ final class BlockFlowRenderer
                     $painter = new PdfBackgroundPainter($pdf, new PdfGradientFactory($pdf), new PdfShadingRegistry($pdf));
                 } else {
                     $bgColorValue = $map['background-color'] ?? ($map['background'] ?? null);
-                    if (is_string($bgColorValue) && preg_match('/^#?[0-9a-fA-F]{3,8}$/', $bgColorValue)) {
+                    if (is_string($bgColorValue) && preg_match('/^#|^rgb/', $bgColorValue)) {
                         $opts['bgcolor'] = $bgColorValue;
                     }
                 }
@@ -200,16 +203,57 @@ final class BlockFlowRenderer
             });
         }
     }
-    /**
-     * @param array<string, mixed>|null $imageResource
-     * @param array<string, mixed> $flow
-     * @return array{0: array<string, mixed>, 1: array<string, mixed>|null}
-     */
+    
     private function prepareImageRendering(array $blockOptions, ?array $imageResource, ?ComputedStyle $style, array $flow, float $baseFontSize): array
     {
         if ($imageResource === null) {
             return [$blockOptions, null];
         }
+
+        
+        $finalWidth = null;
+        $finalHeight = null;
+        $aspectRatio = 1.0;
+
+        if (isset($imageResource['width'], $imageResource['height']) && $imageResource['width'] > 0) {
+            $aspectRatio = (float)$imageResource['height'] / (float)$imageResource['width'];
+        }
+
+        if ($style instanceof ComputedStyle) {
+            $styleMap = $style->toArray();
+            
+            $widthValue = $styleMap['width'] ?? null;
+            if (is_string($widthValue)) {
+                $parsedWidth = $this->parseCssLength($widthValue, $baseFontSize);
+                if ($parsedWidth !== null && $parsedWidth > 0) {
+                    $finalWidth = $parsedWidth;
+                }
+            }
+            
+            $heightValue = $styleMap['height'] ?? null;
+            if (is_string($heightValue) && strtolower($heightValue) !== 'auto') {
+                $parsedHeight = $this->parseCssLength($heightValue, $baseFontSize);
+                if ($parsedHeight !== null && $parsedHeight > 0) {
+                    $finalHeight = $parsedHeight;
+                }
+            }
+        }
+        
+        if ($finalWidth !== null) {
+            $blockOptions['width'] = $finalWidth;
+            if ($finalHeight === null) {
+                
+                $finalHeight = $finalWidth * $aspectRatio;
+            }
+        }
+        
+        if ($finalHeight !== null) {
+            $blockOptions['minHeight'] = $finalHeight;
+            $blockOptions['maxHeight'] = $finalHeight;
+        }
+
+        
+
 
         $type = strtolower((string)($imageResource['type'] ?? ''));
         if ($type === 'svg') {
@@ -217,13 +261,18 @@ final class BlockFlowRenderer
             if (!isset($blockOptions['bgcolor']) && isset($imageResource['background']) && is_string($imageResource['background']) && $imageResource['background'] !== '') {
                 $blockOptions['bgcolor'] = $imageResource['background'];
             }
-            if (isset($imageResource['height']) && is_numeric($imageResource['height'])) {
-                $blockOptions['minHeight'] = max((float)($blockOptions['minHeight'] ?? 0.0), (float)$imageResource['height']);
+            
+            
+            if ($finalHeight !== null) {
+                $textHeight = (float)($textSpec['fontSize'] ?? 12.0);
+                $paddingY = max(0.0, ($finalHeight - $textHeight) / 2.0);
+                
+                if ($this->paddingIsEmpty($blockOptions['padding'])) {
+                    $blockOptions['padding'] = [$paddingY, 0, $paddingY, 0];
+                }
             }
-            if (isset($blockOptions['padding']) && is_array($blockOptions['padding']) && $this->paddingIsEmpty($blockOptions['padding']) && isset($imageResource['height'], $textSpec['fontSize'])) {
-                $pad = max(0.0, ((float)$imageResource['height'] - (float)$textSpec['fontSize']) / 2.0);
-                $blockOptions['padding'] = [$pad, 0.0, $pad, 0.0];
-            }
+            
+
             if (!isset($textSpec['align'])) {
                 $textSpec['align'] = $this->inferImageAlignment($style, $flow);
             }
@@ -272,25 +321,30 @@ final class BlockFlowRenderer
             }
 
             $fontSize = (float)($textSpec['fontSize'] ?? 12.0);
+            
+            // --- START OF FINAL FIX ---
+            // Ensure the extracted color from SVG fill is used. Default to white as a safe fallback for logos.
+            $textColor = $textSpec['color'] ?? 'white';
+            
             $paragraphOptions = [
                 'align' => $textSpec['align'] ?? 'center',
                 'size' => $fontSize,
-                'lineHeight' => $fontSize,
-                'color' => $textSpec['color'] ?? '#000000',
+                'lineHeight' => $fontSize, 
+                'color' => $textColor,
             ];
+            // --- END OF FINAL FIX ---
+            
             $style = (string)($textSpec['style'] ?? '');
             if ($style !== '') {
                 $paragraphOptions['style'] = $style;
             }
 
+            
             $block->addParagraph($content, $paragraphOptions);
         }
     }
 
-    /**
-     * @param array<string, mixed>|null $imageResource
-     * @return array<string, mixed>
-     */
+    
     private function buildBitmapImageOptions(?ComputedStyle $style, array $flow, float $baseFontSize, ?array $imageResource): array
     {
         $options = [];
