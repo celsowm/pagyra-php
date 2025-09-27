@@ -8,19 +8,48 @@ use Celsowm\PagyraPhp\Html\HtmlDocument;
 
 final class FlowComposer
 {
+    /** @var array<string, array<string, mixed>> */
+    private array $imageResources = [];
     /**
      * @param array<string, ComputedStyle> $styles
      * @return array<int, array<string, mixed>>
      */
-    public function compose(HtmlDocument $document, array $styles): array
+    public function compose(HtmlDocument $document, array $styles, array $imageResources = []): array
     {
         $flows = [];
         $__registry = [];
-
+        $this->imageResources = $imageResources;
         $document->eachElement(function (array $node) use (&$flows, $styles, & $__registry): void {
             $tag = strtolower((string)($node['tag'] ?? ''));
             $nidTmp = (string)($node['nodeId'] ?? ''); if ($nidTmp !== '') { $__registry[$nidTmp] = $node; }
             if ($tag === 'style' || $tag === 'script') {
+                return;
+            }
+
+            if ($tag === 'img') {
+                $nodeId = (string)($node['nodeId'] ?? '');
+                if ($nodeId === '') {
+                    return;
+                }
+
+                $ancestorIds = [];
+                foreach (($node['ancestors'] ?? []) as $__anc) {
+                    $aid = (string)($__anc['nodeId'] ?? '');
+                    if ($aid !== '') {
+                        $ancestorIds[] = $aid;
+                    }
+                }
+
+                $flows[] = [
+                    'type' => 'block',
+                    'tag' => 'img',
+                    'nodeId' => $nodeId,
+                    'runs' => [],
+                    'style' => $styles[$nodeId] ?? null,
+                    'attributes' => $node['attributes'] ?? [],
+                    'image' => $this->imageResources[$nodeId] ?? null,
+                    'ancestorIds' => $ancestorIds,
+                ];
                 return;
             }
 
@@ -226,6 +255,18 @@ private function hasAncestorTag(array $node, string $tag): bool
                 continue;
             }
 
+            if ($childTag === 'img') {
+                $alt = trim((string)($child['attributes']['alt'] ?? ''));
+                if ($alt !== '') {
+                    $runs[] = [
+                        'text' => $alt,
+                        'styleChain' => $chain,
+                        'linkNodeId' => $linkNodeId,
+                    ];
+                }
+                continue;
+            }
+
             if ($childTag === 'br') {
                 $runs[] = [
                     'text' => "\n",
@@ -416,6 +457,19 @@ private function hasAncestorTag(array $node, string $tag): bool
                 continue;
             }
 
+            if ($tag === 'img') {
+                $childrenFlows[] = [
+                    'type'       => 'block',
+                    'tag'        => 'img',
+                    'nodeId'     => $childId,
+                    'runs'       => [],
+                    'style'      => $styles[$childId] ?? null,
+                    'attributes' => $child['attributes'] ?? [],
+                    'image'      => $this->imageResources[$childId] ?? null,
+                ];
+                continue;
+            }
+
             $childId = (string)($child['nodeId'] ?? '');
             if ($childId === '') continue;
 
@@ -544,3 +598,6 @@ private function hasAncestorTag(array $node, string $tag): bool
         return $out;
     }
 }
+
+
+
