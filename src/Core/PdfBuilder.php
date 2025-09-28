@@ -5,13 +5,9 @@ declare(strict_types=1);
 namespace Celsowm\PagyraPhp\Core;
 
 use Celsowm\PagyraPhp\Block\PdfBlockBuilder;
-use Celsowm\PagyraPhp\Block\PdfBlockRenderer;
 use Celsowm\PagyraPhp\Color\PdfColor;
 use Celsowm\PagyraPhp\Image\PdfImageManager;
 use Celsowm\PagyraPhp\Core\PdfLayoutManager;
-use Celsowm\PagyraPhp\Text\PdfListRenderer;
-use Celsowm\PagyraPhp\Text\PdfParagraphBuilder;
-use Celsowm\PagyraPhp\Text\PdfRun;
 use Celsowm\PagyraPhp\Core\PdfStreamBuilder;
 use Celsowm\PagyraPhp\Core\HeaderManager;
 use Celsowm\PagyraPhp\Core\FooterManager;
@@ -19,8 +15,11 @@ use Celsowm\PagyraPhp\Core\FixedElementManager;
 use Celsowm\PagyraPhp\Style\PdfStyleManager;
 use Celsowm\PagyraPhp\Graphics\State\PdfExtGStateManager;
 use Celsowm\PagyraPhp\Font\PdfFontManager;
-use Celsowm\PagyraPhp\Table\PdfTableBuilder;
 use Celsowm\PagyraPhp\Text\PdfTextRenderer;
+use Celsowm\PagyraPhp\Text\PdfListRenderer;
+use Celsowm\PagyraPhp\Text\PdfRun;
+use Celsowm\PagyraPhp\Converter\Flow\PdfParagraphBuilder;
+use Celsowm\PagyraPhp\Table\PdfTableBuilder;
 use Celsowm\PagyraPhp\Writer\PdfWriter;
 
 final class PdfBuilder
@@ -106,6 +105,11 @@ final class PdfBuilder
     public function getImageManager(): PdfImageManager
     {
         return $this->imageManager;
+    }
+
+    public function getColorManager(): PdfColor
+    {
+        return $this->colorManager;
     }
 
     public function getPageWidth(): float
