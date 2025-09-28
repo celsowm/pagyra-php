@@ -899,6 +899,7 @@ $initialCursorY = $this->layoutManager->getCursorY();
             throw new \LogicException("Defina uma fonte com setFont() antes de adicionar uma tabela.");
         }
         if (empty($data)) return;
+        if ($this->measurementMode) return;
 
         $this->styleManager->push();
 
