@@ -274,6 +274,10 @@ final class BlockFlowRenderer
         if ($imageResource === null) {
             return [$blockOptions, null];
         }
+        $inferredAlign = $this->inferImageAlignment($style, $flow);
+        if ((($blockOptions['align'] ?? 'left') === 'left') && $inferredAlign !== 'left') {
+            $blockOptions['align'] = $inferredAlign;
+        }
 
         
         $finalWidth = null;
@@ -346,7 +350,7 @@ final class BlockFlowRenderer
             
 
             if (!isset($textSpec['align'])) {
-                $textSpec['align'] = $this->inferImageAlignment($style, $flow);
+                $textSpec['align'] = $inferredAlign;
             }
             if (!isset($textSpec['fontSize']) && isset($textSpec['size'])) {
                 $textSpec['fontSize'] = (float)$textSpec['size'];
@@ -476,6 +480,11 @@ final class BlockFlowRenderer
         $align = 'left';
         if ($style instanceof ComputedStyle) {
             $map = $style->toArray();
+
+            if ($this->styleHasAutoHorizontalMargins($map)) {
+                $align = 'center';
+            }
+
             $candidate = strtolower((string)($map['text-align'] ?? ''));
             if (in_array($candidate, ['left', 'right', 'center'], true)) {
                 $align = $candidate;
@@ -491,6 +500,49 @@ final class BlockFlowRenderer
         }
 
         return $align;
+    }
+
+    private function styleHasAutoHorizontalMargins(array $styleMap): bool
+    {
+        $left = $this->normalizeMarginKeyword($styleMap['margin-left'] ?? null);
+        $right = $this->normalizeMarginKeyword($styleMap['margin-right'] ?? null);
+        if ($left === 'auto' && $right === 'auto') {
+            return true;
+        }
+
+        $margin = $styleMap['margin'] ?? null;
+        if (!is_string($margin)) {
+            return false;
+        }
+
+        $tokens = preg_split('/\s+/', trim($margin)) ?: [];
+        $tokens = array_values(array_filter(array_map('trim', $tokens), static fn($token) => $token !== ''));
+        if ($tokens === []) {
+            return false;
+        }
+
+        $count = count($tokens);
+        if ($count === 1) {
+            $tokens = [$tokens[0], $tokens[0], $tokens[0], $tokens[0]];
+        } elseif ($count === 2) {
+            $tokens = [$tokens[0], $tokens[1], $tokens[0], $tokens[1]];
+        } elseif ($count === 3) {
+            $tokens = [$tokens[0], $tokens[1], $tokens[2], $tokens[1]];
+        } else {
+            $tokens = array_slice($tokens, 0, 4);
+        }
+
+        return strtolower($tokens[1]) === 'auto' && strtolower($tokens[3]) === 'auto';
+    }
+
+    private function normalizeMarginKeyword(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($value));
+        return $normalized === '' ? null : $normalized;
     }
 
     private function parseCssLength(string $value, float $reference): ?float
@@ -548,4 +600,5 @@ final class BlockFlowRenderer
     }
 
 }
+
 
