@@ -12,6 +12,7 @@ use Celsowm\PagyraPhp\Graphics\Painter\PdfBackgroundPainter;
 use Celsowm\PagyraPhp\Graphics\Gradient\PdfGradientFactory;
 use Celsowm\PagyraPhp\Graphics\Shading\PdfShadingRegistry;
 use Celsowm\PagyraPhp\Block\PdfBlockBuilder;
+use Celsowm\PagyraPhp\Text\PdfRun;
 
 final class BlockFlowRenderer
 {
@@ -102,7 +103,7 @@ final class BlockFlowRenderer
         $block = new PdfBlockBuilder($pdf, $blockOptions, $painter);
 
         if ($imageInstruction !== null) {
-            $this->renderImageInstruction($block, $imageInstruction);
+            $this->renderImageInstruction($block, $imageInstruction, $pdf);
         }
 
         
@@ -197,7 +198,7 @@ final class BlockFlowRenderer
                     $baseFontSize
                 );
                 if ($imageInstructionChild !== null) {
-                    $this->renderImageInstruction($nested, $imageInstructionChild);
+                    $this->renderImageInstruction($nested, $imageInstructionChild, $pdf);
                 }
                 if ($runsChild !== []) {
                     $nested->addParagraphRuns($runsChild, $paraOptions);
@@ -245,6 +246,13 @@ final class BlockFlowRenderer
             }
         }
         
+        if ($finalWidth === null && isset($imageResource['width']) && is_numeric($imageResource['width']) && (float)$imageResource['width'] > 0.0) {
+            $finalWidth = (float)$imageResource['width'];
+        }
+
+        if ($finalHeight === null && isset($imageResource['height']) && is_numeric($imageResource['height']) && (float)$imageResource['height'] > 0.0) {
+            $finalHeight = (float)$imageResource['height'];
+        }
         if ($finalWidth !== null) {
             $blockOptions['width'] = $finalWidth;
             if ($finalHeight === null) {
@@ -308,7 +316,7 @@ final class BlockFlowRenderer
         return [$blockOptions, $instruction];
     }
 
-    private function renderImageInstruction(PdfBlockBuilder $block, array $instruction): void
+    private function renderImageInstruction(PdfBlockBuilder $block, array $instruction, PdfBuilder $pdf): void
     {
         $type = strtolower((string)($instruction['type'] ?? ''));
         if ($type === 'bitmap') {
@@ -327,30 +335,37 @@ final class BlockFlowRenderer
             }
 
             $fontSize = (float)($textSpec['fontSize'] ?? 12.0);
-            
-            // --- START OF FINAL FIX ---
-            // Ensure the extracted color from SVG fill is used. Default to white as a safe fallback for logos.
             $textColor = $textSpec['color'] ?? 'white';
-            
+            $styleValue = trim((string)($textSpec['style'] ?? ''));
+
             $paragraphOptions = [
                 'align' => $textSpec['align'] ?? 'center',
                 'size' => $fontSize,
-                'lineHeight' => $fontSize, 
+                'lineHeight' => $fontSize,
+            ];
+
+            $runOptions = [
+                'size' => $fontSize,
                 'color' => $textColor,
             ];
-            // --- END OF FINAL FIX ---
-            
-            $style = (string)($textSpec['style'] ?? '');
-            if ($style !== '') {
-                $paragraphOptions['style'] = $style;
+
+            $markers = $this->paragraphBuilder->styleMarkersFromOptions(['style' => $styleValue]);
+            $styleMarkers = $this->paragraphBuilder->markersToStyleString($markers);
+            if ($styleMarkers !== '') {
+                $runOptions['style'] = $styleMarkers;
             }
 
-            
-            $block->addParagraph($content, $paragraphOptions);
+            $fontFamily = trim((string)($textSpec['fontFamily'] ?? ''));
+            if ($fontFamily !== '') {
+                $alias = $this->fontResolver->resolve($pdf, $fontFamily, $styleMarkers);
+                if ($alias !== null) {
+                    $runOptions['fontAlias'] = $alias;
+                }
+            }
+
+            $block->addParagraphRuns([new PdfRun($content, $runOptions)], $paragraphOptions);
         }
     }
-
-    
     private function buildBitmapImageOptions(?ComputedStyle $style, array $flow, float $baseFontSize, ?array $imageResource): array
     {
         $options = [];
@@ -475,3 +490,4 @@ final class BlockFlowRenderer
     }
 
 }
+

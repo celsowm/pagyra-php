@@ -1657,7 +1657,17 @@ $initialCursorY = $this->layoutManager->getCursorY();
                     'block' => function () use ($el) {
                         if (isset($el['builder']) && method_exists($el['builder'], 'getDefinition')) {
                             $def = $el['builder']->getDefinition();
-                            $this->measureBlockHeight((array)($def['elements'] ?? []), (array)($def['options'] ?? []));
+                            $childElements = (array)($def['elements'] ?? []);
+                            $childOptions  = (array)($def['options'] ?? []);
+                            $height = $this->measureBlockHeight($childElements, $childOptions);
+                            $position = strtolower((string)($childOptions['position'] ?? 'relative'));
+                            if ($position !== 'absolute' && $position !== 'fixed') {
+                                $margins = $this->normalizePadding($childOptions['margin'] ?? 0);
+                                $total = $margins[0] + $height + $margins[2];
+                                if ($total > 0.0) {
+                                    $this->setCursorY($this->getCursorY() - $total);
+                                }
+                            }
                         }
                     },
                     'runs' => function () use ($el) {

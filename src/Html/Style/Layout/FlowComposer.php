@@ -124,7 +124,13 @@ final class FlowComposer
             }
 
             $runs = $this->collectRuns($node);
-
+            $ancestorIds = [];
+            foreach (($node['ancestors'] ?? []) as $__anc) {
+                $aid = (string)($__anc['nodeId'] ?? '');
+                if ($aid !== '') {
+                    $ancestorIds[] = $aid;
+                }
+            }
             // --- START OF THE CRITICAL FIX ---
             // A block is valid if it has text (runs) OR if it has styling
             // that makes it visible (background, padding, border etc.)
@@ -146,6 +152,7 @@ final class FlowComposer
                 'nodeId' => $nodeId,
                 'runs' => $runs,
                 'style' => $styles[$nodeId] ?? null,
+                'ancestorIds' => $ancestorIds,
             ];
         });
 
@@ -155,7 +162,7 @@ final class FlowComposer
 
     private function isBlockTag(string $tag): bool
     {
-        return in_array($tag, ['p', 'div', 'li', 'blockquote', 'section', 'article', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol'], true);
+        return in_array($tag, ['body', 'p', 'div', 'li', 'blockquote', 'section', 'article', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol'], true);
     }
 
     private function hasNestedBlockChild(array $node): bool
@@ -598,6 +605,3 @@ private function hasAncestorTag(array $node, string $tag): bool
         return $out;
     }
 }
-
-
-

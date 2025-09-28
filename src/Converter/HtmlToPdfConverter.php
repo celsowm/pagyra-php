@@ -257,33 +257,96 @@ final class HtmlToPdfConverter
             'style' => '',
             'align' => 'center',
         ];
+        $styleTokens = [];
 
         foreach ($xml->children() as $child) {
-            if ($child->getName() === 'text') {
-                $textSpec['content'] = trim((string)$child);
-                $fill = (string)($child['fill'] ?? '');
-                if ($fill !== '') {
-                    $textSpec['color'] = $fill;
-                }
-                $fontSizeAttr = (string)($child['font-size'] ?? '');
-                $fontSizeParsed = $this->parseSvgLength($fontSizeAttr);
-                if ($fontSizeParsed !== null && $fontSizeParsed > 0) {
-                    $textSpec['fontSize'] = $fontSizeParsed;
-                }
-                $fontWeight = strtolower((string)($child['font-weight'] ?? ''));
-                if ($fontWeight === 'bold' || $fontWeight === 'bolder' || (is_numeric($fontWeight) && (int)$fontWeight >= 600)) {
-                    $textSpec['style'] = 'bold';
-                }
-                $anchor = strtolower((string)($child['text-anchor'] ?? ''));
-                if ($anchor === 'start') {
-                    $textSpec['align'] = 'left';
-                } elseif ($anchor === 'end') {
-                    $textSpec['align'] = 'right';
-                } elseif ($anchor === 'middle') {
-                    $textSpec['align'] = 'center';
-                }
-                break;
+            if ($child->getName() !== 'text') {
+                continue;
             }
+
+            $textSpec['content'] = trim((string)$child);
+            $inlineStyle = (string)($child['style'] ?? '');
+
+            $fill = (string)($child['fill'] ?? '');
+            if ($fill === '') {
+                $fillStyle = $this->extractInlineStyleValue($inlineStyle, 'fill');
+                if ($fillStyle !== null && $fillStyle !== '') {
+                    $fill = $fillStyle;
+                }
+            }
+            if ($fill !== '') {
+                $textSpec['color'] = $fill;
+            }
+
+            $fontSizeAttr = (string)($child['font-size'] ?? '');
+            if ($fontSizeAttr === '') {
+                $fontSizeInline = $this->extractInlineStyleValue($inlineStyle, 'font-size');
+                if ($fontSizeInline !== null) {
+                    $fontSizeAttr = (string)$fontSizeInline;
+                }
+            }
+            $fontSizeParsed = $this->parseSvgLength($fontSizeAttr);
+            if ($fontSizeParsed !== null && $fontSizeParsed > 0) {
+                $textSpec['fontSize'] = $fontSizeParsed;
+            }
+
+            $fontFamily = trim((string)($child['font-family'] ?? ''));
+            if ($fontFamily === '') {
+                $fontFamilyInline = $this->extractInlineStyleValue($inlineStyle, 'font-family');
+                if ($fontFamilyInline !== null) {
+                    $fontFamily = trim((string)$fontFamilyInline);
+                }
+            }
+            if ($fontFamily !== '') {
+                $textSpec['fontFamily'] = $fontFamily;
+            }
+
+            $fontWeight = strtolower((string)($child['font-weight'] ?? ''));
+            if ($fontWeight === '') {
+                $fontWeightInline = $this->extractInlineStyleValue($inlineStyle, 'font-weight');
+                if ($fontWeightInline !== null) {
+                    $fontWeight = strtolower(trim((string)$fontWeightInline));
+                }
+            }
+            if ($fontWeight === 'bold' || $fontWeight === 'bolder' || (is_numeric($fontWeight) && (int)$fontWeight >= 600)) {
+                if (!in_array('bold', $styleTokens, true)) {
+                    $styleTokens[] = 'bold';
+                }
+            }
+
+            $fontStyle = strtolower((string)($child['font-style'] ?? ''));
+            if ($fontStyle === '') {
+                $fontStyleInline = $this->extractInlineStyleValue($inlineStyle, 'font-style');
+                if ($fontStyleInline !== null) {
+                    $fontStyle = strtolower(trim((string)$fontStyleInline));
+                }
+            }
+            if ($fontStyle === 'italic' || $fontStyle === 'oblique') {
+                if (!in_array('italic', $styleTokens, true)) {
+                    $styleTokens[] = 'italic';
+                }
+            }
+
+            $anchor = strtolower((string)($child['text-anchor'] ?? ''));
+            if ($anchor === '') {
+                $anchorInline = $this->extractInlineStyleValue($inlineStyle, 'text-anchor');
+                if ($anchorInline !== null) {
+                    $anchor = strtolower(trim((string)$anchorInline));
+                }
+            }
+            if ($anchor === 'start') {
+                $textSpec['align'] = 'left';
+            } elseif ($anchor === 'end') {
+                $textSpec['align'] = 'right';
+            } elseif ($anchor === 'middle') {
+                $textSpec['align'] = 'center';
+            }
+
+            if ($styleTokens !== []) {
+                $textSpec['style'] = implode(' ', $styleTokens);
+            }
+
+            break;
         }
 
         if ($height === null) {
@@ -299,6 +362,31 @@ final class HtmlToPdfConverter
             'background' => $background,
             'text' => $textSpec,
         ];
+    }
+
+    private function extractInlineStyleValue(string $style, string $property): ?string
+    {
+        $style = trim($style);
+        if ($style === '') {
+            return null;
+        }
+
+        $declarations = preg_split('/;/', $style) ?: [];
+        foreach ($declarations as $declaration) {
+            $declaration = trim($declaration);
+            if ($declaration === '') {
+                continue;
+            }
+            $parts = array_map('trim', explode(':', $declaration, 2));
+            if (count($parts) !== 2) {
+                continue;
+            }
+            if (strtolower($parts[0]) === strtolower($property) && $parts[1] !== '') {
+                return $parts[1];
+            }
+        }
+
+        return null;
     }
 
     private function parseSvgLength(string $value): ?float

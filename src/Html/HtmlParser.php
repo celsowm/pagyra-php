@@ -27,16 +27,21 @@ final class HtmlParser
         libxml_use_internal_errors($previous);
 
         $roots = [];
-        $container = $dom->getElementsByTagName('body')->item(0) ?? $dom->documentElement;
-        if ($container !== null) {
-            foreach ($container->childNodes as $child) {
-                $converted = $this->convertNode($child, []);
+        $body = $dom->getElementsByTagName('body')->item(0);
+        if ($body instanceof \DOMElement) {
+            $convertedBody = $this->convertNode($body, []);
+            if ($convertedBody !== null) {
+                $roots[] = $convertedBody;
+            }
+        } else {
+            $container = $dom->documentElement;
+            if ($container instanceof \DOMElement) {
+                $converted = $this->convertNode($container, []);
                 if ($converted !== null) {
                     $roots[] = $converted;
                 }
             }
         }
-
         return new HtmlDocument($roots, $this->extractStylesheets($dom));
     }
 
