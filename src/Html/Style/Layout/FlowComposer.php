@@ -191,6 +191,24 @@ final class FlowComposer
         }
         return false;
     }
+    /**
+     * @param array<string, mixed> $flow
+     * @return array<string, mixed>
+     */
+    private function cloneFlowTree(array $flow): array
+    {
+        if (isset($flow['children']) && is_array($flow['children'])) {
+            $children = [];
+            foreach ($flow['children'] as $child) {
+                if (is_array($child)) {
+                    $children[] = $this->cloneFlowTree($child);
+                }
+            }
+            $flow['children'] = $children;
+        }
+        return $flow;
+    }
+
 private function hasAncestorTag(array $node, string $tag): bool
     {
         foreach ($node['ancestors'] ?? [] as $ancestor) {
@@ -554,20 +572,24 @@ private function hasAncestorTag(array $node, string $tag): bool
         $byId = [];
         foreach ($flows as $idx => $f) {
             $nid = (string)($f['nodeId'] ?? '');
-            if ($nid !== '') $byId[$nid] = $idx;
+            if ($nid !== '') {
+                $byId[$nid] = $idx;
+            }
         }
 
         $toRemove = [];
         for ($i = 0; $i < count($flows); $i++) {
             $f = $flows[$i];
             $nid = (string)($f['nodeId'] ?? '');
-            if ($nid === '') continue;
+            if ($nid === '') {
+                continue;
+            }
             $anc = $f['ancestorIds'] ?? null;
             $parentIdx = null;
 
             // Prefer the nearest ancestor (last in list) that is at top-level
             if (is_array($anc) && $anc !== []) {
-                for ($k = count($anc)-1; $k >= 0; $k--) {
+                for ($k = count($anc) - 1; $k >= 0; $k--) {
                     $cand = (string)$anc[$k];
                     if ($cand !== '' && isset($byId[$cand])) {
                         $parentIdx = $byId[$cand];
@@ -578,7 +600,7 @@ private function hasAncestorTag(array $node, string $tag): bool
 
             // Fallback heuristic: if previous flow looks like a container (div/section/etc.) with visible style, adopt
             if ($parentIdx === null && $i > 0) {
-                $prev = $flows[$i-1];
+                $prev = $flows[$i - 1];
                 $ptag = strtolower((string)($prev['tag'] ?? ''));
                 $pstyle = $prev['style'] ?? null;
                 $visible = false;
@@ -586,9 +608,9 @@ private function hasAncestorTag(array $node, string $tag): bool
                     $map = $pstyle->toArray();
                     $visible = !empty($map['padding']) || !empty($map['background']) || !empty($map['background-image']) || !empty($map['border']);
                 }
-                $isContainer = in_array($ptag, ['div','section','article','main','header','footer','nav','aside'], true);
+                $isContainer = in_array($ptag, ['div', 'section', 'article', 'main', 'header', 'footer', 'nav', 'aside'], true);
                 if ($isContainer && $visible) {
-                    $parentIdx = $i-1;
+                    $parentIdx = $i - 1;
                 }
             }
 
@@ -596,16 +618,19 @@ private function hasAncestorTag(array $node, string $tag): bool
                 if (!isset($flows[$parentIdx]['children']) || !is_array($flows[$parentIdx]['children'])) {
                     $flows[$parentIdx]['children'] = [];
                 }
-                $flows[$parentIdx]['children'][] = $f;
+                $flows[$parentIdx]['children'][] =& $flows[$i];
                 $toRemove[$i] = true;
             }
         }
 
-        // Build final list without moved children
         $out = [];
-        foreach ($flows as $i => $f) {
-            if (!isset($toRemove[$i])) $out[] = $f;
+        foreach ($flows as $i => &$flow) {
+            if (!isset($toRemove[$i])) {
+                $out[] = $this->cloneFlowTree($flow);
+            }
         }
+        unset($flow);
+
         return $out;
     }
 }

@@ -121,6 +121,61 @@ final class BlockFlowRenderer
         $this->paragraphBuilder->endFontContext();
     }
 
+    /**
+     * @param array<string, mixed> $tableFlow
+     * @return array{data: array<int, array<int, string>>, options: array<string, mixed>}|null
+     */
+    private function mapTableFlowToData(array $tableFlow): ?array
+    {
+        $rows = $tableFlow['rows'] ?? null;
+        if (!is_array($rows) || $rows === []) {
+            return null;
+        }
+
+        $tableData = [];
+        $headerRowIndex = null;
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $cellsSpec = $row['cells'] ?? null;
+            if (!is_array($cellsSpec) || $cellsSpec === []) {
+                continue;
+            }
+
+            $cells = [];
+            foreach ($cellsSpec as $cell) {
+                if (is_array($cell) && array_key_exists('text', $cell)) {
+                    $text = $cell['text'];
+                    $cells[] = is_string($text) ? $text : (string)$text;
+                } else {
+                    $cells[] = is_string($cell) ? $cell : (string)$cell;
+                }
+            }
+
+            if ($cells === []) {
+                continue;
+            }
+
+            $tableData[] = $cells;
+            if (($row['isHeader'] ?? false) && $headerRowIndex === null) {
+                $headerRowIndex = count($tableData) - 1;
+            }
+        }
+
+        if ($tableData === []) {
+            return null;
+        }
+
+        $options = [];
+        if ($headerRowIndex !== null) {
+            $options['headerRow'] = $headerRowIndex;
+        }
+
+        return ['data' => $tableData, 'options' => $options];
+    }
+
     private function renderChildFlows(array $children, PdfBlockBuilder $parent, PdfBuilder $pdf, HtmlDocument $document, array $computedStyles): void
     {
         foreach ($children as $child) {
@@ -130,7 +185,10 @@ final class BlockFlowRenderer
                 continue;
             }
             if ($type === 'table') {
-                $parent->addTable($child['rows'] ?? [], []);
+                $tableSpec = $this->mapTableFlowToData($child);
+                if ($tableSpec !== null) {
+                    $parent->addTable($tableSpec['data'], $tableSpec['options']);
+                }
                 continue;
             }
 
