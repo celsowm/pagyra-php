@@ -11,6 +11,8 @@ use Celsowm\PagyraPhp\Css\CssGradientParser;
 use Celsowm\PagyraPhp\Graphics\Painter\PdfBackgroundPainter;
 use Celsowm\PagyraPhp\Graphics\Gradient\PdfGradientFactory;
 use Celsowm\PagyraPhp\Graphics\Shading\PdfShadingRegistry;
+use Celsowm\PagyraPhp\Graphics\Shadow\PdfBoxShadowParser;
+use Celsowm\PagyraPhp\Graphics\Shadow\PdfBoxShadowRenderer;
 use Celsowm\PagyraPhp\Block\PdfBlockBuilder;
 use Celsowm\PagyraPhp\Text\PdfRun;
 
@@ -98,6 +100,28 @@ final class BlockFlowRenderer
             }
         }
 
+        // Handle box-shadow
+        $boxShadowValue = $map['box-shadow'] ?? null;
+        $boxShadows = null;
+        $borderRadius = null;
+        if (is_string($boxShadowValue) && strtolower($boxShadowValue) !== 'none') {
+            $shadowParser = new PdfBoxShadowParser();
+            $boxShadows = $shadowParser->parse($boxShadowValue);
+
+            // Extract border-radius for shadow rendering
+            $borderRadiusValue = $map['border-radius'] ?? null;
+            if (is_string($borderRadiusValue)) {
+                $borderRadius = $this->parseBorderRadius($borderRadiusValue, $baseFontSize);
+            }
+        }
+
+        // Add shadow options to block options
+        if ($boxShadows !== null) {
+            $blockOptions['boxShadows'] = $boxShadows;
+            if ($borderRadius !== null) {
+                $blockOptions['borderRadius'] = $borderRadius;
+            }
+        }
 
         
         $block = new PdfBlockBuilder($pdf, $blockOptions, $painter);
@@ -231,6 +255,29 @@ final class BlockFlowRenderer
                 }
 
                 $paraOptions = $this->paragraphBuilder->buildParagraphOptions($style);
+
+                // Handle box-shadow for child elements
+                $childBoxShadowValue = $map['box-shadow'] ?? null;
+                $childBoxShadows = null;
+                $childBorderRadius = null;
+                if (is_string($childBoxShadowValue) && strtolower($childBoxShadowValue) !== 'none') {
+                    $shadowParser = new PdfBoxShadowParser();
+                    $childBoxShadows = $shadowParser->parse($childBoxShadowValue);
+
+                    // Extract border-radius for shadow rendering
+                    $childBorderRadiusValue = $map['border-radius'] ?? null;
+                    if (is_string($childBorderRadiusValue)) {
+                        $childBorderRadius = $this->parseBorderRadius($childBorderRadiusValue, $baseFontSize);
+                    }
+                }
+
+                // Add shadow options to child block options
+                if ($childBoxShadows !== null) {
+                    $opts['boxShadows'] = $childBoxShadows;
+                    if ($childBorderRadius !== null) {
+                        $opts['borderRadius'] = $childBorderRadius;
+                    }
+                }
             }
 
             $childBaseFont = (float)($paraOptions['size'] ?? 12.0);
@@ -599,6 +646,50 @@ final class BlockFlowRenderer
         return true;
     }
 
+    /**
+     * Parse CSS border-radius value into an array of radius values.
+     */
+    private function parseBorderRadius(string $value, float $baseFontSize): ?array
+    {
+        $value = trim($value);
+        if ($value === '' || strtolower($value) === 'none') {
+            return null;
+        }
+
+        // Split by spaces to get individual radius values
+        $values = preg_split('/\s+/', $value);
+        $values = array_filter($values, fn($v) => trim($v) !== '');
+        $values = array_values($values);
+
+        if (empty($values)) {
+            return null;
+        }
+
+        // Parse each value
+        $radii = [];
+        foreach ($values as $val) {
+            $parsed = $this->parseCssLength($val, $baseFontSize);
+            if ($parsed === null) {
+                return null; // If any value is invalid, return null
+            }
+            $radii[] = max(0.0, $parsed);
+        }
+
+        // CSS border-radius follows the same pattern as margin/padding:
+        // 1 value: all corners
+        // 2 values: top-left/bottom-right, top-right/bottom-left
+        // 3 values: top-left, top-right/bottom-left, bottom-right
+        // 4 values: top-left, top-right, bottom-right, bottom-left
+        $count = count($radii);
+        if ($count === 1) {
+            return [$radii[0], $radii[0], $radii[0], $radii[0]];
+        } elseif ($count === 2) {
+            return [$radii[0], $radii[1], $radii[0], $radii[1]];
+        } elseif ($count === 3) {
+            return [$radii[0], $radii[1], $radii[2], $radii[1]];
+        } else {
+            return array_slice($radii, 0, 4);
+        }
+    }
+
 }
-
-

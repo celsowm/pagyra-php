@@ -139,7 +139,15 @@ final class PdfBlockRenderer /* nested-blocks-supported */
         $rectH = $totalHeight;
         $radius = $borderSpec['radius'] ?? null;
 
-        // ===== 2) PAINT BACKGROUND FIRST =====
+        // ===== 2) RENDER BOX-SHADOW FIRST (behind everything) =====
+        $boxShadows = $options['boxShadows'] ?? null;
+        $shadowBorderRadius = $options['borderRadius'] ?? null;
+        if ($boxShadows !== null) {
+            $shadowRenderer = new \Celsowm\PagyraPhp\Graphics\Shadow\PdfBoxShadowRenderer($this->pdf);
+            $shadowRenderer->renderBoxShadow($rectX, $rectY, $rectW, $rectH, $boxShadows, $shadowBorderRadius);
+        }
+
+        // ===== 3) PAINT BACKGROUND =====
         if ($bgGradient && $this->bgPainter instanceof PdfBackgroundPainter) {
             if (($bgGradient['type'] ?? 'linear') === 'radial') {
                 $this->bgPainter->radialRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
@@ -262,4 +270,3 @@ final class PdfBlockRenderer /* nested-blocks-supported */
         $this->pdf->drawParagraphBorders($box, $spec);
     }
 }
-
