@@ -106,10 +106,12 @@ final class PdfBlockRenderer /* nested-blocks-supported */
                 if ((($__e['type'] ?? null) === 'runs')) { $hasRuns = true; break; }
             }
             if ($hasRuns) {
-                $elementsFiltered = array_values(array_filter($elementsFiltered, function($el){
-                    $t = $el['type'] ?? null;
-                    return !($t === 'paragraph' || $t === 'block');
-                }));
+                $elementsFiltered = array_values(array_filter(
+                    $elementsFiltered,
+                    static function ($el) {
+                        return (($el['type'] ?? null) !== 'paragraph');
+                    }
+                ));
             }
         }
         // --------------------------------------------------------------

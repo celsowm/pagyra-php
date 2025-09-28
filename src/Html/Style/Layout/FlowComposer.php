@@ -263,6 +263,10 @@ private function hasAncestorTag(array $node, string $tag): bool
             }
 
             if ($childTag === 'img') {
+                $imgNodeId = (string)($child['nodeId'] ?? '');
+                if ($imgNodeId !== '' && isset($this->imageResources[$imgNodeId])) {
+                    continue;
+                }
                 $alt = trim((string)($child['attributes']['alt'] ?? ''));
                 if ($alt !== '') {
                     $runs[] = [
