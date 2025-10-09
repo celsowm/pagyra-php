@@ -187,7 +187,7 @@ final class PdfBlockRenderer /* nested-blocks-supported */
                 match ($element['type']) {
                     'paragraph' => $this->pdf->addParagraphText($element['content'], $element['options']),
                     'image'     => $this->pdf->addImageBlock($element['alias'], $element['options']),
-                    'table'     => $this->pdf->addTableData($element['data'], $element['options']),
+                    'table'     => $this->pdf->addTableData($element['data'], $element['options'], $element['adjustedWidth'] ?? null),
                     'list'      => $this->pdf->addList($element['items'], $element['options']),
                     'spacer'    => $this->pdf->addSpacer($element['height']),
                     'hr'        => $this->pdf->addHorizontalLine($element['options']),

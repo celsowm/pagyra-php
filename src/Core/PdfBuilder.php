@@ -879,7 +879,7 @@ $initialCursorY = $this->layoutManager->getCursorY();
         $this->layoutManager->checkPageBreak();
     }
 
-    public function addTable($dataOrOptions = null, array $options = []): ?PdfTableBuilder
+    public function addTable($dataOrOptions = null, array $options = [], ?float $adjustedWidth = null): ?PdfTableBuilder
     {
         if ($dataOrOptions === null || (is_array($dataOrOptions) && empty($options) && !isset($dataOrOptions[0]))) {
             return new PdfTableBuilder($this, $dataOrOptions ?? []);
@@ -893,13 +893,15 @@ $initialCursorY = $this->layoutManager->getCursorY();
         );
     }
 
-    public function addTableData(array $data, array $options = []): void
+    public function addTableData(array $data, array $options = [], ?float $adjustedWidth = null): void
     {
         if ($this->styleManager->getCurrentFontAlias() === null) {
             throw new \LogicException("Defina uma fonte com setFont() antes de adicionar uma tabela.");
         }
         if (empty($data)) return;
         if ($this->measurementMode) return;
+
+
 
         $this->styleManager->push();
 
@@ -931,7 +933,8 @@ $initialCursorY = $this->layoutManager->getCursorY();
             return;
         }
 
-        $columnWidths = $this->calculateColumnWidths($data, $opts['widths'], $numCols, $opts);
+        $adjustedWidth = $opts['adjustedWidth'] ?? null;
+        $columnWidths = $this->calculateColumnWidths($data, $opts['widths'], $numCols, $opts, $adjustedWidth);
         $columnAligns = $this->normalizeColumnAligns($opts['align'], $numCols);
         $borderSpec = $this->normalizeTableBorderSpec($opts['borders'], $opts['padding']);
         $cellPadding = $borderSpec['padding'];
@@ -963,9 +966,11 @@ $initialCursorY = $this->layoutManager->getCursorY();
         $this->styleManager->pop();
     }
 
-    private function calculateColumnWidths(array $data, $widths, int $numCols, array $tableOptions): array
+    private function calculateColumnWidths(array $data, $widths, int $numCols, array $tableOptions, ?float $adjustedWidth = null): array
     {
-        $availableWidth = $this->layoutManager->getContentAreaWidth();
+        $availableWidth = $adjustedWidth ?? $this->layoutManager->getContentAreaWidth();
+
+
         if (is_array($widths)) {
             $result = [];
             $totalSpecified = array_sum($widths);

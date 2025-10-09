@@ -137,7 +137,7 @@ final class BlockFlowRenderer
 
         
         if (!empty($flow['children']) && is_array($flow['children'])) {
-            $this->renderChildFlows($flow['children'], $block, $pdf, $document, $computedStyles);
+            $this->renderChildFlows($flow['children'], $block, $pdf, $document, $computedStyles, $style, $baseFontSize);
         }
 
         $block->end();
@@ -200,7 +200,7 @@ final class BlockFlowRenderer
         return ['data' => $tableData, 'options' => $options];
     }
 
-    private function renderChildFlows(array $children, PdfBlockBuilder $parent, PdfBuilder $pdf, HtmlDocument $document, array $computedStyles): void
+    private function renderChildFlows(array $children, PdfBlockBuilder $parent, PdfBuilder $pdf, HtmlDocument $document, array $computedStyles, ComputedStyle $parentStyle, float $parentBaseFontSize): void
     {
         foreach ($children as $child) {
             $type = $child['type'] ?? 'block';
@@ -211,6 +211,25 @@ final class BlockFlowRenderer
             if ($type === 'table') {
                 $tableSpec = $this->mapTableFlowToData($child);
                 if ($tableSpec !== null) {
+                    // Calculate adjusted width considering parent block padding
+                    $adjustedWidth = null;
+                    $childStyle = $child['style'] ?? null;
+                    if ($childStyle instanceof ComputedStyle) {
+                        $childBaseFontSize = (float)($this->paragraphBuilder->buildParagraphOptions($childStyle)['size'] ?? 12.0);
+                        $padding = $this->marginCalculator->extractPaddingBox($childStyle, $childBaseFontSize);
+                        $currentContentWidth = $pdf->getContentAreaWidth();
+
+                        // The issue is that table padding is 0, we need to consider the parent block's padding
+                        // Get parent block's padding from the current context
+                        $parentPadding = $this->marginCalculator->extractPaddingBox($parentStyle, $parentBaseFontSize);
+
+                        $adjustedWidth = $currentContentWidth - $parentPadding['left'] - $parentPadding['right'];
+                        if ($adjustedWidth < 0) {
+                            $adjustedWidth = $currentContentWidth;
+                        }
+                    }
+
+                    $tableSpec['options']['adjustedWidth'] = $adjustedWidth;
                     $parent->addTable($tableSpec['data'], $tableSpec['options']);
                 }
                 continue;
@@ -291,10 +310,9 @@ final class BlockFlowRenderer
             }
             [$opts, $imageInstructionChild] = $this->prepareImageRendering($opts, $childImageResource, $style instanceof ComputedStyle ? $style : null, $child, $childBaseFont);
 
-            $parent->addBlock($opts, function (PdfBlockBuilder $nested) use ($child, $document, $computedStyles, $paraOptions, $pdf, $imageInstructionChild) {
+            $parent->addBlock($opts, function (PdfBlockBuilder $nested) use ($child, $document, $computedStyles, $paraOptions, $pdf, $imageInstructionChild, $style, $baseFontSize) {
                 $runSpecsChild = is_array($child['runs'] ?? null) ? $child['runs'] : [];
                 $baseMarkers = $this->paragraphBuilder->styleMarkersFromOptions($paraOptions);
-                $baseFontSize = (float)($paraOptions['size'] ?? 12.0);
                 $runsChild = $this->paragraphBuilder->buildRunsFromFlow(
                     $runSpecsChild,
                     $computedStyles,
@@ -310,7 +328,7 @@ final class BlockFlowRenderer
                 }
 
                 if (!empty($child['children']) && is_array($child['children'])) {
-                    $this->renderChildFlows($child['children'], $nested, $pdf, $document, $computedStyles);
+                    $this->renderChildFlows($child['children'], $nested, $pdf, $document, $computedStyles, $style, $baseFontSize);
                 }
             });
         }

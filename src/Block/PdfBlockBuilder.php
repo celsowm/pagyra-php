@@ -35,9 +35,9 @@ final class PdfBlockBuilder
         return $this;
     }
 
-    public function addTable(array $data, array $opts = []): self
+    public function addTable(array $data, array $opts = [], ?float $adjustedWidth = null): self
     {
-        $this->elements[] = ['type' => 'table', 'data' => $data, 'options' => $opts];
+        $this->elements[] = ['type' => 'table', 'data' => $data, 'options' => $opts, 'adjustedWidth' => $adjustedWidth];
         return $this;
     }
 
