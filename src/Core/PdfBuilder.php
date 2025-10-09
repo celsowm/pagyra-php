@@ -23,6 +23,7 @@ use Celsowm\PagyraPhp\Table\PdfTableBuilder;
 use Celsowm\PagyraPhp\Table\PdfTableManager;
 use Celsowm\PagyraPhp\Text\PdfTextRenderer;
 use Celsowm\PagyraPhp\Writer\PdfWriter;
+use Celsowm\PagyraPhp\Graphics\PdfGraphicsRenderer;
 
 final class PdfBuilder
 {
@@ -59,6 +60,7 @@ final class PdfBuilder
     private FooterManager $footerManager;
     private FixedElementManager $fixedElementManager;
     private PdfTableManager $tableManager;
+    private PdfGraphicsRenderer $graphicsRenderer;
 
 
     public function __construct(float $w = 595.28, float $h = 841.89)
@@ -75,6 +77,7 @@ final class PdfBuilder
         $this->footerManager = new FooterManager($this);
         $this->fixedElementManager = new FixedElementManager($this);
         $this->tableManager = new PdfTableManager($this);
+        $this->graphicsRenderer = new PdfGraphicsRenderer($this);
 
         $this->setMargins(56, 56, 56, 56);
         $this->internal_newPage();
@@ -144,6 +147,11 @@ final class PdfBuilder
     public function getLayoutManager(): PdfLayoutManager
     {
         return $this->layoutManager;
+    }
+
+    public function getColorManager(): PdfColor
+    {
+        return $this->colorManager;
     }
 
     public function getLeftMargin(): float
@@ -484,16 +492,18 @@ final class PdfBuilder
         $padding = $borderSpec['padding'];
         $baseX = $this->mLeft + $padding[3];
         $wrapWidth = $this->layoutManager->getContentAreaWidth() - $padding[1] - $padding[3];
-        
+
         // Ajuste horizontal com containerPadding (quando vindo de um bloco com padding)
         if (isset($opts['containerPadding']) && is_array($opts['containerPadding'])) {
             $cp = array_values($opts['containerPadding']);
-            $cp += [0,0,0,0];
+            $cp += [0, 0, 0, 0];
             $baseX     += (float)$cp[3];
             $wrapWidth -= (float)$cp[1] + (float)$cp[3];
-            if ($wrapWidth < 0) { $wrapWidth = 0.0; }
+            if ($wrapWidth < 0) {
+                $wrapWidth = 0.0;
+            }
         }
-$initialCursorY = $this->layoutManager->getCursorY();
+        $initialCursorY = $this->layoutManager->getCursorY();
         $__borderFragments = [];
         $__fragTop = $initialCursorY;
         $__fragPage = $this->currentPage;
@@ -846,7 +856,7 @@ $initialCursorY = $this->layoutManager->getCursorY();
 
             $dy = isset($opt['baselineShift'])
                 ? (float)$opt['baselineShift']
-                : ($isSup ? ($lineH * 0.35) : ($isSub ? -($lineH * 0.15) : 0.0));
+                : ($isSup ? ($lineH * 0.35) : ($isSub ? - ($lineH * 0.15) : 0.0));
 
             $tokWidth = $this->textRenderer->measureTextStyled($tok['text'], $this->styleManager);
             if ($runBG !== null) {
@@ -1048,13 +1058,12 @@ $initialCursorY = $this->layoutManager->getCursorY();
 
     public function buildBackgroundRectOps(float $x, float $y, float $w, float $h, array $color): string
     {
-        return "q\n" . $this->colorOps($color) . sprintf("%.3F %.3F %.3F %.3F re\n", $x, $y, $w, $h) . "f\nQ\n";
+        return $this->graphicsRenderer->buildBackgroundRectOps($x, $y, $w, $h, $color);
     }
 
     public function drawBackgroundRect(float $x, float $y, float $width, float $height, array $color): void
     {
-        if ($this->currentPage === null) return;
-        $this->pageContents[$this->currentPage] .= $this->buildBackgroundRectOps($x, $y, $width, $height, $color);
+        $this->graphicsRenderer->drawBackgroundRect($x, $y, $width, $height, $color);
     }
 
     private function clampCornerRadii(float $w, float $h, array $r): array
@@ -1100,13 +1109,12 @@ $initialCursorY = $this->layoutManager->getCursorY();
 
     public function buildRoundedBackgroundRectOps(float $x, float $y, float $w, float $h, array $r, array $color): string
     {
-        return "q\n" . $this->colorOps($color) . $this->buildRoundedRectPath($x, $y, $w, $h, $r) . "f\nQ\n";
+        return $this->graphicsRenderer->buildRoundedBackgroundRectOps($x, $y, $w, $h, $r, $color);
     }
 
     public function drawRoundedBackgroundRect(float $x, float $y, float $w, float $h, array $r, array $color): void
     {
-        if ($this->currentPage === null) return;
-        $this->pageContents[$this->currentPage] .= $this->buildRoundedBackgroundRectOps($x, $y, $w, $h, $r, $color);
+        $this->graphicsRenderer->drawRoundedBackgroundRect($x, $y, $w, $h, $r, $color);
     }
 
     private function borderIsUniform(array $spec): bool
@@ -1203,37 +1211,7 @@ $initialCursorY = $this->layoutManager->getCursorY();
 
     public function drawBackgroundImageInRect(string $alias, float $x, float $y, float $w, float $h, array $opts = [], ?int $insertAt = null): void
     {
-        $img = $this->imageManager->getImage($alias);
-        if ($img === null) throw new \LogicException("Imagem '{$alias}' não registrada.");
-
-        $alpha = $opts['alpha'] ?? 0.08;
-        $repeat = strtolower($opts['repeat'] ?? 'no-repeat');
-        $opsAll = '';
-        if ($repeat !== 'tile') {
-            [$ix, $iy, $iw, $ih] = $this->fitImageInBox($img['w'], $img['h'], $x, $y, $w, $h, $opts);
-            $opsAll = $this->buildImageOps($alias, $ix, $iy, $iw, $ih, ['alpha' => $alpha]);
-        } else {
-            $tw = $opts['tileSize']['w'] ?? null;
-            $th = $opts['tileSize']['h'] ?? null;
-            if ($tw === null && $th === null) {
-                $th = max(24.0, $h * 0.25);
-                $tw = $th * ($img['w'] / $img['h']);
-            } elseif ($tw !== null && $th === null) $th = (float)$tw * ($img['h'] / $img['w']);
-            elseif ($tw === null && $th !== null) $tw = (float)$th * ($img['w'] / $img['h']);
-            $tw = (float)$tw;
-            $th = (float)$th;
-            $gapX = (float)($opts['tileGap']['x'] ?? 0.0);
-            $gapY = (float)($opts['tileGap']['y'] ?? 0.0);
-            for ($yy = $y; $yy < $y + $h; $yy += $th + $gapY) {
-                for ($xx = $x; $xx < $x + $w; $xx += $tw + $gapX) {
-                    $opsAll .= $this->buildImageOps($alias, $xx, $yy, $tw, $th, ['alpha' => $alpha]);
-                }
-            }
-        }
-        if ($opsAll !== '') {
-            if ($insertAt !== null) $this->insertOpsAt($opsAll, $insertAt);
-            else $this->appendToPageContent($opsAll);
-        }
+        $this->graphicsRenderer->drawBackgroundImageInRect($alias, $x, $y, $w, $h, $opts, $insertAt);
     }
 
     public function normalizeColor($color): ?array
@@ -1499,30 +1477,7 @@ $initialCursorY = $this->layoutManager->getCursorY();
 
     public function drawParagraphBorders(array $box, array $spec): void
     {
-        if ($this->currentPage === null) return;
-        $x = $box['x'];
-        $y = $box['y'];
-        $w = $box['w'];
-        $h = $box['h'];
-        $r = $spec['radius'] ?? [0, 0, 0, 0];
-        $hasRadius = is_array($r) ? (max($r) > 1e-4) : ((float)$r > 1e-4);
-        if (!is_array($r)) $r = array_fill(0, 4, (float)$r);
-
-        if ($hasRadius && $this->borderIsUniform($spec) && $spec['width'][0] > 1e-3) {
-            $ops = "q\n" . sprintf("%.3F w\n", $spec['width'][0]) . $this->strokeColorOps($spec['color'][0]) . $spec['dash'][0] . "\n1 j\n" .
-                $this->buildRoundedRectPath($x, $y, $w, $h, $r) . "S\nQ\n";
-            $this->appendToPageContent($ops);
-            return;
-        }
-        $ops = "q\n";
-        $sides = [[[$x, $y + $h], [$x + $w, $y + $h]], [[$x + $w, $y + $h], [$x + $w, $y]], [[$x + $w, $y], [$x, $y]], [[$x, $y], [$x, $y + $h]]];
-        for ($i = 0; $i < 4; $i++) {
-            if ($spec['width'][$i] > 1e-3) {
-                $ops .= sprintf("%.3F w\n", $spec['width'][$i]) . $this->strokeColorOps($spec['color'][$i]) . $spec['dash'][$i] . "\n" .
-                    sprintf("%.3F %.3F m\n", $sides[$i][0][0], $sides[$i][0][1]) . sprintf("%.3F %.3F l\n", $sides[$i][1][0], $sides[$i][1][1]) . "S\n";
-            }
-        }
-        $this->appendToPageContent($ops . "Q\n");
+        $this->graphicsRenderer->drawParagraphBorders($box, $spec);
     }
 
     public function addHorizontalLine(array $options = []): void
@@ -1550,17 +1505,7 @@ $initialCursorY = $this->layoutManager->getCursorY();
 
     private function drawHorizontalLineAt(float $x, float $y, float $width, array $opts): void
     {
-        if ($this->currentPage === null) return;
-        $ops = "q\n" . sprintf("%.3F w\n", $opts['height']);
-        if (($color = $this->normalizeColor($opts['color'])) !== null) $ops .= $this->strokeColorOps($color);
-        if ($opts['dash'] !== null && is_array($opts['dash'])) $ops .= sprintf("[%.1F %.1F] 0 d\n", $opts['dash'][0], $opts['dash'][1]);
-        else $ops .= match ($opts['style']) {
-            'dashed' => "[6 3] 0 d\n",
-            'dotted' => "[1 2] 0 d\n",
-            default => "[] 0 d\n",
-        };
-        $ops .= sprintf("%.3F %.3F m\n%.3F %.3F l\nS\nQ\n", $x, $y, $x + $width, $y);
-        $this->appendToPageContent($ops);
+        $this->graphicsRenderer->drawHorizontalLineAt($x, $y, $width, $opts);
     }
 
     public function addSeparator(array $options = []): void
