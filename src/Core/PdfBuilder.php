@@ -54,15 +54,13 @@ final class PdfBuilder
     public array $baseMargins = ['left' => 56.0, 'top' => 56.0, 'right' => 56.0, 'bottom' => 56.0];
 
     private int $pageBreakSuppression = 0;
-
-    private bool $measurementMode = false;
-    private int $measurementDepth = 0;
     private HeaderManager $headerManager;
     private FooterManager $footerManager;
     private FixedElementManager $fixedElementManager;
     private PdfTableManager $tableManager;
     private PdfGraphicsRenderer $graphicsRenderer;
     private PdfLinkManager $linkManager;
+    private PdfMeasurementManager $measurementManager;
 
 
     public function __construct(float $w = 595.28, float $h = 841.89)
@@ -81,6 +79,7 @@ final class PdfBuilder
         $this->tableManager = new PdfTableManager($this);
         $this->graphicsRenderer = new PdfGraphicsRenderer($this);
         $this->linkManager = new PdfLinkManager($this);
+        $this->measurementManager = new PdfMeasurementManager();
 
         $this->setMargins(56, 56, 56, 56);
         $this->internal_newPage();
@@ -169,7 +168,7 @@ final class PdfBuilder
 
     public function isMeasurementMode(): bool
     {
-        return $this->measurementMode;
+        return $this->measurementManager->isMeasurementMode();
     }
 
     public function suppressPageBreaks(): void
@@ -201,7 +200,7 @@ final class PdfBuilder
 
     public function appendToPageContent(string $ops): void
     {
-        if ($this->measurementMode || $this->currentPage === null) {
+        if ($this->measurementManager->isMeasurementMode() || $this->currentPage === null) {
             return;
         }
         $this->pageContents[$this->currentPage] .= $ops;
@@ -209,7 +208,7 @@ final class PdfBuilder
 
     public function registerPageResource(string $type, string $label, ?int $value = 0): void
     {
-        if ($this->measurementMode || $this->currentPage === null) {
+        if ($this->measurementManager->isMeasurementMode() || $this->currentPage === null) {
             return;
         }
         $this->pageResources[$this->currentPage][$type][$label] = $value;
@@ -345,10 +344,6 @@ final class PdfBuilder
         );
         $renderer->render($items, $opts);
     }
-
-
-
-
 
     public function addParagraph(string|array $textOrOpts, array $opts = []): ?PdfParagraphBuilder
     {
@@ -1141,121 +1136,17 @@ final class PdfBuilder
 
     public function enterMeasurementMode(): void
     {
-        $this->measurementDepth++;
-        if ($this->measurementDepth === 1) {
-            $this->measurementMode = true;
-        }
+        $this->measurementManager->enterMeasurementMode();
     }
 
     public function exitMeasurementMode(): void
     {
-        if ($this->measurementDepth > 0) {
-            $this->measurementDepth--;
-        }
-        if ($this->measurementDepth === 0) {
-            $this->measurementMode = false;
-        }
+        $this->measurementManager->exitMeasurementMode();
     }
 
     public function measureBlockHeight(array $elements, array $options): float
     {
-        $layoutState = $this->layoutManager->snapshotState();
-        $origLeft  = $this->mLeft;
-        $origRight = $this->mRight;
-
-        $this->enterMeasurementMode();
-
-        try {
-
-            $borderSpec = $this->normalizeBorderSpec($options['border'] ?? null, $options['padding'] ?? null);
-            $padding    = $borderSpec['padding'];
-            $margin     = $this->normalizePadding($options['margin'] ?? 0);
-
-            $avail = $this->getContentAreaWidth();
-            $wSpec = $options['width'] ?? '100%';
-
-            $blockW = match (true) {
-                is_string($wSpec) && str_ends_with($wSpec, '%')
-                => $avail * max(0.0, min(1.0, (float) rtrim($wSpec, '%') / 100.0)),
-                is_numeric($wSpec)
-                => min((float)$wSpec, $avail),
-                default
-                => $avail,
-            };
-
-            $align = strtolower($options['align'] ?? 'left');
-            $effectiveW = $blockW + $margin[1] + $margin[3];
-
-            $x = match ($align) {
-                'center' => $this->mLeft + ($avail - $effectiveW) / 2.0 + $margin[3],
-                'right'  => $this->mLeft + $avail - $effectiveW + $margin[3],
-                default  => $this->mLeft + $margin[3],
-            };
-
-            $startY = $this->getCursorY() - $margin[0];
-
-            $this->mLeft  = $x + $padding[3];
-            $this->mRight = $this->getPageWidth() - ($x + $blockW - $padding[1]);
-
-            $this->setCursorY($startY - $padding[0]);
-
-            foreach ($elements as $el) {
-                $type = $el['type'] ?? null;
-
-                $fn = match ($type) {
-                    'paragraph' => function () use ($el) {
-                        $this->addParagraphText((string)($el['content'] ?? ''), (array)($el['options'] ?? []));
-                    },
-                    'image' => function () use ($el) {
-                        $this->addImageBlock((string)($el['alias'] ?? ''), (array)($el['options'] ?? []));
-                    },
-                    'table' => function () use ($el) {
-                        $this->addTableData((array)($el['data'] ?? []), (array)($el['options'] ?? []));
-                    },
-                    'list' => function () use ($el) {
-                        $this->addList($el['items'] ?? [], (array)($el['options'] ?? []));
-                    },
-                    'spacer' => function () use ($el) {
-                        $this->addSpacer((float)($el['height'] ?? 0.0));
-                    },
-                    'hr' => function () use ($el) {
-                        $this->addHorizontalLine((array)($el['options'] ?? []));
-                    },
-                    'block' => function () use ($el) {
-                        if (isset($el['builder']) && method_exists($el['builder'], 'getDefinition')) {
-                            $def = $el['builder']->getDefinition();
-                            $childElements = (array)($def['elements'] ?? []);
-                            $childOptions  = (array)($def['options'] ?? []);
-                            $height = $this->measureBlockHeight($childElements, $childOptions);
-                            $position = strtolower((string)($childOptions['position'] ?? 'relative'));
-                            if ($position !== 'absolute' && $position !== 'fixed') {
-                                $margins = $this->normalizePadding($childOptions['margin'] ?? 0);
-                                $total = $margins[0] + $height + $margins[2];
-                                if ($total > 0.0) {
-                                    $this->setCursorY($this->getCursorY() - $total);
-                                }
-                            }
-                        }
-                    },
-                    'runs' => function () use ($el) {
-                        $this->addParagraphRuns((array)($el['runs'] ?? []), (array)($el['options'] ?? []));
-                    },
-                    default => function () { /* no-op p/ tipos desconhecidos */
-                    },
-                };
-
-                $fn();
-            }
-
-            $contentBottomY = $this->getCursorY();
-            $contentHeight  = $startY - $contentBottomY; // já exclui padding-top
-            return max(0.0, $padding[0] + $contentHeight + $padding[2]);
-        } finally {
-            $this->layoutManager->restoreState($layoutState);
-            $this->mLeft  = $origLeft;
-            $this->mRight = $origRight;
-            $this->exitMeasurementMode();
-        }
+        return $this->measurementManager->measureBlockHeight($elements, $options, $this);
     }
 
     public function internal_newPage(): void
