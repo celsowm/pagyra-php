@@ -63,6 +63,7 @@ final class PdfBuilder
     private PdfMeasurementManager $measurementManager;
     private PdfBorderManager $borderManager;
     private PdfColumnLayoutManager $columnLayoutManager;
+    private PdfParagraphComposer $paragraphComposer;
 
 
     public function __construct(float $w = 595.28, float $h = 841.89)
@@ -85,6 +86,7 @@ final class PdfBuilder
         $this->borderManager = new PdfBorderManager($this->graphicsRenderer);
         $this->borderManager->setColorNormalizer([$this->colorManager, 'normalize']);
         $this->columnLayoutManager = new PdfColumnLayoutManager($this);
+        $this->paragraphComposer = new PdfParagraphComposer($this);
 
         $this->setMargins(56, 56, 56, 56);
         $this->internal_newPage();
@@ -206,6 +208,11 @@ final class PdfBuilder
     public function getCurrentPage(): ?int
     {
         return $this->currentPage;
+    }
+
+    public function setCurrentPage(?int $page): void
+    {
+        $this->currentPage = $page;
     }
 
     public function appendToPageContent(string $ops): void
@@ -371,197 +378,12 @@ final class PdfBuilder
 
     public function addParagraphText(string $text, array $opts = []): void
     {
-        $runOptKeys = [
-            'style',
-            'color',
-            'letterSpacing',
-            'wordSpacing',
-            'textShadow',
-            'fontAlias',
-            'size',
-            'href',
-            'sub',
-            'sup',
-            'script',
-            'baselineShift',
-            'sizeScale'
-        ];
-        $runOpts = [];
-        foreach ($runOptKeys as $k) {
-            if (array_key_exists($k, $opts)) $runOpts[$k] = $opts[$k];
-        }
-        $parOpts = $opts;
-        foreach ($runOptKeys as $k) unset($parOpts[$k]);
-
-        $this->addParagraphRuns([new PdfRun($text, $runOpts)], $parOpts);
+        $this->paragraphComposer->addParagraphText($text, $opts);
     }
 
     public function addParagraphRuns(array $runs, array $opts = []): void
     {
-
-        if ($this->styleManager->getCurrentFontAlias() === null) {
-            throw new \LogicException("Defina uma fonte com setFont() antes de adicionar texto.");
-        }
-        $this->styleManager->push();
-
-        $__opsInsertAt = ($this->currentPage !== null) ? strlen($this->pageContents[$this->currentPage]) : null;
-
-        $this->styleManager->applyOptions($opts, $this);
-
-        $borderSpec = $this->borderManager->normalizeBorderSpec($opts['border'] ?? null, $opts['padding'] ?? null);
-        $padding = $borderSpec['padding'];
-        $baseX = $this->mLeft + $padding[3];
-        $wrapWidth = $this->layoutManager->getContentAreaWidth() - $padding[1] - $padding[3];
-
-        // Ajuste horizontal com containerPadding (quando vindo de um bloco com padding)
-        if (isset($opts['containerPadding']) && is_array($opts['containerPadding'])) {
-            $cp = array_values($opts['containerPadding']);
-            $cp += [0, 0, 0, 0];
-            $baseX     += (float)$cp[3];
-            $wrapWidth -= (float)$cp[1] + (float)$cp[3];
-            if ($wrapWidth < 0) {
-                $wrapWidth = 0.0;
-            }
-        }
-        $initialCursorY = $this->layoutManager->getCursorY();
-        $__borderFragments = [];
-        $__fragTop = $initialCursorY;
-        $__fragPage = $this->currentPage;
-        $this->layoutManager->advanceCursor($padding[0]);
-        $__prevPage = $this->currentPage;
-        $__prevBottomMargin = $this->layoutManager->getPageBottomMargin();
-        $this->layoutManager->checkPageBreak();
-        if ($this->currentPage !== $__prevPage) {
-            $__borderFragments[] = ['page' => $__prevPage, 'x' => $this->mLeft, 'y' => $__prevBottomMargin, 'w' => $this->getContentAreaWidth(), 'h' => $__fragTop - $__prevBottomMargin, 'kind' => 'first'];
-            $__fragTop = $this->layoutManager->getCursorY();
-            $__fragPage = $this->currentPage;
-        }
-
-        $align = $opts['align'] ?? 'left';
-        $indent = (float)($opts['indent'] ?? 0.0);
-        $hangIndent = (float)($opts['hangIndent'] ?? 0.0);
-        $spacing = (float)($opts['spacing'] ?? 0.0);
-        $lineH = $this->styleManager->getLineHeight();
-        $bgColor = $this->normalizeColor($opts['bgcolor'] ?? null);
-        $markerSpec = $opts['listMarker'] ?? null;
-        $needMarker = $markerSpec !== null;
-
-        $blocks = $this->explodeRunsToBlocksByNewline($runs);
-        $hasWritten = false;
-        $lastBlockKey = empty($blocks) ? null : array_key_last($blocks);
-        foreach ($blocks as $key => $blockTokens) {
-            $isLastBlock = ($key === $lastBlockKey);
-            $firstLine = true;
-            $lineTokens = [];
-            $avail = $wrapWidth - ($firstLine ? $indent : $hangIndent);
-            foreach ($blockTokens as $tok) {
-                $wTok = $this->measureTokenWidth($tok);
-                if (empty($lineTokens) && $tok['type'] === 'space') continue;
-
-                if ($wTok <= $avail || empty($lineTokens)) {
-                    $lineTokens[] = $tok;
-                    $avail -= $wTok;
-                    continue;
-                }
-                $tokensToFlush = $lineTokens;
-                $nextToken = $tok;
-                if (end($tokensToFlush)['type'] === 'space') array_pop($tokensToFlush);
-
-                if (!empty($tokensToFlush)) {
-                    $__beforePage = $this->currentPage;
-                    $__prevBottomMargin = $this->layoutManager->getPageBottomMargin();
-                    $this->emitRunsLine($tokensToFlush, $align, $indent, $wrapWidth, $lineH, ($align === 'justify'), $bgColor, $baseX, $firstLine, $hangIndent, $needMarker ? $markerSpec : null);
-                    if ($this->currentPage !== $__beforePage) {
-                        $__borderFragments[] = ['page' => $__beforePage, 'x' => $this->mLeft, 'y' => $__prevBottomMargin, 'w' => $this->getContentAreaWidth(), 'h' => $__fragTop - $__prevBottomMargin, 'kind' => empty($__borderFragments) ? 'first' : 'middle'];
-                        $__fragTop = $this->layoutManager->getCursorY();
-                        $__fragPage = $this->currentPage;
-                    }
-                    $needMarker = false;
-                    $hasWritten = true;
-                }
-                $firstLine = false;
-                $lineTokens = ($nextToken['type'] === 'space') ? [] : [$nextToken];
-                $avail = $wrapWidth - ($firstLine ? $indent : $hangIndent) - $this->measureTokensWidth($lineTokens);
-            }
-            if (!empty($lineTokens)) {
-                $__beforePage = $this->currentPage;
-                $__prevBottomMargin = $this->layoutManager->getPageBottomMargin();
-                $this->emitRunsLine($lineTokens, $align, $indent, $wrapWidth, $lineH, ($align === 'justify' && !$isLastBlock), $bgColor, $baseX, $firstLine, $hangIndent, $needMarker ? $markerSpec : null);
-                if ($this->currentPage !== $__beforePage) {
-                    $__borderFragments[] = ['page' => $__beforePage, 'x' => $this->mLeft, 'y' => $__prevBottomMargin, 'w' => $this->getContentAreaWidth(), 'h' => $__fragTop - $__prevBottomMargin, 'kind' => empty($__borderFragments) ? 'first' : 'middle'];
-                    $__fragTop = $this->layoutManager->getCursorY();
-                    $__fragPage = $this->currentPage;
-                }
-                $needMarker = false;
-                $hasWritten = true;
-            }
-            if ($spacing > 0) {
-                $__beforePage = $this->currentPage;
-                $__prevBottomMargin = $this->layoutManager->getPageBottomMargin();
-                $this->layoutManager->advanceCursor($spacing);
-                $this->layoutManager->checkPageBreak();
-                if ($this->currentPage !== $__beforePage) {
-                    $__borderFragments[] = ['page' => $__beforePage, 'x' => $this->mLeft, 'y' => $__prevBottomMargin, 'w' => $this->getContentAreaWidth(), 'h' => $__fragTop - $__prevBottomMargin, 'kind' => empty($__borderFragments) ? 'first' : 'middle'];
-                    $__fragTop = $this->layoutManager->getCursorY();
-                    $__fragPage = $this->currentPage;
-                }
-            }
-        }
-        if ($hasWritten) {
-            $this->layoutManager->advanceCursor($padding[2]);
-        } else {
-            $this->layoutManager->setCursorY($initialCursorY);
-        }
-
-        $finalCursorY = $this->layoutManager->getCursorY();
-        if ($borderSpec['hasBorder'] && !empty($__borderFragments)) {
-            $__borderFragments[] = ['page' => $this->currentPage, 'x' => $this->mLeft, 'y' => $finalCursorY, 'w' => $this->getContentAreaWidth(), 'h' => $__fragTop - $finalCursorY, 'kind' => 'last'];
-            $__origPage = $this->currentPage;
-            foreach ($__borderFragments as $__frag) {
-                if ($__frag['h'] <= 0.001) continue;
-                $spec = $borderSpec;
-                if ($__frag['kind'] === 'first') {
-                    $spec['width'][2] = 0.0;
-                    if (isset($spec['radius'])) {
-                        $spec['radius'][2] = 0.0;
-                        $spec['radius'][3] = 0.0;
-                    }
-                } elseif ($__frag['kind'] === 'middle') {
-                    $spec['width'][0] = 0.0;
-                    $spec['width'][2] = 0.0;
-                    if (isset($spec['radius'])) {
-                        $spec['radius'] = [0.0, 0.0, 0.0, 0.0];
-                    }
-                } elseif ($__frag['kind'] === 'last') {
-                    $spec['width'][0] = 0.0;
-                    if (isset($spec['radius'])) {
-                        $spec['radius'][0] = 0.0;
-                        $spec['radius'][1] = 0.0;
-                    }
-                }
-                $this->currentPage = $__frag['page'];
-                $this->drawParagraphBorders(['x' => $__frag['x'], 'y' => $__frag['y'], 'w' => $__frag['w'], 'h' => $__frag['h']], $spec);
-            }
-            $this->currentPage = $__origPage;
-        }
-        if ($borderSpec['hasBorder'] && empty($__borderFragments)) {
-            $paddedBox = ['x' => $this->mLeft, 'y' => $finalCursorY, 'w' => $this->getContentAreaWidth(), 'h' => $initialCursorY - $finalCursorY];
-            $this->drawParagraphBorders($paddedBox, $borderSpec);
-        }
-        $bgImgOpt = $opts['backgroundImage'] ?? ($opts['bgimage'] ?? null);
-        if ($bgImgOpt !== null) {
-            $bg = is_string($bgImgOpt) ? ['alias' => $bgImgOpt] : (array)$bgImgOpt;
-            if (empty($bg['alias'])) throw new \InvalidArgumentException("backgroundImage: defina 'alias'.");
-            $boxX = $this->mLeft;
-            $boxY = $finalCursorY;
-            $boxW = $this->getContentAreaWidth();
-            $boxH = $initialCursorY - $finalCursorY;
-            if ($__opsInsertAt !== null && $boxW > 0 && $boxH > 0) {
-                $this->drawBackgroundImageInRect($bg['alias'], $boxX, $boxY, $boxW, $boxH, $bg, $__opsInsertAt);
-            }
-        }
-
-        $this->styleManager->pop();
+        $this->paragraphComposer->addParagraphRuns($runs, $opts);
     }
 
     private function explodeRunsToBlocksByNewline(array $runs): array
@@ -1232,7 +1054,7 @@ final class PdfBuilder
         return $this->writer->newObjectId();
     }
 
-    private function normalizeShadowSpec($spec): ?array
+    public function normalizeShadowSpec($spec): ?array
     {
         if (!is_array($spec)) return null;
         return [
