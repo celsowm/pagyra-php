@@ -120,7 +120,7 @@ final class PdfListRenderer
                     'color' => $baseOpts['markerColor'] ?? null,
                 ],
             ];
-            $this->pdf->addListItem($runs ?: [''], $itemOpts);
+            $this->pdf->addParagraphRuns($runs ?: [''], $itemOpts);
 
             if ($nodeType !== 'bullet') {
                 $counters[$level]++;

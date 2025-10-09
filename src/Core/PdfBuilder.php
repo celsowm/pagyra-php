@@ -375,65 +375,9 @@ final class PdfBuilder
         $renderer->render($items, $opts);
     }
 
-    public function addListItem(string|array $runsOuString, array $opts = []): void
-    {
-        if ($this->styleManager->getCurrentFontAlias() === null) {
-            throw new \LogicException("Defina uma fonte com setFont() antes de addList/addListItem().");
-        }
-        $align = $opts['align'] ?? 'left';
-        $baseIndent = (float)($opts['indent'] ?? 0.0);
-        $gap = (float)($opts['gap'] ?? 6.0);
-        $itemSpacing = (float)($opts['itemSpacing'] ?? 2.0);
-        $lineHeight = (float)($opts['lineHeight'] ?? $this->styleManager->getLineHeight());
-        $markerText = (string)($opts['listMarker']['text'] ?? ($opts['bulletChar'] ?? '•'));
-        $markerFont = $opts['listMarker']['fontAlias'] ?? $this->styleManager->getCurrentFontAlias();
-        $markerSize = (float)($opts['listMarker']['size'] ?? $this->styleManager->getCurrentFontSize());
-        $markerStyle = (string)($opts['listMarker']['style'] ?? '');
-        $markerColor = $opts['listMarker']['color'] ?? null;
-        $markerAlign = strtolower($opts['listMarker']['align'] ?? 'right');
-        $markerWidth = (float)($opts['listMarker']['width'] ?? 0.0);
 
-        if ($markerWidth <= 0.0) {
-            $this->styleManager->push();
-            $this->styleManager->setFont($markerFont, $markerSize)->setTextSpacing(0.0, 0.0);
-            $markerMeasured = $this->textRenderer->measureTextStyled($markerText, $this->styleManager);
-            $this->styleManager->pop();
-            $markerWidth = $markerMeasured + $gap;
-        }
 
-        $indentTotal = $baseIndent + $markerWidth;
-        $runs = [];
-        if (is_string($runsOuString)) {
-            $runs = [new PdfRun($runsOuString, [])];
-        } elseif (is_array($runsOuString)) {
-            foreach ($runsOuString as $r) {
-                if ($r instanceof PdfRun) $runs[] = $r;
-                elseif (is_array($r)) $runs[] = new PdfRun($r['text'] ?? '', $r['options'] ?? []);
-                elseif (is_string($r)) $runs[] = new PdfRun($r, []);
-            }
-        }
-        $parOpts = [
-            'align' => $align,
-            'lineHeight' => $lineHeight,
-            'spacing' => $itemSpacing,
-            'indent' => $indentTotal,
-            'hangIndent' => $indentTotal,
-            'listMarker' => [
-                'text' => $markerText,
-                'width' => $markerWidth,
-                'gap' => $gap,
-                'align' => $markerAlign,
-                'fontAlias' => $markerFont,
-                'size' => $markerSize,
-                'style' => $markerStyle,
-                'color' => $markerColor
-            ],
-        ];
-        if (isset($opts['bgcolor'])) $parOpts['bgcolor'] = $opts['bgcolor'];
-        if (isset($opts['border'])) $parOpts['border'] = $opts['border'];
-        if (isset($opts['padding'])) $parOpts['padding'] = $opts['padding'];
-        $this->addParagraphRuns($runs, $parOpts);
-    }
+
 
     public function addParagraph(string|array $textOrOpts, array $opts = []): ?PdfParagraphBuilder
     {
