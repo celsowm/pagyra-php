@@ -16,6 +16,7 @@ use Celsowm\PagyraPhp\Core\PdfStreamBuilder;
 use Celsowm\PagyraPhp\Core\HeaderManager;
 use Celsowm\PagyraPhp\Core\FooterManager;
 use Celsowm\PagyraPhp\Core\FixedElementManager;
+use Celsowm\PagyraPhp\Core\PdfLinkManager;
 use Celsowm\PagyraPhp\Style\PdfStyleManager;
 use Celsowm\PagyraPhp\Graphics\State\PdfExtGStateManager;
 use Celsowm\PagyraPhp\Font\PdfFontManager;
@@ -61,6 +62,7 @@ final class PdfBuilder
     private FixedElementManager $fixedElementManager;
     private PdfTableManager $tableManager;
     private PdfGraphicsRenderer $graphicsRenderer;
+    private PdfLinkManager $linkManager;
 
 
     public function __construct(float $w = 595.28, float $h = 841.89)
@@ -78,6 +80,7 @@ final class PdfBuilder
         $this->fixedElementManager = new FixedElementManager($this);
         $this->tableManager = new PdfTableManager($this);
         $this->graphicsRenderer = new PdfGraphicsRenderer($this);
+        $this->linkManager = new PdfLinkManager($this);
 
         $this->setMargins(56, 56, 56, 56);
         $this->internal_newPage();
@@ -224,61 +227,29 @@ final class PdfBuilder
 
     public function addLinkAbs(float $x, float $y, float $width, float $height, string $url): void
     {
-        if ($this->measurementMode || $this->currentPage === null) {
-            return;
-        }
-        $annotId = $this->newObjectId();
-        $actionId = $this->getOrCreateUriAction($url);
+        $this->linkManager->addLinkAbs($x, $y, $width, $height, $url);
+    }
+
+    public function addLink(string $text, string $url, array $opts = []): void
+    {
+        $this->linkManager->addLinkText($text, $url, $opts);
+    }
+
+    public function addLinkTextAbs(float $x, float $y, string $text, string $url, array $opts = []): void
+    {
+        $this->linkManager->addLinkTextAbs($x, $y, $text, $url, $opts);
+    }
+
+    public function addAnnotation(int $annotId, array $rect, int $actionId): void
+    {
         if (!isset($this->pageAnnotations[$this->currentPage])) {
             $this->pageAnnotations[$this->currentPage] = [];
         }
         $this->pageAnnotations[$this->currentPage][] = [
             'id' => $annotId,
-            'rect' => [$x, $y, $x + $width, $y + $height],
+            'rect' => $rect,
             'action' => $actionId
         ];
-    }
-
-    private function getOrCreateUriAction(string $url): int
-    {
-        $urlHash = md5($url);
-        if (!isset($this->uriActions[$urlHash])) {
-            $actionId = $this->newObjectId();
-            $this->uriActions[$urlHash] = $actionId;
-            $escapedUrl = str_replace(
-                ['\\', '(', ')'],
-                ['\\\\', '\\(', '\\)'],
-                $url
-            );
-            $this->setObject($actionId, "<< /Type /Action /S /URI /URI ({$escapedUrl}) >>");
-        }
-        return $this->uriActions[$urlHash];
-    }
-
-    public function addLink(string $text, string $url, array $opts = []): void
-    {
-        $opts['href'] = $url;
-        $opts['color'] = $opts['color'] ?? '#0000FF';
-        $opts['style'] = $opts['style'] ?? 'U';
-        $this->addParagraphText($text, $opts);
-    }
-
-    public function addLinkTextAbs(float $x, float $y, string $text, string $url, array $opts = []): void
-    {
-        $opts['style'] = $opts['style'] ?? 'U';
-        $opts['color'] = $opts['color'] ?? '#0000FF';
-
-        $this->styleManager->push();
-        $this->styleManager->applyOptions($opts, $this);
-
-        $this->addTextAbs($x, $y, $text, $opts['color'], $opts);
-        $textWidth = $this->textRenderer->measureTextStyled($text, $this->styleManager);
-        $linkHeight = $this->styleManager->getLineHeight();
-
-        $this->styleManager->pop();
-
-        $linkY = $y - ($linkHeight * 0.25);
-        $this->addLinkAbs($x, $linkY, $textWidth, $linkHeight, $url);
     }
 
     public function addTTFFont(string $alias, string $ttfPath): void
