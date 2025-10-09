@@ -28,7 +28,7 @@ final class PdfBlockRenderer /* nested-blocks-supported */
     public function render(array $elements, array $options): float
     {
         $position   = $options['position'] ?? 'relative';
-        $borderSpec = $this->pdf->normalizeBorderSpec($options['border'] ?? null, $options['padding'] ?? null);
+        $borderSpec = $this->pdf->getBorderManager()->normalizeBorderSpec($options['border'] ?? null, $options['padding'] ?? null);
         $padding    = $borderSpec['padding'];
         $margin     = $this->normalizeMargin($options['margin'] ?? 0);
 

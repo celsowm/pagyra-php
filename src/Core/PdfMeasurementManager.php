@@ -41,7 +41,7 @@ class PdfMeasurementManager
         $this->enterMeasurementMode();
 
         try {
-            $borderSpec = $pdfBuilder->normalizeBorderSpec($options['border'] ?? null, $options['padding'] ?? null);
+            $borderSpec = $pdfBuilder->getBorderManager()->normalizeBorderSpec($options['border'] ?? null, $options['padding'] ?? null);
             $padding    = $borderSpec['padding'];
             $margin     = $pdfBuilder->normalizePadding($options['margin'] ?? 0);
 
