@@ -213,15 +213,8 @@ final class PdfColor
                         return null;
                     }
                     $values = $this->normalizeVector($rgb, 3);
-                    if ($alpha < 1.0) {
-                        $values = array_map(
-                            static function (float $component) use ($alpha): float {
-                                return ($alpha * $component) + ((1.0 - $alpha) * 1.0);
-                            },
-                            $values
-                        );
-                    }
-                    return ['space' => 'rgb', 'v' => $values];
+                    // Don't pre-multiply alpha here - let PDF graphics state handle transparency
+                    return ['space' => 'rgb', 'v' => $values, 'alpha' => $alpha];
                 }
             }
 

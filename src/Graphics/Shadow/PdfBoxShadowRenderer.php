@@ -89,32 +89,33 @@ final class PdfBoxShadowRenderer
         ?array $borderRadius
     ): void {
         $page = $this->pdf->getCurrentPage();
-        
+
         $ops = "q\n";
 
-        // Set transparency
-        if ($alpha < 1.0) {
-            [$gsName, $gsId] = $this->pdf->getExtGStateManager()->ensureAlphaRef($alpha);
-            $this->pdf->registerPageResource('ExtGState', $gsName, $gsId);
-            $ops .= "{$gsName} gs\n";
-        }
-
-        // Set fill color
+        // Set fill color (now includes alpha handling)
         $pdfColor = new PdfColor();
-        $colorOps = $pdfColor->getFillOps($color);
+        $colorSpec = $pdfColor->normalize($color);
+        $colorOps = $pdfColor->getFillOps($colorSpec);
         if ($colorOps !== '') {
             $ops .= $colorOps;
         }
 
+        // Apply alpha if present in color spec
+        if (isset($colorSpec['alpha']) && $colorSpec['alpha'] < 1.0) {
+            [$gsName, $gsId] = $this->pdf->getExtGStateManager()->ensureAlphaRef($colorSpec['alpha']);
+            $this->pdf->registerPageResource('ExtGState', $gsName, $gsId);
+            $ops .= "{$gsName} gs\n";
+        }
+
         // Draw shadow shape
         if ($borderRadius && $this->hasSignificantRadius($borderRadius)) {
-            $ops .= $this->buildRoundedRectPath($x, $y, $w, $h, $borderRadius);
+            $path = $this->buildRoundedRectPath($x, $y, $w, $h, $borderRadius);
+            $ops .= $path;
         } else {
             $ops .= sprintf("%.3F %.3F %.3F %.3F re\n", $x, $y, $w, $h);
         }
 
         $ops .= "f\nQ\n"; // Fill and restore graphics state
-
         $this->pdf->appendToPageContent($ops);
     }
 
