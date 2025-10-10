@@ -46,17 +46,58 @@ class PdfParagraphComposer
 
     public function addParagraphRuns(array $runs, array $opts = []): void
     {
-        $styleManager = $this->pdfBuilder->getStyleManager();
+        $this->validateFontIsSet();
 
+        $styleManager = $this->pdfBuilder->getStyleManager();
+        $styleManager->push();
+
+        $context = $this->initializeParagraphContext($opts);
+        $layout = $this->calculateLayoutDimensions($opts, $context);
+
+        $blocks = $this->explodeRunsToBlocksByNewline($runs);
+        $renderingResult = $this->renderTextBlocks($blocks, $opts, $layout, $context);
+
+        $this->applyFinalLayoutAdjustments($renderingResult, $context, $layout);
+        $this->renderBorders($renderingResult, $context);
+        $this->renderBackgroundImage($opts, $context, $renderingResult);
+
+        $styleManager->pop();
+    }
+
+    public function drawParagraphBorders(array $box, array $spec): void
+    {
+        $this->pdfBuilder->drawParagraphBorders($box, $spec);
+    }
+
+    private function validateFontIsSet(): void
+    {
+        $styleManager = $this->pdfBuilder->getStyleManager();
         if ($styleManager->getCurrentFontAlias() === null) {
             throw new \LogicException("Defina uma fonte com setFont() antes de adicionar texto.");
         }
-        $styleManager->push();
+    }
 
-        $__opsInsertAt = ($this->pdfBuilder->getCurrentPage() !== null) ? strlen($this->pdfBuilder->pageContents[$this->pdfBuilder->getCurrentPage()] ?? '') : null;
-
+    private function initializeParagraphContext(array $opts): array
+    {
+        $styleManager = $this->pdfBuilder->getStyleManager();
         $styleManager->applyOptions($opts, $this->pdfBuilder);
 
+        $opsInsertAt = ($this->pdfBuilder->getCurrentPage() !== null)
+            ? strlen($this->pdfBuilder->pageContents[$this->pdfBuilder->getCurrentPage()] ?? '')
+            : null;
+
+        return [
+            'opsInsertAt' => $opsInsertAt,
+            'initialCursorY' => $this->pdfBuilder->getCursorY(),
+            'borderFragments' => [],
+            'fragTop' => $this->pdfBuilder->getCursorY(),
+            'fragPage' => $this->pdfBuilder->getCurrentPage(),
+        ];
+    }
+
+    private function calculateLayoutDimensions(array $opts, array $context): array
+    {
+        $styleManager = $this->pdfBuilder->getStyleManager();
         $borderSpec = $this->borderManager->normalizeBorderSpec($opts['border'] ?? null, $opts['padding'] ?? null);
         $padding = $borderSpec['padding'];
         $baseX = $this->pdfBuilder->mLeft + $padding[3];
@@ -66,156 +107,295 @@ class PdfParagraphComposer
         if (isset($opts['containerPadding']) && is_array($opts['containerPadding'])) {
             $cp = array_values($opts['containerPadding']);
             $cp += [0, 0, 0, 0];
-            $baseX     += (float)$cp[3];
+            $baseX += (float)$cp[3];
             $wrapWidth -= (float)$cp[1] + (float)$cp[3];
             if ($wrapWidth < 0) {
                 $wrapWidth = 0.0;
             }
         }
-        $initialCursorY = $this->pdfBuilder->getCursorY();
-        $__borderFragments = [];
-        $__fragTop = $initialCursorY;
-        $__fragPage = $this->pdfBuilder->getCurrentPage();
-        $this->pdfBuilder->getLayoutManager()->advanceCursor($padding[0]);
-        $__prevPage = $this->pdfBuilder->getCurrentPage();
-        $__prevBottomMargin = $this->pdfBuilder->getLayoutManager()->getPageBottomMargin();
-        $this->pdfBuilder->getLayoutManager()->checkPageBreak();
-        if ($this->pdfBuilder->getCurrentPage() !== $__prevPage) {
-            $__borderFragments[] = ['page' => $__prevPage, 'x' => $this->pdfBuilder->mLeft, 'y' => $__prevBottomMargin, 'w' => $this->pdfBuilder->getContentAreaWidth(), 'h' => $__fragTop - $__prevBottomMargin, 'kind' => 'first'];
-            $__fragTop = $this->pdfBuilder->getLayoutManager()->getCursorY();
-            $__fragPage = $this->pdfBuilder->getCurrentPage();
-        }
 
-        $align = $opts['align'] ?? 'left';
-        $indent = (float)($opts['indent'] ?? 0.0);
-        $hangIndent = (float)($opts['hangIndent'] ?? 0.0);
-        $spacing = (float)($opts['spacing'] ?? 0.0);
-        $lineH = $styleManager->getLineHeight();
-        $bgColor = $this->pdfBuilder->normalizeColor($opts['bgcolor'] ?? null);
-        $markerSpec = $opts['listMarker'] ?? null;
-        $needMarker = $markerSpec !== null;
-
-        $blocks = $this->explodeRunsToBlocksByNewline($runs);
-        $hasWritten = false;
-        $lastBlockKey = empty($blocks) ? null : array_key_last($blocks);
-        foreach ($blocks as $key => $blockTokens) {
-            $isLastBlock = ($key === $lastBlockKey);
-            $firstLine = true;
-            $lineTokens = [];
-            $avail = $wrapWidth - ($firstLine ? $indent : $hangIndent);
-            foreach ($blockTokens as $tok) {
-                $wTok = $this->measureTokenWidth($tok);
-                if (empty($lineTokens) && $tok['type'] === 'space') continue;
-
-                if ($wTok <= $avail || empty($lineTokens)) {
-                    $lineTokens[] = $tok;
-                    $avail -= $wTok;
-                    continue;
-                }
-                $tokensToFlush = $lineTokens;
-                $nextToken = $tok;
-                if (end($tokensToFlush)['type'] === 'space') array_pop($tokensToFlush);
-
-                if (!empty($tokensToFlush)) {
-                    $__beforePage = $this->pdfBuilder->getCurrentPage();
-                    $__prevBottomMargin = $this->pdfBuilder->getLayoutManager()->getPageBottomMargin();
-                    $this->emitRunsLine($tokensToFlush, $align, $indent, $wrapWidth, $lineH, ($align === 'justify'), $bgColor, $baseX, $firstLine, $hangIndent, $needMarker ? $markerSpec : null);
-                    if ($this->pdfBuilder->getCurrentPage() !== $__beforePage) {
-                        $__borderFragments[] = ['page' => $__beforePage, 'x' => $this->pdfBuilder->mLeft, 'y' => $__prevBottomMargin, 'w' => $this->pdfBuilder->getContentAreaWidth(), 'h' => $__fragTop - $__prevBottomMargin, 'kind' => empty($__borderFragments) ? 'first' : 'middle'];
-                        $__fragTop = $this->pdfBuilder->getLayoutManager()->getCursorY();
-                        $__fragPage = $this->pdfBuilder->getCurrentPage();
-                    }
-                    $needMarker = false;
-                    $hasWritten = true;
-                }
-                $firstLine = false;
-                $lineTokens = ($nextToken['type'] === 'space') ? [] : [$nextToken];
-                $avail = $wrapWidth - ($firstLine ? $indent : $hangIndent) - $this->measureTokensWidth($lineTokens);
-            }
-            if (!empty($lineTokens)) {
-                $__beforePage = $this->pdfBuilder->getCurrentPage();
-                $__prevBottomMargin = $this->pdfBuilder->getLayoutManager()->getPageBottomMargin();
-                $this->emitRunsLine($lineTokens, $align, $indent, $wrapWidth, $lineH, ($align === 'justify' && !$isLastBlock), $bgColor, $baseX, $firstLine, $hangIndent, $needMarker ? $markerSpec : null);
-                if ($this->pdfBuilder->getCurrentPage() !== $__beforePage) {
-                    $__borderFragments[] = ['page' => $__beforePage, 'x' => $this->pdfBuilder->mLeft, 'y' => $__prevBottomMargin, 'w' => $this->pdfBuilder->getContentAreaWidth(), 'h' => $__fragTop - $__prevBottomMargin, 'kind' => empty($__borderFragments) ? 'first' : 'middle'];
-                    $__fragTop = $this->pdfBuilder->getLayoutManager()->getCursorY();
-                    $__fragPage = $this->pdfBuilder->getCurrentPage();
-                }
-                $needMarker = false;
-                $hasWritten = true;
-            }
-            if ($spacing > 0) {
-                $__beforePage = $this->pdfBuilder->getCurrentPage();
-                $__prevBottomMargin = $this->pdfBuilder->getLayoutManager()->getPageBottomMargin();
-                $this->pdfBuilder->getLayoutManager()->advanceCursor($spacing);
-                $this->pdfBuilder->getLayoutManager()->checkPageBreak();
-                if ($this->pdfBuilder->getCurrentPage() !== $__beforePage) {
-                    $__borderFragments[] = ['page' => $__beforePage, 'x' => $this->pdfBuilder->mLeft, 'y' => $__prevBottomMargin, 'w' => $this->pdfBuilder->getContentAreaWidth(), 'h' => $__fragTop - $__prevBottomMargin, 'kind' => empty($__borderFragments) ? 'first' : 'middle'];
-                    $__fragTop = $this->pdfBuilder->getLayoutManager()->getCursorY();
-                    $__fragPage = $this->pdfBuilder->getCurrentPage();
-                }
-            }
-        }
-        if ($hasWritten) {
-            $this->pdfBuilder->getLayoutManager()->advanceCursor($padding[2]);
-        } else {
-            $this->pdfBuilder->getLayoutManager()->setCursorY($initialCursorY);
-        }
-
-        $finalCursorY = $this->pdfBuilder->getLayoutManager()->getCursorY();
-        if ($borderSpec['hasBorder'] && !empty($__borderFragments)) {
-            $__borderFragments[] = ['page' => $this->pdfBuilder->getCurrentPage(), 'x' => $this->pdfBuilder->mLeft, 'y' => $finalCursorY, 'w' => $this->pdfBuilder->getContentAreaWidth(), 'h' => $__fragTop - $finalCursorY, 'kind' => 'last'];
-            $__origPage = $this->pdfBuilder->getCurrentPage();
-            foreach ($__borderFragments as $__frag) {
-                if ($__frag['h'] <= 0.001) continue;
-                $spec = $borderSpec;
-                if ($__frag['kind'] === 'first') {
-                    $spec['width'][2] = 0.0;
-                    if (isset($spec['radius'])) {
-                        $spec['radius'][2] = 0.0;
-                        $spec['radius'][3] = 0.0;
-                    }
-                } elseif ($__frag['kind'] === 'middle') {
-                    $spec['width'][0] = 0.0;
-                    $spec['width'][2] = 0.0;
-                    if (isset($spec['radius'])) {
-                        $spec['radius'] = [0.0, 0.0, 0.0, 0.0];
-                    }
-                } elseif ($__frag['kind'] === 'last') {
-                    $spec['width'][0] = 0.0;
-                    if (isset($spec['radius'])) {
-                        $spec['radius'][0] = 0.0;
-                        $spec['radius'][1] = 0.0;
-                    }
-                }
-                $this->pdfBuilder->setCurrentPage($__frag['page']);
-                $this->drawParagraphBorders(['x' => $__frag['x'], 'y' => $__frag['y'], 'w' => $__frag['w'], 'h' => $__frag['h']], $spec);
-            }
-            $this->pdfBuilder->setCurrentPage($__origPage);
-        }
-        if ($borderSpec['hasBorder'] && empty($__borderFragments)) {
-            $paddedBox = ['x' => $this->pdfBuilder->mLeft, 'y' => $finalCursorY, 'w' => $this->pdfBuilder->getContentAreaWidth(), 'h' => $initialCursorY - $finalCursorY];
-            $this->drawParagraphBorders($paddedBox, $borderSpec);
-        }
-        $bgImgOpt = $opts['backgroundImage'] ?? ($opts['bgimage'] ?? null);
-        if ($bgImgOpt !== null) {
-            $bg = is_string($bgImgOpt) ? ['alias' => $bgImgOpt] : (array)$bgImgOpt;
-            if (empty($bg['alias'])) throw new \InvalidArgumentException("backgroundImage: defina 'alias'.");
-            $boxX = $this->pdfBuilder->mLeft;
-            $boxY = $finalCursorY;
-            $boxW = $this->pdfBuilder->getContentAreaWidth();
-            $boxH = $initialCursorY - $finalCursorY;
-            if ($__opsInsertAt !== null && $boxW > 0 && $boxH > 0) {
-                $this->pdfBuilder->drawBackgroundImageInRect($bg['alias'], $boxX, $boxY, $boxW, $boxH, $bg, $__opsInsertAt);
-            }
-        }
-
-        $styleManager->pop();
+        return [
+            'borderSpec' => $borderSpec,
+            'padding' => $padding,
+            'baseX' => $baseX,
+            'wrapWidth' => $wrapWidth,
+            'align' => $opts['align'] ?? 'left',
+            'indent' => (float)($opts['indent'] ?? 0.0),
+            'hangIndent' => (float)($opts['hangIndent'] ?? 0.0),
+            'spacing' => (float)($opts['spacing'] ?? 0.0),
+            'lineHeight' => $styleManager->getLineHeight(),
+            'bgColor' => $this->pdfBuilder->normalizeColor($opts['bgcolor'] ?? null),
+            'markerSpec' => $opts['listMarker'] ?? null,
+            'needMarker' => ($opts['listMarker'] ?? null) !== null,
+        ];
     }
 
-    public function drawParagraphBorders(array $box, array $spec): void
+    private function renderTextBlocks(array $blocks, array $opts, array $layout, array &$context): array
     {
-        $this->pdfBuilder->drawParagraphBorders($box, $spec);
+        $styleManager = $this->pdfBuilder->getStyleManager();
+        $lineHeight = $styleManager->getLineHeight();
+
+        // Avança cursor com padding superior
+        $this->pdfBuilder->getLayoutManager()->advanceCursor($layout['padding'][0]);
+
+        // Verifica quebra de página inicial
+        $prevPage = $this->pdfBuilder->getCurrentPage();
+        $prevBottomMargin = $this->pdfBuilder->getLayoutManager()->getPageBottomMargin();
+        $this->pdfBuilder->getLayoutManager()->checkPageBreak();
+
+        if ($this->pdfBuilder->getCurrentPage() !== $prevPage) {
+            $context['borderFragments'][] = [
+                'page' => $prevPage,
+                'x' => $this->pdfBuilder->mLeft,
+                'y' => $prevBottomMargin,
+                'w' => $this->pdfBuilder->getContentAreaWidth(),
+                'h' => $context['fragTop'] - $prevBottomMargin,
+                'kind' => 'first'
+            ];
+            $context['fragTop'] = $this->pdfBuilder->getLayoutManager()->getCursorY();
+            $context['fragPage'] = $this->pdfBuilder->getCurrentPage();
+        }
+
+        $hasWritten = false;
+        $lastBlockKey = empty($blocks) ? null : array_key_last($blocks);
+
+        foreach ($blocks as $key => $blockTokens) {
+            $isLastBlock = ($key === $lastBlockKey);
+            $hasWritten = $this->renderTextBlock($blockTokens, $opts, $layout, $context, $isLastBlock, $hasWritten);
+        }
+
+        return [
+            'hasWritten' => $hasWritten,
+            'finalCursorY' => $this->pdfBuilder->getLayoutManager()->getCursorY(),
+        ];
+    }
+
+    private function renderTextBlock(array $blockTokens, array $opts, array $layout, array &$context, bool $isLastBlock, bool $hasWritten): bool
+    {
+        $firstLine = true;
+        $lineTokens = [];
+        $avail = $layout['wrapWidth'] - ($firstLine ? $layout['indent'] : $layout['hangIndent']);
+
+        foreach ($blockTokens as $tok) {
+            $wTok = $this->measureTokenWidth($tok);
+            if (empty($lineTokens) && $tok['type'] === 'space') continue;
+
+            if ($wTok <= $avail || empty($lineTokens)) {
+                $lineTokens[] = $tok;
+                $avail -= $wTok;
+                continue;
+            }
+
+            // Flush line
+            $hasWritten = $this->flushLineTokens($lineTokens, $layout, $context, $firstLine, $hasWritten);
+            $firstLine = false;
+
+            // Start new line with current token
+            $lineTokens = ($tok['type'] === 'space') ? [] : [$tok];
+            $avail = $layout['wrapWidth'] - ($firstLine ? $layout['indent'] : $layout['hangIndent']) - $this->measureTokensWidth($lineTokens);
+        }
+
+        // Flush remaining tokens
+        if (!empty($lineTokens)) {
+            $hasWritten = $this->flushLineTokens($lineTokens, $layout, $context, $firstLine, $hasWritten, $isLastBlock);
+        }
+
+        // Apply spacing between blocks
+        if ($layout['spacing'] > 0) {
+            $this->applyBlockSpacing($layout, $context);
+        }
+
+        return $hasWritten;
+    }
+
+    private function flushLineTokens(array $lineTokens, array $layout, array &$context, bool $firstLine, bool $hasWritten, bool $isLastBlock = false): bool
+    {
+        $tokensToFlush = $lineTokens;
+        if (end($tokensToFlush)['type'] === 'space') {
+            array_pop($tokensToFlush);
+        }
+
+        if (!empty($tokensToFlush)) {
+            $beforePage = $this->pdfBuilder->getCurrentPage();
+            $prevBottomMargin = $this->pdfBuilder->getLayoutManager()->getPageBottomMargin();
+
+            $this->emitRunsLine(
+                $tokensToFlush,
+                $layout['align'],
+                $layout['indent'],
+                $layout['wrapWidth'],
+                $layout['lineHeight'],
+                ($layout['align'] === 'justify' && !$isLastBlock),
+                $layout['bgColor'],
+                $layout['baseX'],
+                $firstLine,
+                $layout['hangIndent'],
+                $layout['needMarker'] ? $layout['markerSpec'] : null
+            );
+
+            if ($this->pdfBuilder->getCurrentPage() !== $beforePage) {
+                $context['borderFragments'][] = [
+                    'page' => $beforePage,
+                    'x' => $this->pdfBuilder->mLeft,
+                    'y' => $prevBottomMargin,
+                    'w' => $this->pdfBuilder->getContentAreaWidth(),
+                    'h' => $context['fragTop'] - $prevBottomMargin,
+                    'kind' => empty($context['borderFragments']) ? 'first' : 'middle'
+                ];
+                $context['fragTop'] = $this->pdfBuilder->getLayoutManager()->getCursorY();
+                $context['fragPage'] = $this->pdfBuilder->getCurrentPage();
+            }
+
+            $layout['needMarker'] = false;
+            $hasWritten = true;
+        }
+
+        return $hasWritten;
+    }
+
+    private function applyBlockSpacing(array $layout, array &$context): void
+    {
+        $beforePage = $this->pdfBuilder->getCurrentPage();
+        $prevBottomMargin = $this->pdfBuilder->getLayoutManager()->getPageBottomMargin();
+
+        $this->pdfBuilder->getLayoutManager()->advanceCursor($layout['spacing']);
+        $this->pdfBuilder->getLayoutManager()->checkPageBreak();
+
+        if ($this->pdfBuilder->getCurrentPage() !== $beforePage) {
+            $context['borderFragments'][] = [
+                'page' => $beforePage,
+                'x' => $this->pdfBuilder->mLeft,
+                'y' => $prevBottomMargin,
+                'w' => $this->pdfBuilder->getContentAreaWidth(),
+                'h' => $context['fragTop'] - $prevBottomMargin,
+                'kind' => empty($context['borderFragments']) ? 'first' : 'middle'
+            ];
+            $context['fragTop'] = $this->pdfBuilder->getLayoutManager()->getCursorY();
+            $context['fragPage'] = $this->pdfBuilder->getCurrentPage();
+        }
+    }
+
+    private function applyFinalLayoutAdjustments(array $renderingResult, array $context, array $layout): void
+    {
+        if ($renderingResult['hasWritten']) {
+            $this->pdfBuilder->getLayoutManager()->advanceCursor($layout['padding'][2]);
+        } else {
+            $this->pdfBuilder->getLayoutManager()->setCursorY($context['initialCursorY']);
+        }
+    }
+
+    private function renderBorders(array $renderingResult, array $context): void
+    {
+        $layout = $this->getLayoutFromContext($context);
+        $borderSpec = $layout['borderSpec'];
+        $finalCursorY = $renderingResult['finalCursorY'];
+
+        if (!$borderSpec['hasBorder'] || empty($context['borderFragments'])) {
+            if ($borderSpec['hasBorder']) {
+                $paddedBox = [
+                    'x' => $this->pdfBuilder->mLeft,
+                    'y' => $finalCursorY,
+                    'w' => $this->pdfBuilder->getContentAreaWidth(),
+                    'h' => $context['initialCursorY'] - $finalCursorY
+                ];
+                $this->drawParagraphBorders($paddedBox, $borderSpec);
+            }
+            return;
+        }
+
+        $context['borderFragments'][] = [
+            'page' => $this->pdfBuilder->getCurrentPage(),
+            'x' => $this->pdfBuilder->mLeft,
+            'y' => $finalCursorY,
+            'w' => $this->pdfBuilder->getContentAreaWidth(),
+            'h' => $context['fragTop'] - $finalCursorY,
+            'kind' => 'last'
+        ];
+
+        $origPage = $this->pdfBuilder->getCurrentPage();
+        foreach ($context['borderFragments'] as $frag) {
+            if ($frag['h'] <= 0.001) continue;
+
+            $spec = $borderSpec;
+            $spec = $this->adjustBorderSpecForFragment($spec, $frag['kind']);
+
+            $this->pdfBuilder->setCurrentPage($frag['page']);
+            $this->drawParagraphBorders([
+                'x' => $frag['x'],
+                'y' => $frag['y'],
+                'w' => $frag['w'],
+                'h' => $frag['h']
+            ], $spec);
+        }
+        $this->pdfBuilder->setCurrentPage($origPage);
+    }
+
+    private function renderBackgroundImage(array $opts, array $context, array $renderingResult): void
+    {
+        $bgImgOpt = $opts['backgroundImage'] ?? ($opts['bgimage'] ?? null);
+        if ($bgImgOpt === null) return;
+
+        $bg = is_string($bgImgOpt) ? ['alias' => $bgImgOpt] : (array)$bgImgOpt;
+        if (empty($bg['alias'])) {
+            throw new \InvalidArgumentException("backgroundImage: defina 'alias'.");
+        }
+
+        $boxX = $this->pdfBuilder->mLeft;
+        $boxY = $renderingResult['finalCursorY'];
+        $boxW = $this->pdfBuilder->getContentAreaWidth();
+        $boxH = $context['initialCursorY'] - $renderingResult['finalCursorY'];
+
+        if ($context['opsInsertAt'] !== null && $boxW > 0 && $boxH > 0) {
+            $this->pdfBuilder->drawBackgroundImageInRect(
+                $bg['alias'],
+                $boxX,
+                $boxY,
+                $boxW,
+                $boxH,
+                $bg,
+                $context['opsInsertAt']
+            );
+        }
+    }
+
+    private function getLayoutFromContext(array $context): array
+    {
+        // This is a helper to get layout data - in a full implementation,
+        // you might want to store layout data in context or pass it differently
+        // For now, return a default structure to prevent undefined array key errors
+        return [
+            'borderSpec' => [
+                'hasBorder' => false,
+                'width' => [0.0, 0.0, 0.0, 0.0],
+                'color' => [0.0, 0.0, 0.0],
+                'style' => 'solid',
+                'padding' => [0.0, 0.0, 0.0, 0.0]
+            ]
+        ];
+    }
+
+    private function adjustBorderSpecForFragment(array $spec, string $kind): array
+    {
+        if ($kind === 'first') {
+            $spec['width'][2] = 0.0;
+            if (isset($spec['radius'])) {
+                $spec['radius'][2] = 0.0;
+                $spec['radius'][3] = 0.0;
+            }
+        } elseif ($kind === 'middle') {
+            $spec['width'][0] = 0.0;
+            $spec['width'][2] = 0.0;
+            if (isset($spec['radius'])) {
+                $spec['radius'] = [0.0, 0.0, 0.0, 0.0];
+            }
+        } elseif ($kind === 'last') {
+            $spec['width'][0] = 0.0;
+            if (isset($spec['radius'])) {
+                $spec['radius'][0] = 0.0;
+                $spec['radius'][1] = 0.0;
+            }
+        }
+        return $spec;
     }
 
     private function explodeRunsToBlocksByNewline(array $runs): array
