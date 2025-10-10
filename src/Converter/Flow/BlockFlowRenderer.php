@@ -70,7 +70,7 @@ final class BlockFlowRenderer
 
         [$blockOptions, $imageInstruction] = $this->prepareImageRendering($blockOptions, $imageResource, $style, $flow, $baseFontSize);
 
-        
+
         $bgImageValue = $map['background-image'] ?? ($map['background'] ?? null);
         if (is_string($bgImageValue) && str_contains($bgImageValue, 'linear-gradient')) {
             $gp = new CssGradientParser();

@@ -148,11 +148,12 @@ final class PdfBlockRenderer /* nested-blocks-supported */
         }
 
         // ===== 3) PAINT BACKGROUND =====
-        if ($bgGradient && $this->bgPainter instanceof PdfBackgroundPainter) {
+        if ($bgGradient) {
+            $painter = $this->bgPainter ?: new PdfBackgroundPainter($this->pdf, new \Celsowm\PagyraPhp\Graphics\Gradient\PdfGradientFactory($this->pdf), new \Celsowm\PagyraPhp\Graphics\Shading\PdfShadingRegistry($this->pdf));
             if (($bgGradient['type'] ?? 'linear') === 'radial') {
-                $this->bgPainter->radialRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
+                $painter->radialRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
             } else {
-                $this->bgPainter->linearRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
+                $painter->linearRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
             }
         } else {
             $this->drawBackground($rectX, $rectY, $rectW, $rectH, $bgColor, $radius);
