@@ -653,18 +653,6 @@ final class PdfBuilder
         $this->tableManager->addTableData($data, $options);
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
     public function addSpacer(float $h): void
     {
         $this->layoutManager->advanceCursor($h);
@@ -858,8 +846,6 @@ final class PdfBuilder
     {
         $this->graphicsRenderer->drawRoundedBackgroundRect($x, $y, $w, $h, $r, $color);
     }
-
-
 
     private function buildImageOps(string $alias, float $x, float $y, float $w, float $h, ?array $opts = null): string
     {
@@ -1067,8 +1053,6 @@ final class PdfBuilder
         ];
     }
 
-
-
     public function drawParagraphBorders(array $box, array $spec): void
     {
         $this->graphicsRenderer->drawParagraphBorders($box, $spec);
@@ -1150,8 +1134,6 @@ final class PdfBuilder
     {
         $this->columnLayoutManager->addColumns($columns, $options);
     }
-
-
 
     public function normalizePadding($padding): array
     {
