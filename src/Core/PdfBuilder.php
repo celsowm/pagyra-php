@@ -46,11 +46,7 @@ final class PdfBuilder
     public array $pageContents = [];
     private array $pageResources = [];
     private ?int $currentPage = null;
-    private array $fonts = [];
-    private array $usedGids = [];
     private array $pageAnnotations = [];
-    private array $uriActions = [];
-
     public array $baseMargins = ['left' => 56.0, 'top' => 56.0, 'right' => 56.0, 'bottom' => 56.0];
 
     private int $pageBreakSuppression = 0;
@@ -64,7 +60,6 @@ final class PdfBuilder
     private PdfBorderManager $borderManager;
     private PdfColumnLayoutManager $columnLayoutManager;
     private PdfParagraphComposer $paragraphComposer;
-
 
     public function __construct(float $w = 595.28, float $h = 841.89)
     {
@@ -386,46 +381,6 @@ final class PdfBuilder
         $this->paragraphComposer->addParagraphRuns($runs, $opts);
     }
 
-    private function explodeRunsToBlocksByNewline(array $runs): array
-    {
-        $blocks = [[]];
-        foreach ($runs as $run) {
-            if (!$run instanceof PdfRun) {
-                $run = new PdfRun($run['text'] ?? '', $run['options'] ?? []);
-            }
-
-            if ($run->isInline && $run->inlineRenderer !== null) {
-                $blocks[array_key_last($blocks)][] = [
-                    'type' => 'inline',
-                    'renderer' => $run->inlineRenderer,
-                    'opt' => $run->options
-                ];
-                continue;
-            }
-
-            if ($run->text === '') continue;
-
-            $parts = preg_split('/\R/u', $run->text);
-            if ($parts === false) {
-                $parts = [$run->text];
-            }
-            $lastPartIdx = count($parts) - 1;
-            foreach ($parts as $j => $part) {
-                $pieces = preg_split('/(\s+)/u', $part, -1, PREG_SPLIT_DELIM_CAPTURE);
-                if ($pieces === false) {
-                    $pieces = [$part];
-                }
-                foreach ($pieces as $p) {
-                    if ($p === '') continue;
-                    $isSpace = preg_match('/^\s+$/u', $p);
-                    $blocks[array_key_last($blocks)][] = ['type' => $isSpace ? 'space' : 'word', 'text' => $p, 'opt' => $run->options];
-                }
-                if ($j < $lastPartIdx) $blocks[] = [];
-            }
-        }
-        return array_values(array_filter($blocks, fn($b) => !empty($b)));
-    }
-
     private function measureTokenWidth(array $tok): float
     {
         if ($tok['type'] === 'inline') {
@@ -497,143 +452,7 @@ final class PdfBuilder
             'glyphHeight' => $glyphHeight,
         ];
     }
-
-    private function emitRunsLine(
-        array $tokens,
-        string $align,
-        float $indent,
-        float $wrapWidth,
-        float $lineH,
-        bool $justify,
-        ?array $bgColor,
-        float $baseX,
-        bool $isFirst,
-        float $hangIndent = 0.0,
-        ?array $markerSpec = null
-    ): void {
-        $this->layoutManager->checkPageBreak($lineH);
-        $renderTokens = $tokens;
-        if ($justify && count($renderTokens) > 0 && end($renderTokens)['type'] === 'space') {
-            array_pop($renderTokens);
-        }
-        if (empty($renderTokens)) {
-            $this->layoutManager->advanceCursor($lineH);
-            $this->layoutManager->checkPageBreak();
-            return;
-        }
-        $actualIndent = $isFirst ? $indent : $hangIndent;
-        $lineWidth = $this->measureTokensWidth($renderTokens);
-        $targetWidth = $wrapWidth - $actualIndent;
-        $x = match ($align) {
-            'center' => $baseX + $actualIndent + ($targetWidth - $lineWidth) / 2.0,
-            'right' => $baseX + $actualIndent + ($targetWidth - $lineWidth),
-            default => $baseX + $actualIndent,
-        };
-        $lineTop = $this->layoutManager->getCursorY();
-
-        $lineMetrics = $this->computeLineMetrics($lineH);
-        $baselineOffset = $lineMetrics['baselineOffset'];
-        $baselineY = $lineTop - $baselineOffset;
-
-        if ($bgColor !== null) {
-            $maxSz = $this->styleManager->getCurrentFontSize();
-            $this->drawBackgroundRect($baseX, $baselineY - ($maxSz * 0.25), $wrapWidth, $lineH, $bgColor);
-        }
-
-        $spaces = array_values(array_filter($renderTokens, fn($t) => $t['type'] === 'space'));
-        $extraPerGap = 0.0;
-        if ($justify && count($spaces) > 0) {
-            $extra = $targetWidth - $lineWidth;
-            if ($extra > 0.001) {
-                $extraPerGap = $extra / count($spaces);
-            }
-        }
-
-        if ($markerSpec !== null && $isFirst) {
-            $this->styleManager->push();
-            $this->styleManager->applyOptions([
-                'fontAlias' => $markerSpec['fontAlias'],
-                'size' => (float)$markerSpec['size'],
-                'style' => (string)$markerSpec['style'],
-                'color' => $markerSpec['color'],
-                'letterSpacing' => 0.0,
-                'wordSpacing' => 0.0,
-            ], $this);
-
-            $mText = (string)$markerSpec['text'];
-            $mWidth = (float)$markerSpec['width'];
-            $mAlign = strtolower($markerSpec['align'] ?? 'right');
-            $mGap = (float)$markerSpec['gap'];
-            $measured = $this->textRenderer->measureTextStyled($mText, $this->styleManager);
-            $boxRight = $baseX + $actualIndent;
-            $boxLeft = $boxRight - max($mWidth, $measured + $mGap);
-            $mx = ($mAlign === 'right') ? $boxRight - $measured - $mGap : $boxLeft;
-            $this->textRenderer->writeTextLine($mx, $baselineY, $mText, $this->styleManager, null);
-            $this->styleManager->pop();
-        }
-
-        foreach ($renderTokens as $tok) {
-            if ($tok['type'] === 'inline') {
-                $tok['renderer']($x, $baselineY);
-                $x += $this->measureTokenWidth($tok);
-                continue;
-            }
-            $this->styleManager->push();
-            $opt = $tok['opt'] ?? [];
-            $this->styleManager->applyOptions($opt, $this);
-
-            $shadow = $this->normalizeShadowSpec($opt['textShadow'] ?? null);
-            $runBG = $this->normalizeColor($opt['bgcolor'] ?? null);
-            $href = $opt['href'] ?? null;
-            $isSub = !empty($opt['sub']) || (isset($opt['script']) && strtolower((string)$opt['script']) === 'sub');
-            $isSup = !empty($opt['sup']) || (isset($opt['script']) && strtolower((string)$opt['script']) === 'sup');
-            $scale = isset($opt['sizeScale']) ? (float)$opt['sizeScale'] : (($isSub || $isSup) ? 0.75 : 1.0);
-
-            if (abs($scale - 1.0) > 1e-6) {
-                $this->styleManager->setFont(
-                    $this->styleManager->getCurrentFontAlias(),
-                    $this->styleManager->getCurrentFontSize() * $scale
-                );
-            }
-
-            $dy = isset($opt['baselineShift'])
-                ? (float)$opt['baselineShift']
-                : ($isSup ? ($lineH * 0.35) : ($isSub ? - ($lineH * 0.15) : 0.0));
-
-            $tokWidth = $this->textRenderer->measureTextStyled($tok['text'], $this->styleManager);
-            if ($runBG !== null) {
-                $this->drawBackgroundRect(
-                    $x,
-                    $baselineY + $dy - ($this->styleManager->getCurrentFontSize() * 0.25),
-                    $tokWidth,
-                    $this->styleManager->getLineHeight(),
-                    $runBG
-                );
-            }
-
-            $this->textRenderer->writeTextLine($x, $baselineY + $dy, $tok['text'], $this->styleManager, $shadow);
-
-            if ($href !== null) {
-                $linkHeight = $this->styleManager->getLineHeight();
-                $linkY = ($baselineY + $dy) - ($linkHeight * 0.25);
-                $this->addLinkAbs($x, $linkY, $tokWidth, $linkHeight, $href);
-            }
-
-            $x += $tokWidth;
-            if ($tok['type'] === 'space') {
-                $x += $this->styleManager->getWordSpacing();
-                if ($extraPerGap > 0.0) {
-                    $x += $extraPerGap;
-                }
-            }
-
-            $this->styleManager->pop();
-        }
-
-        $this->layoutManager->advanceCursor($lineH);
-        $this->layoutManager->checkPageBreak();
-    }
-
+    
     public function addTable($dataOrOptions = null, array $options = [], ?float $adjustedWidth = null): ?PdfTableBuilder
     {
         if ($dataOrOptions === null || (is_array($dataOrOptions) && empty($options) && !isset($dataOrOptions[0]))) {
@@ -847,79 +666,11 @@ final class PdfBuilder
         $this->graphicsRenderer->drawRoundedBackgroundRect($x, $y, $w, $h, $r, $color);
     }
 
-    private function buildImageOps(string $alias, float $x, float $y, float $w, float $h, ?array $opts = null): string
-    {
-        if ($this->currentPage === null) return '';
-        $img = $this->imageManager->getImage($alias);
-        if ($img === null) throw new \LogicException("Imagem '{$alias}' não registrada.");
-
-        $ops = "q\n";
-        if (isset($opts['alpha']) && (float)$opts['alpha'] < 1.0) {
-            [$gsName, $gsId] = $this->getExtGStateManager()->ensureAlphaRef(
-                max(0.0, min(1.0, (float)$opts['alpha']))
-            );
-            $this->registerPageResource('ExtGState', $gsName, $gsId);
-            $ops .= "{$gsName} gs\n";
-        }
-        $ops .= sprintf("%.3F 0 0 %.3F %.3F %.3F cm\n", $w, $h, $x, $y);
-        $ops .= $img['name'] . " Do\nQ\n";
-        $this->registerPageResource('XObject', $img['name'], $img['objId']);
-        return $ops;
-    }
-
     public function insertOpsAt(string $ops, int $at): void
     {
         if ($this->currentPage === null || $ops === '') return;
         $buf = $this->pageContents[$this->currentPage] ?? '';
         $this->pageContents[$this->currentPage] = substr($buf, 0, $at) . $ops . substr($buf, $at);
-    }
-
-    private function fitImageInBox(float $imgW, float $imgH, float $boxX, float $boxY, float $boxW, float $boxH, array $opts): array
-    {
-        $mode = strtolower($opts['mode'] ?? 'cover');
-        $align = strtolower($opts['align'] ?? 'center');
-        $valign = strtolower($opts['valign'] ?? 'middle');
-        $offX = (float)($opts['offsetX'] ?? 0.0);
-        $offY = (float)($opts['offsetY'] ?? 0.0);
-
-        if (isset($opts['size'])) {
-            $tw = (float)($opts['size']['w'] ?? 0.0);
-            $th = (float)($opts['size']['h'] ?? 0.0);
-            if ($tw > 0 && $th <= 0) $th = $tw * ($imgH / $imgW);
-            if ($th > 0 && $tw <= 0) $tw = $th * ($imgW / $imgH);
-            if ($tw > 0 && $th > 0) {
-                $x = match ($align) {
-                    'left' => $boxX,
-                    'right' => $boxX + $boxW - $tw,
-                    default => $boxX + ($boxW - $tw) / 2
-                };
-                $y = match ($valign) {
-                    'top' => $boxY + $boxH - $th,
-                    'bottom' => $boxY,
-                    default => $boxY + ($boxH - $th) / 2
-                };
-                return [$x + $offX, $y + $offY, $tw, $th];
-            }
-        }
-        if ($mode === 'stretch') return [$boxX + $offX, $boxY + $offY, $boxW, $boxH];
-
-        $scale = 1.0;
-        if ($mode === 'contain') $scale = min($boxW / $imgW, $boxH / $imgH);
-        elseif ($mode === 'cover') $scale = max($boxW / $imgW, $boxH / $imgH);
-
-        $tw = $imgW * $scale;
-        $th = $imgH * $scale;
-        $x = match ($align) {
-            'left' => $boxX,
-            'right' => $boxX + $boxW - $tw,
-            default => $boxX + ($boxW - $tw) / 2
-        };
-        $y = match ($valign) {
-            'top' => $boxY + $boxH - $th,
-            'bottom' => $boxY,
-            default => $boxY + ($boxH - $th) / 2
-        };
-        return [$x + $offX, $y + $offY, $tw, $th];
     }
 
     public function drawBackgroundImageInRect(string $alias, float $x, float $y, float $w, float $h, array $opts = [], ?int $insertAt = null): void
