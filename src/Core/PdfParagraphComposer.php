@@ -54,6 +54,9 @@ class PdfParagraphComposer
         $context = $this->initializeParagraphContext($opts);
         $layout = $this->calculateLayoutDimensions($opts, $context);
 
+        // Store layout data in context for later retrieval
+        $context['layout'] = $layout;
+
         $blocks = $this->explodeRunsToBlocksByNewline($runs);
         $renderingResult = $this->renderTextBlocks($blocks, $opts, $layout, $context);
 
@@ -92,6 +95,7 @@ class PdfParagraphComposer
             'borderFragments' => [],
             'fragTop' => $this->pdfBuilder->getCursorY(),
             'fragPage' => $this->pdfBuilder->getCurrentPage(),
+            'layout' => null, // Will be set by calculateLayoutDimensions
         ];
     }
 
@@ -360,9 +364,13 @@ class PdfParagraphComposer
 
     private function getLayoutFromContext(array $context): array
     {
-        // This is a helper to get layout data - in a full implementation,
-        // you might want to store layout data in context or pass it differently
-        // For now, return a default structure to prevent undefined array key errors
+        // Retrieve layout data that was stored in context during paragraph processing
+        if (isset($context['layout']) && is_array($context['layout'])) {
+            return $context['layout'];
+        }
+
+        // Fallback to default structure if layout data is not available
+        // This maintains backward compatibility and prevents undefined array key errors
         return [
             'borderSpec' => [
                 'hasBorder' => false,
@@ -370,7 +378,18 @@ class PdfParagraphComposer
                 'color' => [0.0, 0.0, 0.0],
                 'style' => 'solid',
                 'padding' => [0.0, 0.0, 0.0, 0.0]
-            ]
+            ],
+            'padding' => [0.0, 0.0, 0.0, 0.0],
+            'baseX' => $this->pdfBuilder->mLeft,
+            'wrapWidth' => $this->pdfBuilder->getContentAreaWidth(),
+            'align' => 'left',
+            'indent' => 0.0,
+            'hangIndent' => 0.0,
+            'spacing' => 0.0,
+            'lineHeight' => 12.0, // Default line height
+            'bgColor' => null,
+            'markerSpec' => null,
+            'needMarker' => false,
         ];
     }
 
