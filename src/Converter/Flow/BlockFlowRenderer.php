@@ -123,7 +123,14 @@ final class BlockFlowRenderer
             }
         }
 
-        
+        // Handle border
+        if (isset($map['border']) && is_string($map['border']) && strtolower($map['border']) !== 'none') {
+            $borderOptions = $this->parseBorderValue($map['border'], $baseFontSize);
+            if ($borderOptions !== null) {
+                $blockOptions['border'] = $borderOptions;
+            }
+        }
+
         $block = new PdfBlockBuilder($pdf, $blockOptions, $painter);
 
         if ($imageInstruction !== null) {
@@ -295,6 +302,14 @@ final class BlockFlowRenderer
                     $opts['boxShadows'] = $childBoxShadows;
                     if ($childBorderRadius !== null) {
                         $opts['borderRadius'] = $childBorderRadius;
+                    }
+                }
+
+                // Handle border for child elements
+                if (isset($map['border']) && is_string($map['border']) && strtolower($map['border']) !== 'none') {
+                    $childBorderOptions = $this->parseBorderValue($map['border'], $baseFontSize);
+                    if ($childBorderOptions !== null) {
+                        $opts['border'] = $childBorderOptions;
                     }
                 }
             }
@@ -662,6 +677,66 @@ final class BlockFlowRenderer
         }
 
         return true;
+    }
+
+    /**
+     * Parse CSS border shorthand value into border options array.
+     * @return array{width: float, style: string, color: string}|null
+     */
+    private function parseBorderValue(string $value, float $baseFontSize): ?array
+    {
+        $value = trim($value);
+        if ($value === '' || strtolower($value) === 'none') {
+            return null;
+        }
+
+        // Split by spaces: width, style, color
+        $parts = preg_split('/\s+/', $value);
+        $parts = array_filter($parts, fn($p) => trim($p) !== '');
+        $parts = array_values($parts);
+
+        if (count($parts) < 2) {
+            return null; // Need at least width and style
+        }
+
+        $width = null;
+        $style = 'solid';
+        $color = 'black';
+
+        // Parse width (first part that matches length)
+        foreach ($parts as $i => $part) {
+            $parsedWidth = $this->parseCssLength($part, $baseFontSize);
+            if ($parsedWidth !== null) {
+                $width = $parsedWidth;
+                array_splice($parts, $i, 1); // Remove this part
+                break;
+            }
+        }
+
+        if ($width === null) {
+            return null; // No valid width found
+        }
+
+        // Check for style (solid, dashed, dotted)
+        foreach ($parts as $i => $part) {
+            $partLower = strtolower($part);
+            if (in_array($partLower, ['solid', 'dashed', 'dotted'], true)) {
+                $style = $partLower;
+                array_splice($parts, $i, 1); // Remove this part
+                break;
+            }
+        }
+
+        // Remaining part should be color
+        if (!empty($parts)) {
+            $color = trim(implode(' ', $parts));
+        }
+
+        return [
+            'width' => $width,
+            'style' => $style,
+            'color' => $color
+        ];
     }
 
     /**
