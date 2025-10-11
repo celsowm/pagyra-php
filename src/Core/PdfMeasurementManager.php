@@ -122,8 +122,8 @@ class PdfMeasurementManager
             }
 
             $contentBottomY = $pdfBuilder->getCursorY();
-            $contentHeight  = $startY - $contentBottomY; // já exclui padding-top
-            return max(0.0, $padding[0] + $contentHeight + $padding[2]);
+            $contentHeight  = ($startY - $padding[0]) - $contentBottomY; // Height from contentStartY to contentBottomY
+            return max(0.0, $contentHeight);
         } finally {
             $pdfBuilder->getLayoutManager()->restoreState($layoutState);
             $pdfBuilder->mLeft = $origLeft;

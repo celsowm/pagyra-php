@@ -126,7 +126,8 @@ final class PdfBlockRenderer /* nested-blocks-supported */
         $this->pdf->setCursorY($saved['cursorY']);
 
         // Compute total block height based on measurement and proper padding analysis
-        $totalHeight = $measuredContentHeight;
+        // Add block's own vertical padding to the measured content height
+        $totalHeight = $measuredContentHeight + $padding[0] + $padding[2];
 
         // Apply minimum height constraint if specified
         if (($options['minHeight'] ?? null) !== null) {
@@ -136,11 +137,6 @@ final class PdfBlockRenderer /* nested-blocks-supported */
         // Apply maximum height constraint if specified
         if (($options['maxHeight'] ?? null) !== null && $totalHeight > $options['maxHeight']) {
             $totalHeight = (float)$options['maxHeight'];
-        }
-
-        // Debug: Analyze child elements and their padding contributions
-        if (isset($options['debug']) && $options['debug'] === true) {
-            $this->analyzeChildElementHeights($elementsFiltered, $padding, $totalHeight, $measuredContentHeight);
         }
 
         // Background rectangle (outer box)
@@ -288,11 +284,6 @@ final class PdfBlockRenderer /* nested-blocks-supported */
      */
     private function analyzeChildElementHeights(array $elements, array $containerPadding, float $totalHeight, float $measuredHeight): void
     {
-        error_log("=== BLOCK HEIGHT ANALYSIS ===");
-        error_log("Container padding: [" . implode(', ', $containerPadding) . "]");
-        error_log("Measured content height: {$measuredHeight}");
-        error_log("Total height: {$totalHeight}");
-        error_log("Number of child elements: " . count($elements));
 
         foreach ($elements as $index => $element) {
             $type = $element['type'] ?? 'unknown';
@@ -310,6 +301,5 @@ final class PdfBlockRenderer /* nested-blocks-supported */
                 error_log("  -> Table with {$rowCount} rows");
             }
         }
-        error_log("=== END ANALYSIS ===");
     }
 }

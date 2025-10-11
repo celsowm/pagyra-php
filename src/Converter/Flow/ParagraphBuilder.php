@@ -9,16 +9,21 @@ use Celsowm\PagyraPhp\Html\HtmlDocument;
 use Celsowm\PagyraPhp\Html\Style\ComputedStyle;
 use Celsowm\PagyraPhp\Text\PdfRun;
 
+use Celsowm\PagyraPhp\Converter\Flow\MarginCalculator;
+
 final class ParagraphBuilder
 {
     private ?FontResolver $fontResolver;
     private ?PdfBuilder $currentPdf = null;
+    private MarginCalculator $marginCalculator;
 
     public function __construct(
         private LengthConverter $lengthConverter,
-        ?FontResolver $fontResolver = null
+        ?FontResolver $fontResolver = null,
+        ?MarginCalculator $marginCalculator = null
     ) {
         $this->fontResolver = $fontResolver;
+        $this->marginCalculator = $marginCalculator ?? new MarginCalculator($lengthConverter);
     }
 
     public function beginFontContext(PdfBuilder $pdf, FontResolver $fontResolver): void
@@ -103,6 +108,10 @@ final class ParagraphBuilder
                 $options['fontAlias'] = $alias;
             }
         }
+
+        // Extract padding for paragraph
+        $padding = $this->marginCalculator->extractPaddingBox($style, (float)($options['size'] ?? 12.0));
+        $options['padding'] = [$padding['top'], $padding['right'], $padding['bottom'], $padding['left']];
 
         return $options;
     }

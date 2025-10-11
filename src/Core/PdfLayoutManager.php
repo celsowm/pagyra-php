@@ -127,7 +127,13 @@ final class PdfLayoutManager
     public function checkPageBreak(float $neededHeight = 0.0): void
     {
         if (($this->cursorY - $neededHeight) < $this->currentContext['mBottom']) {
-            if ($this->pdf->isMeasurementMode() || $this->pdf->arePageBreaksSuppressed()) {
+            if ($this->pdf->isMeasurementMode()) {
+                // In measurement mode, we don't actually break pages or modify cursorY based on page breaks.
+                // We just let the cursor continue to advance to measure total height.
+                return;
+            }
+            if ($this->pdf->arePageBreaksSuppressed()) {
+                // If page breaks are suppressed, we also don't break pages, but we might hit the bottom margin.
                 $this->cursorY = $this->currentContext['mBottom'];
                 return;
             }
