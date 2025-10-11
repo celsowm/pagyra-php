@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Celsowm\PagyraPhp\Converter;
 
 use Celsowm\PagyraPhp\Converter\Flow\BlockFlowRenderer;
+use Celsowm\PagyraPhp\Converter\Flow\ImageFlowRenderer;
 use Celsowm\PagyraPhp\Converter\Flow\LengthConverter;
 use Celsowm\PagyraPhp\Converter\Flow\ListFlowRenderer;
 use Celsowm\PagyraPhp\Converter\Flow\MarginCalculator;
@@ -34,7 +35,8 @@ final class FlowRenderer
         $paragraphBuilder ??= new ParagraphBuilder($lengthConverter, $fontResolver);
         $marginCalculator ??= new MarginCalculator($lengthConverter);
 
-        $this->blockRenderer = $blockRenderer ?? new BlockFlowRenderer($paragraphBuilder, $marginCalculator, $lengthConverter, $fontResolver);
+        $imageFlowRenderer ??= new ImageFlowRenderer($lengthConverter, $fontResolver, $paragraphBuilder);
+        $this->blockRenderer = $blockRenderer ?? new BlockFlowRenderer($paragraphBuilder, $marginCalculator, $lengthConverter, $fontResolver, $imageFlowRenderer);
         $this->listRenderer = $listRenderer ?? new ListFlowRenderer($paragraphBuilder, $marginCalculator, $fontResolver);
         $this->tableRenderer = $tableRenderer ?? new TableFlowRenderer($paragraphBuilder, $lengthConverter, $fontResolver);
     }
