@@ -54,6 +54,20 @@ final class MarginCalculator
             $margins[$side] = $this->parseMarginComponent($map[$property], $reference, $margins[$side]);
         }
 
+        // Map CSS logical margin properties to physical sides assuming LTR horizontal writing mode.
+        $logicalProps = [
+            'margin-block-start'  => 'top',
+            'margin-block-end'    => 'bottom',
+            'margin-inline-start' => 'left',
+            'margin-inline-end'   => 'right',
+        ];
+        foreach ($logicalProps as $property => $side) {
+            if (!isset($map[$property])) {
+                continue;
+            }
+            $margins[$side] = $this->parseMarginComponent($map[$property], $reference, $margins[$side]);
+        }
+
         return $margins;
     }
 
@@ -81,6 +95,20 @@ final class MarginCalculator
             if (isset($map[$prop])) {
                 $pad[$side] = $this->lengthConverter->parseLengthOptional($map[$prop], $reference, $pad[$side]);
             }
+        }
+
+        // Map CSS logical padding properties to physical sides assuming LTR horizontal writing mode.
+        $logicalProps = [
+            'padding-block-start'  => 'top',
+            'padding-block-end'    => 'bottom',
+            'padding-inline-start' => 'left',
+            'padding-inline-end'   => 'right',
+        ];
+        foreach ($logicalProps as $prop => $side) {
+            if (!isset($map[$prop])) {
+                continue;
+            }
+            $pad[$side] = $this->lengthConverter->parseLengthOptional($map[$prop], $reference, $pad[$side]);
         }
 
         return $pad;

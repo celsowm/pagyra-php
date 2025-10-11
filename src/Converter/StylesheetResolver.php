@@ -35,6 +35,9 @@ final class StylesheetResolver
 strong, b { font-weight: bold; }
 em, i { font-style: italic; }
 
+/* paragraphs */
+p { margin-block-start: 1em; margin-block-end: 1em; }
+
 /* headings (equivalentes às defaults dos browsers) */
 h1 { font-size: 24pt; font-weight: bold;}
 h2 { font-size: 18pt; }
@@ -42,6 +45,9 @@ h3 { font-size: 14pt; }
 h4 { font-size: 12pt; }
 h5 { font-size: 10pt; }
 h6 { font-size: 9pt; }
+
+/* lists */
+ul, ol { margin-block-start: 1em; margin-block-end: 1em; }
 
 CSS;
     }
