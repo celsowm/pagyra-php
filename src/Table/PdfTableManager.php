@@ -27,7 +27,6 @@ final class PdfTableManager
             throw new \LogicException("Defina uma fonte com setFont() antes de adicionar uma tabela.");
         }
         if (empty($data)) return;
-        if ($this->pdfBuilder->isMeasurementMode()) return;
 
         $this->styleManager->push();
 
@@ -59,6 +58,8 @@ final class PdfTableManager
             return;
         }
 
+        $measurementMode = $this->pdfBuilder->isMeasurementMode();
+
         $adjustedWidth = $opts['adjustedWidth'] ?? null;
         $columnWidths = $this->calculateColumnWidths($data, $opts['widths'], $numCols, $opts, $adjustedWidth);
         $columnAligns = $this->normalizeColumnAligns($opts['align'], $numCols);
@@ -75,15 +76,19 @@ final class PdfTableManager
             elseif ($isAltRow && $opts['altRowColor'] !== null) $rowBgColor = $this->pdfBuilder->normalizeColor($opts['altRowColor']);
 
             $rowHeight = $this->calculateRowHeight($row, $columnWidths, $cellPadding, $opts['wrapText'], $isHeader ? $opts['headerStyle'] : '', $opts['minRowHeight']);
-            $this->pdfBuilder->getLayoutManager()->checkPageBreak($rowHeight);
+            if (!$measurementMode) {
+                $this->pdfBuilder->getLayoutManager()->checkPageBreak($rowHeight);
+            }
 
-            $this->styleManager->push();
-            if ($isHeader) $this->styleManager->applyOptions(['style' => $opts['headerStyle']], $this->pdfBuilder);
-            if ($isHeader && $opts['headerColor'] !== null) $this->styleManager->setTextColor($this->pdfBuilder->normalizeColor($opts['headerColor']));
+            if (!$measurementMode) {
+                $this->styleManager->push();
+                if ($isHeader) $this->styleManager->applyOptions(['style' => $opts['headerStyle']], $this->pdfBuilder);
+                if ($isHeader && $opts['headerColor'] !== null) $this->styleManager->setTextColor($this->pdfBuilder->normalizeColor($opts['headerColor']));
 
-            $this->drawTableRow($row, $columnWidths, $columnAligns, $rowHeight, $cellPadding, $borderSpec, $rowBgColor, $opts['wrapText']);
+                $this->drawTableRow($row, $columnWidths, $columnAligns, $rowHeight, $cellPadding, $borderSpec, $rowBgColor, $opts['wrapText']);
 
-            $this->styleManager->pop();
+                $this->styleManager->pop();
+            }
 
             $this->pdfBuilder->getLayoutManager()->advanceCursor($rowHeight);
             if ($opts['spacing'] > 0 && $rowIndex < count($data) - 1) $this->pdfBuilder->getLayoutManager()->advanceCursor($opts['spacing']);
