@@ -95,17 +95,19 @@ final class PdfBoxShadowRenderer
         // Set fill color (now includes alpha handling)
         $pdfColor = new PdfColor();
         $colorSpec = $pdfColor->normalize($color);
+
+        // Override alpha in color spec with our calculated alpha for proper shadow intensity
+        $colorSpec['alpha'] = $alpha;
+
         $colorOps = $pdfColor->getFillOps($colorSpec);
         if ($colorOps !== '') {
             $ops .= $colorOps;
         }
 
-        // Apply alpha if present in color spec
-        if (isset($colorSpec['alpha']) && $colorSpec['alpha'] < 1.0) {
-            [$gsName, $gsId] = $this->pdf->getExtGStateManager()->ensureAlphaRef($colorSpec['alpha']);
-            $this->pdf->registerPageResource('ExtGState', $gsName, $gsId);
-            $ops .= "{$gsName} gs\n";
-        }
+        // Apply alpha through graphics state for consistent shadow rendering
+        [$gsName, $gsId] = $this->pdf->getExtGStateManager()->ensureAlphaRef($alpha);
+        $this->pdf->registerPageResource('ExtGState', $gsName, $gsId);
+        $ops .= "{$gsName} gs\n";
 
         // Draw shadow shape
         if ($borderRadius && $this->hasSignificantRadius($borderRadius)) {
@@ -120,7 +122,7 @@ final class PdfBoxShadowRenderer
     }
 
     /**
-     * Render a blurred shadow by creating multiple layers.
+     * Render a blurred shadow by creating multiple layers with gaussian-like distribution.
      */
     private function renderBlurredShadow(
         float $x,
@@ -132,15 +134,36 @@ final class PdfBoxShadowRenderer
         float $blurRadius,
         ?array $borderRadius
     ): void {
-        // Create blur effect by rendering multiple layers with decreasing opacity
-        $layers = max(3, min(10, (int)($blurRadius / 2))); // Adaptive layer count
-        $stepSize = $blurRadius / $layers;
-        $baseAlpha = $alpha / $layers;
+        // Create blur effect using gaussian-like distribution for more realistic blur
+        $layers = max(5, min(15, (int)($blurRadius * 1.5))); // More layers for smoother blur
+        $stepSize = $blurRadius / ($layers - 1);
+
+        // Use gaussian-like distribution for opacity (bell curve)
+        $totalWeight = 0;
+        $layerData = [];
 
         for ($i = 0; $i < $layers; $i++) {
-            $layerOffset = $stepSize * $i;
-            $layerAlpha = $baseAlpha * (1 - ($i / $layers) * 0.5); // Fade out outer layers
-            
+            // Gaussian function: e^(-(x^2)/(2*sigma^2))
+            $normalizedPos = ($i / ($layers - 1)) - 0.5; // Normalize to [-0.5, 0.5]
+            $sigma = 0.3; // Controls the spread of the gaussian
+            $weight = exp(-($normalizedPos * $normalizedPos) / (2 * $sigma * $sigma));
+
+            $layerData[] = [
+                'offset' => $stepSize * $i,
+                'weight' => $weight
+            ];
+            $totalWeight += $weight;
+        }
+
+        // Normalize weights and render layers
+        foreach ($layerData as $i => $data) {
+            $normalizedWeight = $data['weight'] / $totalWeight;
+            // Apply gaussian weight to alpha for smooth distribution
+            $layerAlpha = $alpha * $normalizedWeight;
+
+            // Use smaller step size for smoother transitions
+            $layerOffset = $data['offset'] * 0.8;
+
             $layerX = $x - $layerOffset;
             $layerY = $y - $layerOffset;
             $layerW = $w + (2 * $layerOffset);

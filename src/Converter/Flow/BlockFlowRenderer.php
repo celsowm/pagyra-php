@@ -81,7 +81,7 @@ final class BlockFlowRenderer
             $blockOptions['bggradient'] = $bgGradient;
             $painter = new PdfBackgroundPainter($pdf, new PdfGradientFactory($pdf), new PdfShadingRegistry($pdf));
         } else {
-            
+
             $bgColorValue = $map['background-color'] ?? ($map['background'] ?? null);
             if (
                 is_string($bgColorValue) &&
@@ -121,6 +121,11 @@ final class BlockFlowRenderer
             if ($borderRadius !== null) {
                 $blockOptions['borderRadius'] = $borderRadius;
             }
+        }
+
+        // Add border-radius to block options for background rendering
+        if ($borderRadius !== null) {
+            $blockOptions['borderRadius'] = $borderRadius;
         }
 
         // Handle border
@@ -275,7 +280,12 @@ final class BlockFlowRenderer
                     $painter = new PdfBackgroundPainter($pdf, new PdfGradientFactory($pdf), new PdfShadingRegistry($pdf));
                 } else {
                     $bgColorValue = $map['background-color'] ?? ($map['background'] ?? null);
-                    if (is_string($bgColorValue) && preg_match('/^#|^rgb/', $bgColorValue)) {
+                    if (
+                        is_string($bgColorValue) &&
+                        !str_contains($bgColorValue, 'gradient') &&
+                        strtolower($bgColorValue) !== 'transparent' &&
+                        strtolower($bgColorValue) !== 'none'
+                    ) {
                         $opts['bgcolor'] = $bgColorValue;
                     }
                 }
@@ -303,6 +313,11 @@ final class BlockFlowRenderer
                     if ($childBorderRadius !== null) {
                         $opts['borderRadius'] = $childBorderRadius;
                     }
+                }
+
+                // Add border-radius to child block options for background rendering
+                if ($childBorderRadius !== null) {
+                    $opts['borderRadius'] = $childBorderRadius;
                 }
 
                 // Handle border for child elements

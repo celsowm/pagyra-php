@@ -8,6 +8,9 @@ use Celsowm\PagyraPhp\Core\PdfBuilder;
 use Celsowm\PagyraPhp\Image\PdfImageManager;
 use Celsowm\PagyraPhp\Text\PdfTextRenderer;
 use Celsowm\PagyraPhp\Graphics\Painter\PdfBackgroundPainter;
+use Celsowm\PagyraPhp\Graphics\Shadow\PdfBoxShadowRenderer;
+use Celsowm\PagyraPhp\Graphics\Gradient\PdfGradientFactory;
+use Celsowm\PagyraPhp\Graphics\Shading\PdfShadingRegistry;
 
 final class PdfBlockRenderer /* nested-blocks-supported */
 {
@@ -122,14 +125,22 @@ final class PdfBlockRenderer /* nested-blocks-supported */
         $this->pdf->mRight = $saved['mRight'];
         $this->pdf->setCursorY($saved['cursorY']);
 
-        // Compute total block height based on measurement (already includes padding)
-        $totalHeight = max($measuredContentHeight, $padding[0] + $padding[2]);
+        // Compute total block height based on measurement and proper padding analysis
+        $totalHeight = $measuredContentHeight;
 
+        // Apply minimum height constraint if specified
         if (($options['minHeight'] ?? null) !== null) {
             $totalHeight = max($totalHeight, (float)$options['minHeight']);
         }
+
+        // Apply maximum height constraint if specified
         if (($options['maxHeight'] ?? null) !== null && $totalHeight > $options['maxHeight']) {
             $totalHeight = (float)$options['maxHeight'];
+        }
+
+        // Debug: Analyze child elements and their padding contributions
+        if (isset($options['debug']) && $options['debug'] === true) {
+            $this->analyzeChildElementHeights($elementsFiltered, $padding, $totalHeight, $measuredContentHeight);
         }
 
         // Background rectangle (outer box)
@@ -137,19 +148,20 @@ final class PdfBlockRenderer /* nested-blocks-supported */
         $rectY = $startY - $totalHeight;
         $rectW = $width;
         $rectH = $totalHeight;
-        $radius = $borderSpec['radius'] ?? null;
+        // Use borderRadius from options if available, otherwise fall back to borderSpec radius
+        $radius = $options['borderRadius'] ?? ($borderSpec['radius'] ?? null);
 
         // ===== 2) RENDER BOX-SHADOW FIRST (behind everything) =====
         $boxShadows = $options['boxShadows'] ?? null;
         $shadowBorderRadius = $options['borderRadius'] ?? null;
         if ($boxShadows !== null) {
-            $shadowRenderer = new \Celsowm\PagyraPhp\Graphics\Shadow\PdfBoxShadowRenderer($this->pdf);
+            $shadowRenderer = new PdfBoxShadowRenderer($this->pdf);
             $shadowRenderer->renderBoxShadow($rectX, $rectY, $rectW, $rectH, $boxShadows, $shadowBorderRadius);
         }
 
         // ===== 3) PAINT BACKGROUND =====
         if ($bgGradient) {
-            $painter = $this->bgPainter ?: new PdfBackgroundPainter($this->pdf, new \Celsowm\PagyraPhp\Graphics\Gradient\PdfGradientFactory($this->pdf), new \Celsowm\PagyraPhp\Graphics\Shading\PdfShadingRegistry($this->pdf));
+            $painter = $this->bgPainter ?: new PdfBackgroundPainter($this->pdf, new PdfGradientFactory($this->pdf), new PdfShadingRegistry($this->pdf));
             if (($bgGradient['type'] ?? 'linear') === 'radial') {
                 $painter->radialRect($rectX, $rectY, $rectW, $rectH, $bgGradient, is_array($radius) ? $radius : null);
             } else {
@@ -269,5 +281,35 @@ final class PdfBlockRenderer /* nested-blocks-supported */
     {
         $box = ['x' => $x, 'y' => $y, 'w' => $w, 'h' => $h];
         $this->pdf->drawParagraphBorders($box, $spec);
+    }
+
+    /**
+     * Analyze child elements and their padding contributions for debugging.
+     */
+    private function analyzeChildElementHeights(array $elements, array $containerPadding, float $totalHeight, float $measuredHeight): void
+    {
+        error_log("=== BLOCK HEIGHT ANALYSIS ===");
+        error_log("Container padding: [" . implode(', ', $containerPadding) . "]");
+        error_log("Measured content height: {$measuredHeight}");
+        error_log("Total height: {$totalHeight}");
+        error_log("Number of child elements: " . count($elements));
+
+        foreach ($elements as $index => $element) {
+            $type = $element['type'] ?? 'unknown';
+            $elementOptions = $element['options'] ?? [];
+
+            // Extract padding from element options if available
+            $elementPadding = $elementOptions['padding'] ?? [0, 0, 0, 0];
+
+            error_log("Element {$index}: type={$type}, padding=[" . implode(', ', $elementPadding) . "]");
+
+            // Special analysis for table elements
+            if ($type === 'table') {
+                $tableData = $element['data'] ?? [];
+                $rowCount = count($tableData);
+                error_log("  -> Table with {$rowCount} rows");
+            }
+        }
+        error_log("=== END ANALYSIS ===");
     }
 }
