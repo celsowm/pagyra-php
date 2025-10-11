@@ -146,10 +146,10 @@ final class FlowComposer
             $hasVisibleStyle = false;
             if ($style) {
                 $map = $style->toArray();
-                $hasVisibleStyle = isset($map['background']) || isset($map['background-color']) || isset($map['background-image']) || !empty($map['padding']) || !empty($map['border']);
+                $hasVisibleStyle = $this->styleHasVisibleEffect($map);
             }
 
-            if ($runs === [] && !$hasVisibleStyle) {
+            if ($runs === [] && !$hasVisibleStyle && !$this->hasNestedBlockChild($node)) {
                 return;
             }
             // --- END OF THE CRITICAL FIX ---
@@ -170,7 +170,34 @@ final class FlowComposer
 
     private function isBlockTag(string $tag): bool
     {
-        return in_array($tag, ['body', 'p', 'div', 'li', 'blockquote', 'section', 'article', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol'], true);
+        return in_array(
+            $tag,
+            [
+                'article',
+                'aside',
+                'blockquote',
+                'body',
+                'div',
+                'figcaption',
+                'figure',
+                'footer',
+                'h1',
+                'h2',
+                'h3',
+                'h4',
+                'h5',
+                'h6',
+                'header',
+                'li',
+                'main',
+                'nav',
+                'ol',
+                'p',
+                'section',
+                'ul',
+            ],
+            true
+        );
     }
 
     private function hasNestedBlockChild(array $node): bool
@@ -566,6 +593,66 @@ private function hasAncestorTag(array $node, string $tag): bool
     }
 
 
+    /**
+     * Determine if style declarations should keep a block even without inline text.
+     *
+     * @param array<string, string> $map
+     */
+    private function styleHasVisibleEffect(array $map): bool
+    {
+        $directProps = ['background', 'background-color', 'background-image', 'box-shadow', 'outline', 'border', 'border-radius'];
+        foreach ($directProps as $prop) {
+            if (!isset($map[$prop])) {
+                continue;
+            }
+            if ($this->styleValueIsMeaningful($map[$prop])) {
+                return true;
+            }
+        }
+
+        foreach ($map as $name => $value) {
+            $nameLower = strtolower((string)$name);
+            if (
+                !str_starts_with($nameLower, 'margin') &&
+                !str_starts_with($nameLower, 'padding') &&
+                !str_starts_with($nameLower, 'border')
+            ) {
+                continue;
+            }
+
+            if ($this->styleValueIsMeaningful($value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function styleValueIsMeaningful(string $value): bool
+    {
+        $normalized = strtolower(trim($value));
+        if ($normalized === '' || in_array($normalized, ['0', '0px', '0pt', '0em', '0rem', '0%', 'none', 'transparent', 'initial', 'inherit'], true)) {
+            return false;
+        }
+
+        if (str_contains($normalized, 'auto')) {
+            return true;
+        }
+
+        if (preg_match('/([0-9]*\.?[0-9]+)/', $normalized, $matches) === 1) {
+            return ((float)$matches[1]) > 0.0;
+        }
+
+        $keywords = ['solid', 'dashed', 'dotted', 'double', 'groove', 'ridge', 'inset', 'outset'];
+        foreach ($keywords as $keyword) {
+            if (str_contains($normalized, $keyword)) {
+                return true;
+            }
+        }
+
+        return true;
+    }
+
 
     /**
      * Post-process flat top-level flows to re-parent child blocks based on ancestorIds (nearest ancestor among flows).
@@ -614,7 +701,7 @@ private function hasAncestorTag(array $node, string $tag): bool
                 $visible = false;
                 if ($pstyle && method_exists($pstyle, 'toArray')) {
                     $map = $pstyle->toArray();
-                    $visible = !empty($map['padding']) || !empty($map['background']) || !empty($map['background-image']) || !empty($map['border']);
+                    $visible = $this->styleHasVisibleEffect($map);
                 }
                 $isContainer = in_array($ptag, ['div', 'section', 'article', 'main', 'header', 'footer', 'nav', 'aside'], true);
                 if ($isContainer && $visible) {

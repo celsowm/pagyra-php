@@ -140,6 +140,35 @@ final class PdfBlockRenderer /* nested-blocks-supported */
             $totalHeight = (float)$options['maxHeight'];
         }
 
+        $debugActive = $this->isLayoutDebugEnabled() && !$this->pdf->isMeasurementMode();
+        if ($debugActive) {
+            $formatBox = static fn(array $values): string => implode(', ', array_map(
+                static fn($value) => sprintf('%.2f', (float)$value),
+                $values
+            ));
+
+            error_log(sprintf(
+                '[layout] tag=%s id=%s position=%s absolute=%s x=%.2f width=%.2f startY=%.2f totalHeight=%.2f margin=[%s] padding=[%s]',
+                (string)($options['debugTag'] ?? '?'),
+                (string)($options['debugNodeId'] ?? '?'),
+                (string)($options['position'] ?? 'relative'),
+                $isAbsolute ? 'yes' : 'no',
+                $x,
+                $width,
+                $startY,
+                $totalHeight,
+                $formatBox($margin),
+                $formatBox($padding)
+            ));
+            error_log(sprintf(
+                '[layout]        measuredHeight=%.2f contentStartY=%.2f cursorBefore=%.2f',
+                $measuredContentHeight,
+                $contentStartY,
+                $saved['cursorY']
+            ));
+            $this->analyzeChildElementHeights($elementsFiltered, $padding, $totalHeight, $measuredContentHeight);
+        }
+
         // Background rectangle (outer box)
         $rectX = $x;
         $rectY = $startY - $totalHeight;
@@ -287,22 +316,51 @@ final class PdfBlockRenderer /* nested-blocks-supported */
      */
     private function analyzeChildElementHeights(array $elements, array $containerPadding, float $totalHeight, float $measuredHeight): void
     {
+        $formatBox = static fn(array $values): string => implode(', ', array_map(
+            static fn($value) => sprintf('%.2f', (float)$value),
+            $values
+        ));
+
+        error_log(sprintf(
+            '[layout]        containerPadding=[%s] totalHeight=%.2f measured=%.2f childCount=%d',
+            $formatBox($containerPadding),
+            $totalHeight,
+            $measuredHeight,
+            count($elements)
+        ));
 
         foreach ($elements as $index => $element) {
             $type = $element['type'] ?? 'unknown';
-            $elementOptions = $element['options'] ?? [];
+            $elementOptions = is_array($element['options'] ?? null) ? $element['options'] : [];
+            $elementPadding = $elementOptions['padding'] ?? [0.0, 0.0, 0.0, 0.0];
+            $elementMargin = $elementOptions['margin'] ?? [0.0, 0.0, 0.0, 0.0];
 
-            // Extract padding from element options if available
-            $elementPadding = $elementOptions['padding'] ?? [0, 0, 0, 0];
+            error_log(sprintf(
+                '[layout]        child[%d] type=%s padding=[%s] margin=[%s]',
+                $index,
+                $type,
+                $formatBox((array)$elementPadding),
+                $formatBox((array)$elementMargin)
+            ));
 
-            error_log("Element {$index}: type={$type}, padding=[" . implode(', ', $elementPadding) . "]");
-
-            // Special analysis for table elements
             if ($type === 'table') {
                 $tableData = $element['data'] ?? [];
-                $rowCount = count($tableData);
-                error_log("  -> Table with {$rowCount} rows");
+                $rowCount = is_array($tableData) ? count($tableData) : 0;
+                error_log(sprintf('[layout]            tableRows=%d', $rowCount));
             }
         }
+    }
+
+    private function isLayoutDebugEnabled(): bool
+    {
+        $flag = getenv('PAGYRA_DEBUG_LAYOUT');
+        if ($flag === false) {
+            return false;
+        }
+        $flag = strtolower(trim((string)$flag));
+        if ($flag === '' || $flag === '0' || $flag === 'false' || $flag === 'off') {
+            return false;
+        }
+        return true;
     }
 }

@@ -64,6 +64,9 @@ final class BlockFlowRenderer
             'width'   => '100%',
             'padding' => [$padding['top'], $padding['right'], $padding['bottom'], $padding['left']],
             'margin'  => [$margins['top'], $margins['right'], $margins['bottom'], $margins['left']],
+            'debugTag' => $__tag,
+            'debugNodeId' => $__id,
+            'debugChildCount' => $__kids,
         ];
 
         $map = $style->toArray();
@@ -357,6 +360,9 @@ final class BlockFlowRenderer
                 ];
             }
             $opts['containerPadding'] = $parentContainerPadding;
+            $opts['debugTag'] = $child['tag'] ?? '?';
+            $opts['debugNodeId'] = $child['nodeId'] ?? '?';
+            $opts['debugChildCount'] = is_array($child['children'] ?? null) ? count($child['children']) : 0;
             $parent->addBlock($opts, function (PdfBlockBuilder $nested) use ($child, $document, $computedStyles, $paraOptions, $pdf, $childImageResource, $style, $baseFontSize) {
                 $runSpecsChild = is_array($child['runs'] ?? null) ? $child['runs'] : [];
                 $baseMarkers = $this->paragraphBuilder->styleMarkersFromOptions($paraOptions);
