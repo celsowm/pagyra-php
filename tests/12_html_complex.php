@@ -21,7 +21,7 @@ $html = <<<'HTML'
       margin: 0;
       padding: 20px;
       color: #333;
-      background-color: #fafafa;
+      background-color: yellow;
     }
 
     header {
