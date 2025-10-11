@@ -55,7 +55,7 @@ $html = <<<'HTML'
 
     h2 {
       color: #4a90e2;
-      border-bottom: 1px solid #eee;
+      border-bottom: 1px solid #59232b;
       padding-bottom: 8px;
     }
 

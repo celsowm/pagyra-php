@@ -127,12 +127,10 @@ final class BlockFlowRenderer
             $blockOptions['borderRadius'] = $borderRadius;
         }
 
-        // Handle border
-        if (isset($map['border']) && is_string($map['border']) && strtolower($map['border']) !== 'none') {
-            $borderOptions = $this->parseBorderValue($map['border'], $baseFontSize);
-            if ($borderOptions !== null) {
-                $blockOptions['border'] = $borderOptions;
-            }
+        // Handle border (supports shorthand and per-side declarations)
+        $borderOptions = $this->buildBorderOptions($map, $baseFontSize);
+        if ($borderOptions !== null) {
+            $blockOptions['border'] = $borderOptions;
         }
 
         $block = new PdfBlockBuilder($pdf, $blockOptions, $painter);
@@ -214,6 +212,14 @@ final class BlockFlowRenderer
 
     private function renderChildFlows(array $children, PdfBlockBuilder $parent, PdfBuilder $pdf, HtmlDocument $document, array $computedStyles, ComputedStyle $parentStyle, float $parentBaseFontSize): void
     {
+        $parentPaddingBox = $this->marginCalculator->extractPaddingBox($parentStyle, $parentBaseFontSize);
+        $parentContainerPadding = [
+            $parentPaddingBox['top'],
+            $parentPaddingBox['right'],
+            $parentPaddingBox['bottom'],
+            $parentPaddingBox['left'],
+        ];
+
         foreach ($children as $child) {
             $type = $child['type'] ?? 'block';
             if ($type === 'list') {
@@ -223,13 +229,7 @@ final class BlockFlowRenderer
                 }
 
                 $options = $prepared['options'];
-                $parentPadding = $this->marginCalculator->extractPaddingBox($parentStyle, $parentBaseFontSize);
-                $options['containerPadding'] = [
-                    $parentPadding['top'],
-                    $parentPadding['right'],
-                    $parentPadding['bottom'],
-                    $parentPadding['left'],
-                ];
+                $options['containerPadding'] = $parentContainerPadding;
 
                 if ($prepared['marginTop'] > 0.0) {
                     $parent->addSpacer($prepared['marginTop']);
@@ -255,9 +255,7 @@ final class BlockFlowRenderer
 
                         // The issue is that table padding is 0, we need to consider the parent block's padding
                         // Get parent block's padding from the current context
-                        $parentPadding = $this->marginCalculator->extractPaddingBox($parentStyle, $parentBaseFontSize);
-
-                        $adjustedWidth = $currentContentWidth - $parentPadding['left'] - $parentPadding['right'];
+                        $adjustedWidth = $currentContentWidth - $parentPaddingBox['left'] - $parentPaddingBox['right'];
                         if ($adjustedWidth < 0) {
                             $adjustedWidth = $currentContentWidth;
                         }
@@ -342,12 +340,10 @@ final class BlockFlowRenderer
                     $opts['borderRadius'] = $childBorderRadius;
                 }
 
-                // Handle border for child elements
-                if (isset($map['border']) && is_string($map['border']) && strtolower($map['border']) !== 'none') {
-                    $childBorderOptions = $this->parseBorderValue($map['border'], $baseFontSize);
-                    if ($childBorderOptions !== null) {
-                        $opts['border'] = $childBorderOptions;
-                    }
+                // Handle border for child elements (supports directional borders)
+                $childBorderOptions = $this->buildBorderOptions($map, $baseFontSize);
+                if ($childBorderOptions !== null) {
+                    $opts['border'] = $childBorderOptions;
                 }
             }
 
@@ -360,6 +356,7 @@ final class BlockFlowRenderer
                     'margin' => [0.0, 0.0, 0.0, 0.0],
                 ];
             }
+            $opts['containerPadding'] = $parentContainerPadding;
             $parent->addBlock($opts, function (PdfBlockBuilder $nested) use ($child, $document, $computedStyles, $paraOptions, $pdf, $childImageResource, $style, $baseFontSize) {
                 $runSpecsChild = is_array($child['runs'] ?? null) ? $child['runs'] : [];
                 $baseMarkers = $this->paragraphBuilder->styleMarkersFromOptions($paraOptions);
@@ -396,6 +393,83 @@ final class BlockFlowRenderer
 
         $parsed = $this->lengthConverter->parseLengthOptional($value, $reference, 0.0);
         return $parsed > 0.0 ? $parsed : null;
+    }
+
+    /**
+     * Build a normalized border options array from CSS declarations.
+     *
+     * @param array<string, string> $map
+     * @return array{width: array<int, float>, style: string, color: array<int, string|null>}|null
+     */
+    private function buildBorderOptions(array $map, float $baseFontSize): ?array
+    {
+        $widths = [0.0, 0.0, 0.0, 0.0];   // top, right, bottom, left
+        $colors = [null, null, null, null];
+        $styles = [null, null, null, null];
+        $hasBorder = false;
+
+        $applySpec = function (?array $spec, ?int $side) use (&$widths, &$colors, &$styles, &$hasBorder): void {
+            if ($spec === null) {
+                return;
+            }
+            $width = max(0.0, (float)($spec['width'] ?? 0.0));
+            if ($width <= 0.0) {
+                return;
+            }
+            $color = $spec['color'] ?? 'black';
+            $style = $spec['style'] ?? 'solid';
+
+            $targets = $side === null ? [0, 1, 2, 3] : [$side];
+            foreach ($targets as $idx) {
+                $widths[$idx] = $width;
+                $colors[$idx] = $color;
+                $styles[$idx] = $style;
+            }
+            $hasBorder = true;
+        };
+
+        if (isset($map['border']) && is_string($map['border']) && strtolower($map['border']) !== 'none') {
+            $applySpec($this->parseBorderValue($map['border'], $baseFontSize), null);
+        }
+
+        $sideMap = [
+            'border-top' => 0,
+            'border-right' => 1,
+            'border-bottom' => 2,
+            'border-left' => 3,
+        ];
+
+        foreach ($sideMap as $property => $index) {
+            if (!isset($map[$property]) || !is_string($map[$property])) {
+                continue;
+            }
+            if (strtolower($map[$property]) === 'none') {
+                $widths[$index] = 0.0;
+                $colors[$index] = null;
+                $styles[$index] = null;
+                continue;
+            }
+            $applySpec($this->parseBorderValue($map[$property], $baseFontSize), $index);
+        }
+
+        if (!$hasBorder) {
+            return null;
+        }
+
+        $styleCandidates = array_values(array_filter($styles, static fn($s) => is_string($s) && $s !== ''));
+        $style = $styleCandidates !== [] ? (string)end($styleCandidates) : 'solid';
+
+        // If every side ended up with zero width, ignore the border.
+        $totalWidth = array_sum($widths);
+        if ($totalWidth <= 0.0) {
+            return null;
+        }
+
+        return [
+            'width' => $widths,
+            'style' => $style,
+            'color' => $colors,
+        ];
     }
 
     /**

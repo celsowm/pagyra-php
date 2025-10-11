@@ -34,6 +34,7 @@ final class PdfBlockRenderer /* nested-blocks-supported */
         $borderSpec = $this->pdf->getBorderManager()->normalizeBorderSpec($options['border'] ?? null, $options['padding'] ?? null);
         $padding    = $borderSpec['padding'];
         $margin     = $this->normalizeMargin($options['margin'] ?? 0);
+        $containerPadding = $this->normalizeMargin($options['containerPadding'] ?? [0.0, 0.0, 0.0, 0.0]);
 
         $bgColor    = $this->pdf->normalizeColor($options['bgcolor'] ?? null);
         $bgGradient = $options['bggradient'] ?? null;
@@ -213,7 +214,9 @@ final class PdfBlockRenderer /* nested-blocks-supported */
 
         // ===== 4) BORDER (on top of bg/content edges) =====
         if ($borderSpec['hasBorder']) {
-            $this->drawBorder($rectX, $rectY, $rectW, $rectH, $borderSpec);
+            $borderRectX = $rectX;
+            $borderRectW = max(0.0, $rectW - $containerPadding[1] - $containerPadding[3]);
+            $this->drawBorder($borderRectX, $rectY, $borderRectW, $rectH, $borderSpec);
         }
 
         // Restore outer state and advance cursor
