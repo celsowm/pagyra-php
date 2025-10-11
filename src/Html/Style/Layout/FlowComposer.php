@@ -93,6 +93,13 @@ final class FlowComposer
                 if ($items === []) {
                     return;
                 }
+                $ancestorIds = [];
+                foreach (($node['ancestors'] ?? []) as $__anc) {
+                    $aid = (string)($__anc['nodeId'] ?? '');
+                    if ($aid !== '') {
+                        $ancestorIds[] = $aid;
+                    }
+                }
                 $flows[] = [
                     'type' => 'list',
                     'tag' => $tag,
@@ -100,6 +107,7 @@ final class FlowComposer
                     'items' => $items,
                     'style' => $styles[$nodeId] ?? null,
                     'attributes' => $node['attributes'] ?? [],
+                    'ancestorIds' => $ancestorIds,
                 ];
                 return;
             }
