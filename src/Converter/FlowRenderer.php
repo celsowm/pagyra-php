@@ -36,8 +36,17 @@ final class FlowRenderer
         $marginCalculator ??= new MarginCalculator($lengthConverter);
 
         $imageFlowRenderer ??= new ImageFlowRenderer($lengthConverter, $fontResolver, $paragraphBuilder);
-        $this->blockRenderer = $blockRenderer ?? new BlockFlowRenderer($paragraphBuilder, $marginCalculator, $lengthConverter, $fontResolver, $imageFlowRenderer);
-        $this->listRenderer = $listRenderer ?? new ListFlowRenderer($paragraphBuilder, $marginCalculator, $fontResolver);
+        $listRenderer ??= new ListFlowRenderer($paragraphBuilder, $marginCalculator, $fontResolver);
+
+        $this->listRenderer = $listRenderer;
+        $this->blockRenderer = $blockRenderer ?? new BlockFlowRenderer(
+            $paragraphBuilder,
+            $marginCalculator,
+            $lengthConverter,
+            $fontResolver,
+            $imageFlowRenderer,
+            $listRenderer
+        );
         $this->tableRenderer = $tableRenderer ?? new TableFlowRenderer($paragraphBuilder, $lengthConverter, $fontResolver);
     }
 

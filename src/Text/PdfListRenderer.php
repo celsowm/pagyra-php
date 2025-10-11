@@ -120,6 +120,9 @@ final class PdfListRenderer
                     'color' => $baseOpts['markerColor'] ?? null,
                 ],
             ];
+            if (isset($baseOpts['containerPadding']) && is_array($baseOpts['containerPadding'])) {
+                $itemOpts['containerPadding'] = $baseOpts['containerPadding'];
+            }
             $this->pdf->addParagraphRuns($runs ?: [''], $itemOpts);
 
             if ($nodeType !== 'bullet') {

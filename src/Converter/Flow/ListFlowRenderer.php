@@ -18,17 +18,20 @@ final class ListFlowRenderer
     }
 
     /**
+     * Prepare list items and rendering options from a flow descriptor.
+     *
      * @param array<string, mixed> $flow
      * @param array<string, ComputedStyle> $computedStyles
+     * @return array{items: array<int, mixed>, options: array<string, mixed>, marginTop: float, marginBottom: float}|null
      */
-    public function render(
+    public function prepare(
         array $flow,
         PdfBuilder $pdf,
         array $computedStyles,
         HtmlDocument $document
-    ): void {
+    ): ?array {
         if (!is_array($flow['items'] ?? null) || ($flow['items'] ?? []) === []) {
-            return;
+            return null;
         }
 
         $listTag = strtolower((string)($flow['tag'] ?? ''));
@@ -52,7 +55,7 @@ final class ListFlowRenderer
             $conversion = $this->convertListSpec($flow, $computedStyles, $document, 0, $startByLevel);
             $items = $conversion['items'];
             if ($items === []) {
-                return;
+                return null;
             }
 
             $typeByLevel = $conversion['types'];
@@ -67,17 +70,40 @@ final class ListFlowRenderer
             $marginBottom = (float)($options['marginBottom'] ?? 0.0);
             unset($options['marginTop'], $options['marginBottom']);
 
-            if ($marginTop > 0.0) {
-                $pdf->addSpacer($marginTop);
-            }
-
-            $pdf->addList($items, $options);
-
-            if ($marginBottom > 0.0) {
-                $pdf->addSpacer($marginBottom);
-            }
+            return [
+                'items' => $items,
+                'options' => $options,
+                'marginTop' => $marginTop,
+                'marginBottom' => $marginBottom,
+            ];
         } finally {
             $this->paragraphBuilder->endFontContext();
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $flow
+     * @param array<string, ComputedStyle> $computedStyles
+     */
+    public function render(
+        array $flow,
+        PdfBuilder $pdf,
+        array $computedStyles,
+        HtmlDocument $document
+    ): void {
+        $prepared = $this->prepare($flow, $pdf, $computedStyles, $document);
+        if ($prepared === null) {
+            return;
+        }
+
+        if ($prepared['marginTop'] > 0.0) {
+            $pdf->addSpacer($prepared['marginTop']);
+        }
+
+        $pdf->addList($prepared['items'], $prepared['options']);
+
+        if ($prepared['marginBottom'] > 0.0) {
+            $pdf->addSpacer($prepared['marginBottom']);
         }
     }
 

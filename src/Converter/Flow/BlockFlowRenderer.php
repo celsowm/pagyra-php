@@ -23,7 +23,8 @@ final class BlockFlowRenderer
         private MarginCalculator $marginCalculator,
         private LengthConverter $lengthConverter,
         private FontResolver $fontResolver,
-        private ImageFlowRenderer $imageFlowRenderer
+        private ImageFlowRenderer $imageFlowRenderer,
+        private ListFlowRenderer $listFlowRenderer
     ) {}
 
     
@@ -216,7 +217,29 @@ final class BlockFlowRenderer
         foreach ($children as $child) {
             $type = $child['type'] ?? 'block';
             if ($type === 'list') {
-                $parent->addList($child['items'] ?? [], []);
+                $prepared = $this->listFlowRenderer->prepare($child, $pdf, $computedStyles, $document);
+                if ($prepared === null) {
+                    continue;
+                }
+
+                $options = $prepared['options'];
+                $parentPadding = $this->marginCalculator->extractPaddingBox($parentStyle, $parentBaseFontSize);
+                $options['containerPadding'] = [
+                    $parentPadding['top'],
+                    $parentPadding['right'],
+                    $parentPadding['bottom'],
+                    $parentPadding['left'],
+                ];
+
+                if ($prepared['marginTop'] > 0.0) {
+                    $parent->addSpacer($prepared['marginTop']);
+                }
+
+                $parent->addList($prepared['items'], $options);
+
+                if ($prepared['marginBottom'] > 0.0) {
+                    $parent->addSpacer($prepared['marginBottom']);
+                }
                 continue;
             }
             if ($type === 'table') {
