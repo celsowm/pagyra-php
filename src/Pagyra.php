@@ -41,7 +41,12 @@ final class Pagyra
             }
         }
 
-        $rules = (new StylesheetParser())->parse($cssText);
+        $rules = (new StylesheetParser())->parse(
+            $cssText,
+            mediaType: 'print',
+            viewportWidth: $options->viewportWidth,
+            viewportHeight: $options->viewportHeight,
+        );
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
 
         $registry = self::buildFontRegistry($options->fontConfig, $options->resourceBaseDir, $cssText);
