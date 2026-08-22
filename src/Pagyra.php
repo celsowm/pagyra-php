@@ -49,7 +49,13 @@ final class Pagyra
         );
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
 
-        $registry = self::buildFontRegistry($options->fontConfig, $options->resourceBaseDir, $cssText);
+        $registry = self::buildFontRegistry(
+            $options->fontConfig,
+            $options->resourceBaseDir,
+            $cssText,
+            $options->viewportWidth,
+            $options->viewportHeight,
+        );
         $textMetrics = new GlyphTextMetrics($registry);
         $layoutRoot = (new BlockLayoutEngine($options->viewportWidth, $options->viewportHeight, $textMetrics))->layout($styledRoot);
 
@@ -68,13 +74,18 @@ final class Pagyra
     }
 
     /** @param array<string,mixed> $config */
-    private static function buildFontRegistry(array $config, ?string $resourceBaseDir = null, string $cssText = ''): FontRegistry
-    {
+    private static function buildFontRegistry(
+        array $config,
+        ?string $resourceBaseDir = null,
+        string $cssText = '',
+        ?float $viewportWidth = null,
+        ?float $viewportHeight = null,
+    ): FontRegistry {
         $registry = new FontRegistry();
         $defs = $config['fontFaceDefs'] ?? [];
         if (!is_array($defs)) $defs = [];
 
-        foreach ((new FontFaceRuleParser())->parse($cssText) as $face) {
+        foreach ((new FontFaceRuleParser())->parse($cssText, 'print', $viewportWidth, $viewportHeight) as $face) {
             $defs[] = $face;
         }
 
