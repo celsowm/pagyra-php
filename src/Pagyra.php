@@ -69,7 +69,7 @@ final class Pagyra
             $pageStyle['height'] - $pageStyle['margins']['top'] - $pageStyle['margins']['bottom'],
         );
         $pagination = (new PaginationEngine())->paginate($layoutRoot, $pageContentHeight);
-        $displayList = (new DisplayListBuilder())->build(
+        $displayList = (new DisplayListBuilder($sourceBytes))->build(
             $pagination,
             $pageStyle['width'],
             $pageStyle['height'],
@@ -143,10 +143,6 @@ final class Pagyra
         return [$pageStyle, $viewportWidth, $viewportHeight];
     }
 
-    /**
-     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $left
-     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $right
-     */
     private static function samePageConfiguration(
         array $left,
         float $leftViewportWidth,
@@ -163,29 +159,19 @@ final class Pagyra
         ] as [$a, $b]) {
             if (abs($a - $b) > 0.01) return false;
         }
-
         foreach (['top', 'right', 'bottom', 'left'] as $side) {
             if (abs($left['margins'][$side] - $right['margins'][$side]) > 0.01) return false;
         }
         return true;
     }
 
-    /**
-     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $pageStyle
-     * @return array{0:float,1:float}
-     */
     private static function resolvePrintViewport(RenderHtmlOptions $options, array $pageStyle): array
     {
         $contentWidth = max(1.0, $pageStyle['width'] - $pageStyle['margins']['left'] - $pageStyle['margins']['right']);
         $contentHeight = max(1.0, $pageStyle['height'] - $pageStyle['margins']['top'] - $pageStyle['margins']['bottom']);
-
-        return [
-            min($options->viewportWidth, $contentWidth),
-            min($options->viewportHeight, $contentHeight),
-        ];
+        return [min($options->viewportWidth, $contentWidth), min($options->viewportHeight, $contentHeight)];
     }
 
-    /** @param array<string,mixed> $config */
     private static function buildFontRegistry(
         array $config,
         ?string $resourceBaseDir = null,
@@ -197,26 +183,20 @@ final class Pagyra
         $defs = $config['fontFaceDefs'] ?? [];
         if (!is_array($defs)) $defs = [];
 
-        foreach ((new FontFaceRuleParser())->parse($cssText, 'print', $viewportWidth, $viewportHeight) as $face) {
-            $defs[] = $face;
-        }
-
+        foreach ((new FontFaceRuleParser())->parse($cssText, 'print', $viewportWidth, $viewportHeight) as $face) $defs[] = $face;
         foreach ($defs as $def) {
             if (!is_array($def)) continue;
             $family = $def['family'] ?? $def['name'] ?? null;
             $src = $def['src'] ?? null;
             if (!is_string($family) || $family === '' || !is_string($src) || $src === '') continue;
-
             $weight = is_numeric($def['weight'] ?? null) ? (int) $def['weight'] : 400;
             $style = is_string($def['style'] ?? null) ? $def['style'] : 'normal';
-
             try {
                 $embedded = self::decodeBase64FontDataUrl($src);
                 if ($embedded !== null) {
                     $registry->registerData($family, $embedded, $weight, $style);
                     continue;
                 }
-
                 $path = self::resolveFontPath($src, $resourceBaseDir);
                 if ($path === null || !is_file($path)) continue;
                 $registry->registerFile($family, $path, $weight, $style);
@@ -229,20 +209,11 @@ final class Pagyra
 
     private static function decodeBase64FontDataUrl(string $src): ?string
     {
-        if (!str_starts_with(strtolower(trim($src)), 'data:')) {
-            return null;
-        }
-
+        if (!str_starts_with(strtolower(trim($src)), 'data:')) return null;
         $comma = strpos($src, ',');
-        if ($comma === false) {
-            return null;
-        }
-
+        if ($comma === false) return null;
         $metadata = substr($src, 5, $comma - 5);
-        if (preg_match('/(?:^|;)base64(?:;|$)/i', $metadata) !== 1) {
-            return null;
-        }
-
+        if (preg_match('/(?:^|;)base64(?:;|$)/i', $metadata) !== 1) return null;
         $payload = preg_replace('/\s+/', '', substr($src, $comma + 1)) ?? '';
         $binary = base64_decode($payload, true);
         return $binary === false ? null : $binary;
@@ -251,26 +222,14 @@ final class Pagyra
     private static function resolveFontPath(string $src, ?string $resourceBaseDir): ?string
     {
         $src = trim($src);
-        if ($src === '' || preg_match('/^(?:https?:)?\/\//i', $src) === 1 || str_starts_with(strtolower($src), 'data:')) {
-            return null;
-        }
-
+        if ($src === '' || preg_match('/^(?:https?:)?\/\//i', $src) === 1 || str_starts_with(strtolower($src), 'data:')) return null;
         if (str_starts_with(strtolower($src), 'file://')) {
             $path = rawurldecode(substr($src, 7));
-            if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $path) === 1) {
-                $path = substr($path, 1);
-            }
+            if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $path) === 1) $path = substr($path, 1);
             return $path;
         }
-
-        if (str_starts_with($src, '/') || str_starts_with($src, '\\\\') || preg_match('/^[a-zA-Z]:[\\\/]/', $src) === 1) {
-            return rawurldecode($src);
-        }
-
-        if ($resourceBaseDir === null) {
-            return null;
-        }
-
+        if (str_starts_with($src, '/') || str_starts_with($src, '\\\\') || preg_match('/^[a-zA-Z]:[\\\/]/', $src) === 1) return rawurldecode($src);
+        if ($resourceBaseDir === null) return null;
         $relative = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, rawurldecode($src));
         return rtrim($resourceBaseDir, '/\\') . DIRECTORY_SEPARATOR . ltrim($relative, '/\\');
     }
@@ -278,9 +237,7 @@ final class Pagyra
     public static function renderHtmlToPdf(array|RenderHtmlOptions $options): string
     {
         $prepared = self::prepareHtmlRender($options);
-        if ($prepared->displayList === null) {
-            throw new \LogicException('Display list generation failed before PDF serialization.');
-        }
+        if ($prepared->displayList === null) throw new \LogicException('Display list generation failed before PDF serialization.');
         return (new PdfSerializer())->serialize($prepared->displayList, $prepared->fontRegistry);
     }
 }
