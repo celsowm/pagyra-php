@@ -1,0 +1,27 @@
+{
+    "domRoot": {
+        "type": "document",
+        "children": [
+            {
+                "type": "element",
+                "tagName": "p",
+                "children": [
+                    {
+                        "type": "text",
+                        "text": "Hello World"
+                    }
+                ]
+            }
+        ]
+    },
+    "pageSize": {
+        "widthPt": 600,
+        "heightPt": 825
+    },
+    "margins": {
+        "top": 20,
+        "right": 20,
+        "bottom": 20,
+        "left": 20
+    }
+}
