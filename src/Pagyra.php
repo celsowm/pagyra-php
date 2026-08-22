@@ -7,6 +7,7 @@ namespace Pagyra;
 use Pagyra\Core\PreparedRender;
 use Pagyra\Core\RenderHtmlOptions;
 use Pagyra\Css\StylesheetParser;
+use Pagyra\Css\StylesheetSourceLoader;
 use Pagyra\Fonts\FontRegistry;
 use Pagyra\Fonts\GlyphTextMetrics;
 use Pagyra\Html\HtmlParser;
@@ -29,7 +30,16 @@ final class Pagyra
         $sourceBytes = new ImageSourceBytesResolver($options->resourceBaseDir);
         $imageSizes = new ImageSourceIntrinsicSizeResolver($sourceBytes);
         $document = (new HtmlParser($imageSizes))->parseDocument($options->html);
+
         $cssText = $document->mergedEmbeddedCss($options->css);
+        $stylesheetLoader = new StylesheetSourceLoader($options->resourceBaseDir);
+        foreach ($document->stylesheetHrefs as $href) {
+            $linkedCss = $stylesheetLoader->load($href);
+            if (trim($linkedCss) !== '') {
+                $cssText .= ($cssText === '' ? '' : "\n") . $linkedCss;
+            }
+        }
+
         $rules = (new StylesheetParser())->parse($cssText);
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
 
