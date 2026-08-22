@@ -6,12 +6,12 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics and the first styled-inline-run pipeline. PDF rendering is intentionally not implemented yet.**
+**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking and text alignment. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> text metrics -> line boxes -> text runs
+HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> line boxes -> text runs
 ```
 
 Current foundation:
@@ -43,9 +43,12 @@ Current foundation:
 - block `display:none` filtering;
 - centralized `TextMetrics` abstraction;
 - heuristic text-metrics fallback ported from `pagyra-js` coefficients/calibration;
-- first word-wrapping formatter for inline/textual block contents;
 - styled inline fragment collection preserving `font-family`, `font-size`, `font-weight`, `font-style`, color and other computed properties;
 - per-fragment token measurement, so style/font changes can affect wrapping;
+- `white-space: normal`, `nowrap`, `pre`, `pre-wrap` and `pre-line` handling for the current inline formatter;
+- explicit newline preservation for preformatted modes;
+- oversized-word splitting for `overflow-wrap: anywhere`, `overflow-wrap: break-word` and `word-break: break-all`;
+- `text-align: left`, `center`, `right`, `end` and first-pass `justify` spacing;
 - deterministic `LineBox` output with x/y/width/height/baseline/text plus styled `TextRun` children;
 - mixed-font-size baseline alignment inside a line;
 - basic inherited `text-transform` application without requiring `ext-mbstring`;
@@ -60,7 +63,8 @@ Current foundation:
 - 96-DPI CSS unit conversions matching `pagyra-js`;
 - CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
 - RGBA/hex/rgb/named-color parsing foundation;
-- unit/integration/parity test suites kept separate.
+- unit/integration/parity test suites kept separate;
+- GitHub Actions CI for PHP 8.2, 8.3 and 8.4.
 
 Example local font configuration:
 
@@ -78,7 +82,7 @@ $prepared = Pagyra::prepareHtmlRender([
 ]);
 ```
 
-Styled inline content is now preserved through layout. For example:
+Styled inline content is preserved through layout. For example:
 
 ```html
 <p>Todo <strong>poder</strong> emana do <em>povo</em>.</p>
@@ -88,7 +92,7 @@ produces line boxes containing separate `TextRun` objects for the normal, bold a
 
 The parsed-font path currently targets measurement, not rendering outlines. `glyf`/CFF outlines, GPOS kerning/class pairs, variable fonts, Base14 width tables, full fallback-chain policy and PDF embedding/subsetting remain pending.
 
-The inline formatter still has deliberate limits: mixed inline/block formatting contexts, atomic inline boxes, preserved `white-space` modes, explicit newline policy, overflow-wrap/word-break, text-align/justify, decorations and the full vertical-align model remain for later slices.
+The inline formatter still has deliberate limits: mixed inline/block formatting contexts, atomic inline boxes, richer Unicode line-breaking rules, hyphenation, full `vertical-align`, decorations and more browser-specific justification behavior remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
