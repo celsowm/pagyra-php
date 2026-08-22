@@ -47,6 +47,19 @@ final class PdfSerializationTest extends TestCase
         self::assertStringContainsString("(Ol\xE1 \x96 teste) Tj", $pdf);
     }
 
+    public function testBase14PdfPreservesLetterAndWordSpacing(): void
+    {
+        $pdf = Pagyra::renderHtmlToPdf([
+            'html' => '<p style="margin:0;font-family:Arial;font-size:10px;letter-spacing:2px;word-spacing:3px">A B</p>',
+            'viewportWidth' => 200,
+            'viewportHeight' => 100,
+        ]);
+
+        self::assertStringContainsString("1.5 Tc\n", $pdf);
+        self::assertStringContainsString("2.25 Tw\n", $pdf);
+        self::assertStringContainsString('(A B) Tj', $pdf);
+    }
+
     public function testForcedBreakProducesRealMultiplePdfPagesIncludingSkippedParityPage(): void
     {
         $pdf = Pagyra::renderHtmlToPdf([
