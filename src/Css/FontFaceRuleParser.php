@@ -61,7 +61,15 @@ final class FontFaceRuleParser
             $url = trim($match[2] ?? '');
             if ($url === '') continue;
             $fallback ??= $url;
-            if (strtolower(trim($match[3] ?? '')) === 'woff2') {
+
+            $format = strtolower(trim($match[3] ?? ''));
+            if (in_array($format, ['truetype', 'opentype', 'ttf', 'otf'], true)) {
+                return $url;
+            }
+            if ($format === '' && preg_match('/\.(?:ttf|otf)(?:[?#].*)?$/i', $url) === 1) {
+                return $url;
+            }
+            if ($format === '' && str_starts_with(strtolower($url), 'data:font/')) {
                 return $url;
             }
         }
