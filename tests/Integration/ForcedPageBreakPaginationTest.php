@@ -70,7 +70,7 @@ final class ForcedPageBreakPaginationTest extends TestCase
         self::assertSame(3, $prepared->pagination->pageCount);
     }
 
-    public function testTallBlockReportsAllPagesItSpans(): void
+    public function testTallBlockReportsAllPagesAndFragmentGeometry(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
             'html' => '<style>'
@@ -86,5 +86,18 @@ final class ForcedPageBreakPaginationTest extends TestCase
         self::assertSame(0, $placement->pageIndex);
         self::assertSame(2, $placement->endPageIndex);
         self::assertSame(3, $prepared->pagination->pageCount);
+        self::assertCount(3, $placement->fragments);
+
+        self::assertSame(0, $placement->fragments[0]->pageIndex);
+        self::assertSame(0.0, $placement->fragments[0]->pageY);
+        self::assertSame(160.0, $placement->fragments[0]->height);
+
+        self::assertSame(1, $placement->fragments[1]->pageIndex);
+        self::assertSame(0.0, $placement->fragments[1]->pageY);
+        self::assertSame(160.0, $placement->fragments[1]->height);
+
+        self::assertSame(2, $placement->fragments[2]->pageIndex);
+        self::assertSame(0.0, $placement->fragments[2]->pageY);
+        self::assertSame(30.0, $placement->fragments[2]->height);
     }
 }
