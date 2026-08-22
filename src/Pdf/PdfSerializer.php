@@ -25,16 +25,15 @@ final class PdfSerializer
         $pagesId = $reserve();
 
         $fontIds = [];
-        $fontNames = [];
         foreach ($displayList->pages as $page) {
             foreach ($page->commands as $command) {
                 if (!$command instanceof TextPaintCommand) continue;
                 $baseFont = $this->base14Font($command);
-                if (isset($fontIds[$baseFont])) continue;
-                $fontIds[$baseFont] = $reserve();
-                $fontNames[$baseFont] = 'F' . count($fontNames + [$baseFont => true]);
+                if (!isset($fontIds[$baseFont])) $fontIds[$baseFont] = $reserve();
             }
         }
+
+        $fontNames = [];
         $fontIndex = 1;
         foreach ($fontIds as $baseFont => $fontId) {
             $fontNames[$baseFont] = 'F' . $fontIndex++;
@@ -108,10 +107,7 @@ final class PdfSerializer
         $x = Units::pxToPt($command->x);
         $y = Units::pxToPt($pageHeightPx - $command->baseline);
         $fontSize = Units::pxToPt($command->fontSize);
-        $color = $command->color;
-        $r = $color?->toPdfRgb()[0] ?? 0.0;
-        $g = $color?->toPdfRgb()[1] ?? 0.0;
-        $b = $color?->toPdfRgb()[2] ?? 0.0;
+        [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
 
         return "BT\n"
             . '/' . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
