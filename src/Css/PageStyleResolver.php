@@ -81,16 +81,42 @@ final class PageStyleResolver
             }
         }
 
+        $resolvedMargins = [
+            'top' => (float) $margins['top']['value'],
+            'right' => (float) $margins['right']['value'],
+            'bottom' => (float) $margins['bottom']['value'],
+            'left' => (float) $margins['left']['value'],
+        ];
+        $resolvedMargins = $this->clampMarginsToPage($resolvedMargins, $width, $height);
+
         return [
             'width' => $width,
             'height' => $height,
-            'margins' => [
-                'top' => $margins['top']['value'],
-                'right' => $margins['right']['value'],
-                'bottom' => $margins['bottom']['value'],
-                'left' => $margins['left']['value'],
-            ],
+            'margins' => $resolvedMargins,
         ];
+    }
+
+    /**
+     * @param array{top:float,right:float,bottom:float,left:float} $margins
+     * @return array{top:float,right:float,bottom:float,left:float}
+     */
+    private function clampMarginsToPage(array $margins, float $width, float $height): array
+    {
+        $horizontal = $margins['left'] + $margins['right'];
+        if ($horizontal > $width) {
+            $scale = $width / ($horizontal > 0.0 ? $horizontal : 1.0);
+            $margins['left'] *= $scale;
+            $margins['right'] *= $scale;
+        }
+
+        $vertical = $margins['top'] + $margins['bottom'];
+        if ($vertical > $height) {
+            $scale = $height / ($vertical > 0.0 ? $vertical : 1.0);
+            $margins['top'] *= $scale;
+            $margins['bottom'] *= $scale;
+        }
+
+        return $margins;
     }
 
     /** @return list<string> */
