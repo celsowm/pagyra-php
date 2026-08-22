@@ -95,6 +95,7 @@ final class PaginationEngine
                 continuousStartY: $start,
                 continuousEndY: $start,
                 lines: $linesByPage[$pageIndex] ?? [],
+                blocks: $this->blockFragmentsForPage($node, $pageIndex, $offset, $flow),
             )];
         }
 
@@ -116,10 +117,53 @@ final class PaginationEngine
                 continuousStartY: $fragmentStart,
                 continuousEndY: $fragmentEnd,
                 lines: $linesByPage[$pageIndex] ?? [],
+                blocks: $this->blockFragmentsForPage($node, $pageIndex, $offset, $flow),
             );
         }
 
         return $fragments;
+    }
+
+    /** @return list<BlockFragment> */
+    private function blockFragmentsForPage(LayoutNode $node, int $pageIndex, float $offset, PageFlow $flow): array
+    {
+        $fragments = [];
+        foreach ($node->children as $child) {
+            $fragment = $this->blockFragmentForPage($child, $pageIndex, $offset, $flow);
+            if ($fragment !== null) $fragments[] = $fragment;
+        }
+        return $fragments;
+    }
+
+    private function blockFragmentForPage(LayoutNode $node, int $pageIndex, float $offset, PageFlow $flow): ?BlockFragment
+    {
+        $border = $node->box->borderBox();
+        $start = $border->y + $offset;
+        $end = $border->bottom() + $offset;
+        $pageStart = $flow->contentStartForPage($pageIndex);
+        $pageEnd = $pageStart + $flow->contentHeight;
+
+        if ($end <= $pageStart + self::EPSILON || $start >= $pageEnd - self::EPSILON) {
+            return null;
+        }
+
+        $fragmentStart = max($start, $pageStart);
+        $fragmentEnd = min($end, $pageEnd);
+        $children = [];
+        foreach ($node->children as $child) {
+            $childFragment = $this->blockFragmentForPage($child, $pageIndex, $offset, $flow);
+            if ($childFragment !== null) $children[] = $childFragment;
+        }
+
+        return new BlockFragment(
+            node: $node,
+            pageIndex: $pageIndex,
+            pageY: $fragmentStart - $pageStart,
+            height: max(0.0, $fragmentEnd - $fragmentStart),
+            continuousStartY: $fragmentStart,
+            continuousEndY: $fragmentEnd,
+            children: $children,
+        );
     }
 
     private function widowOrphanOffset(LayoutNode $node, float $start, float $offset, PageFlow $flow): float
