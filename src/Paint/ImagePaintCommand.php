@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Paint;
 
+use Pagyra\Geometry\Rect;
 use Pagyra\Image\ImageMetadata;
 use Pagyra\Layout\AtomicInlineBox;
 
@@ -19,6 +20,7 @@ final readonly class ImagePaintCommand implements \JsonSerializable
         public string $bytes,
         public ImageMetadata $metadata,
         public string $source,
+        public ?Rect $clipRect = null,
     ) {
     }
 
@@ -31,6 +33,7 @@ final readonly class ImagePaintCommand implements \JsonSerializable
             'y' => $this->y,
             'width' => $this->width,
             'height' => $this->height,
+            'clipRect' => $this->clipRect,
             'format' => $this->metadata->format,
             'intrinsicWidth' => $this->metadata->width,
             'intrinsicHeight' => $this->metadata->height,
