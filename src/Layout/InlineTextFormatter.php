@@ -31,10 +31,7 @@ final class InlineTextFormatter
         $currentWidth = 0.0;
         foreach ($tokens as $token) {
             if ($token['kind'] === 'newline') {
-                $lines[] = $current;
-                $current = [];
-                $currentWidth = 0.0;
-                continue;
+                $lines[] = $current; $current = []; $currentWidth = 0.0; continue;
             }
             if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
                 if ($current === [] || ($current[array_key_last($current)]['kind'] ?? null) === 'space') continue;
@@ -43,29 +40,18 @@ final class InlineTextFormatter
             }
             if ($allowSoftWrap && $availableWidth > 0 && $current !== [] && $currentWidth + $token['width'] > $availableWidth) {
                 if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
-                    $lines[] = $current;
-                    $current = [];
-                    $currentWidth = 0.0;
-                    continue;
+                    $lines[] = $current; $current = []; $currentWidth = 0.0; continue;
                 }
-                $lines[] = $current;
-                $current = [];
-                $currentWidth = 0.0;
+                $lines[] = $current; $current = []; $currentWidth = 0.0;
             }
             if ($allowSoftWrap && $availableWidth > 0 && $token['kind'] === 'word' && $token['width'] > $availableWidth && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
                 foreach ($this->splitWordToken($token, $availableWidth) as $index => $chunk) {
-                    if ($index > 0) {
-                        $lines[] = $current;
-                        $current = [];
-                        $currentWidth = 0.0;
-                    }
-                    $current[] = $chunk;
-                    $currentWidth += $chunk['width'];
+                    if ($index > 0) { $lines[] = $current; $current = []; $currentWidth = 0.0; }
+                    $current[] = $chunk; $currentWidth += $chunk['width'];
                 }
                 continue;
             }
-            $current[] = $token;
-            $currentWidth += $token['width'];
+            $current[] = $token; $currentWidth += $token['width'];
         }
         if ($current !== [] || $lines === []) $lines[] = $current;
 
@@ -91,16 +77,13 @@ final class InlineTextFormatter
                 if ($token['kind'] === 'box') {
                     $top = $this->boxTopOffset($token, $nominalHeight, $fontSize);
                     $placements[] = ['token' => $token, 'top' => $top, 'baseline' => null];
-                    $minTop = min($minTop, $top);
-                    $maxBottom = max($maxBottom, $top + $token['lineHeight']);
+                    $minTop = min($minTop, $top); $maxBottom = max($maxBottom, $top + $token['lineHeight']);
                     continue;
                 }
-                $baseline = $this->textBaseline($token, $lineBaseline, $nominalHeight);
-                $ownBaseline = $this->ownBaseline($token['fontSize'], $token['lineHeight']);
-                $top = $baseline - $ownBaseline;
-                $placements[] = ['token' => $token, 'top' => $top, 'baseline' => $baseline];
-                $minTop = min($minTop, $top);
-                $maxBottom = max($maxBottom, $top + $token['lineHeight']);
+                $itemBaseline = $this->textBaseline($token, $lineBaseline, $nominalHeight);
+                $top = $itemBaseline - $this->ownBaseline($token['fontSize'], $token['lineHeight']);
+                $placements[] = ['token' => $token, 'top' => $top, 'baseline' => $itemBaseline];
+                $minTop = min($minTop, $top); $maxBottom = max($maxBottom, $top + $token['lineHeight']);
             }
 
             $lineHeight = $maxBottom - $minTop;
@@ -119,36 +102,31 @@ final class InlineTextFormatter
                     $runBaseline = $cursorY + (($placement['baseline'] ?? $lineBaseline) - $minTop);
                     $this->appendRun($runs, new TextRun($runX, $itemY, $width, $token['lineHeight'], $runBaseline, $token['text'], $token['fontSize'], $token['style']));
                 }
-                $runX += $width;
-                $usedWidth += $width;
+                $runX += $width; $usedWidth += $width;
             }
             $text = implode('', array_map(static fn(TextRun $run): string => $run->text, $runs));
             $lineBoxes[] = new LineBox($x + $offset, $cursorY, $usedWidth, $lineHeight, $baseline, $text, $runs, $boxes);
             $cursorY += $lineHeight;
         }
-
         return new InlineTextLayout($lineBoxes, $cursorY - $y);
     }
 
-    private function collectTokens(StyledNode $node, float $parentFontSize): array
+    private function collectTokens(StyledNode $node, float $nodeFontSize): array
     {
         $tokens = [];
         foreach ($node->children as $child) {
-            $fontSize = $this->resolveFontSize($child->style, $parentFontSize);
             if ($child->node->type === 'text') {
-                $text = $this->applyTextTransform($child->node->text ?? '', $child->style);
-                array_push($tokens, ...$this->tokenizeText($text, $child->style, $fontSize));
+                $text = $this->applyTextTransform($child->node->text ?? '', $node->style);
+                array_push($tokens, ...$this->tokenizeText($text, $node->style, $nodeFontSize));
                 continue;
             }
             $display = strtolower($child->style->get('display', 'inline') ?? 'inline');
             if ($display === 'none' || in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true)) continue;
+            $fontSize = $this->resolveFontSize($child->style, $nodeFontSize);
             if ($child->node->isImage() || in_array($display, ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'], true)) {
                 $width = $this->atomicDimension($child, 'width', 0.0, $fontSize);
                 $height = $this->atomicDimension($child, 'height', $this->metrics->lineHeight($child->style, $fontSize), $fontSize);
-                $tokens[] = [
-                    'kind' => 'box', 'text' => '', 'style' => $child->style, 'fontSize' => $fontSize,
-                    'width' => $width, 'lineHeight' => $height, 'source' => $child,
-                ];
+                $tokens[] = ['kind' => 'box', 'text' => '', 'style' => $child->style, 'fontSize' => $fontSize, 'width' => $width, 'lineHeight' => $height, 'source' => $child];
                 continue;
             }
             array_push($tokens, ...$this->collectTokens($child, $fontSize));
@@ -164,7 +142,8 @@ final class InlineTextFormatter
         $tokens = [];
         foreach ($parts as $part) {
             if (preg_match('/^(\r\n|\r|\n)$/u', $part) === 1) {
-                $tokens[] = $this->textToken(in_array($whiteSpace, ['pre', 'pre-wrap', 'pre-line'], true) ? 'newline' : 'space', in_array($whiteSpace, ['pre', 'pre-wrap', 'pre-line'], true) ? '' : ' ', $style, $fontSize);
+                $preserve = in_array($whiteSpace, ['pre', 'pre-wrap', 'pre-line'], true);
+                $tokens[] = $this->textToken($preserve ? 'newline' : 'space', $preserve ? '' : ' ', $style, $fontSize);
             } elseif (preg_match('/^[\t\f ]+$/u', $part) === 1) {
                 $tokens[] = $this->textToken('space', in_array($whiteSpace, ['pre', 'pre-wrap'], true) ? $part : ' ', $style, $fontSize);
             } else {
@@ -176,18 +155,15 @@ final class InlineTextFormatter
 
     private function textToken(string $kind, string $text, ComputedStyle $style, float $fontSize): array
     {
-        return [
-            'kind' => $kind, 'text' => $text, 'style' => $style, 'fontSize' => $fontSize,
+        return ['kind' => $kind, 'text' => $text, 'style' => $style, 'fontSize' => $fontSize,
             'width' => $kind === 'newline' ? 0.0 : $this->metrics->measure($text, $style, $fontSize)->inlineSize,
-            'lineHeight' => $this->metrics->lineHeight($style, $fontSize), 'source' => null,
-        ];
+            'lineHeight' => $this->metrics->lineHeight($style, $fontSize), 'source' => null];
     }
 
     private function textBaseline(array $token, float $lineBaseline, float $lineHeight): float
     {
         $value = strtolower(trim($token['style']->get('vertical-align', 'baseline') ?? 'baseline'));
-        $fontSize = $token['fontSize'];
-        $ownHeight = $token['lineHeight'];
+        $fontSize = $token['fontSize']; $ownHeight = $token['lineHeight'];
         return match ($value) {
             'sub' => $lineBaseline + $fontSize * 0.2,
             'super' => $lineBaseline - $fontSize * 0.4,
@@ -212,10 +188,7 @@ final class InlineTextFormatter
         };
     }
 
-    private function ownBaseline(float $fontSize, float $lineHeight): float
-    {
-        return (($lineHeight - $fontSize) / 2.0) + ($fontSize * 0.75);
-    }
+    private function ownBaseline(float $fontSize, float $lineHeight): float { return (($lineHeight - $fontSize) / 2.0) + ($fontSize * 0.75); }
 
     private function numericVerticalShift(string $value, float $fontSize, float $lineHeight): float
     {
@@ -238,41 +211,26 @@ final class InlineTextFormatter
 
     private function splitWordToken(array $token, float $availableWidth): array
     {
-        $chars = preg_split('//u', $token['text'], -1, PREG_SPLIT_NO_EMPTY) ?: [$token['text']];
-        $chunks = []; $buffer = '';
+        $chars = preg_split('//u', $token['text'], -1, PREG_SPLIT_NO_EMPTY) ?: [$token['text']]; $chunks = []; $buffer = '';
         foreach ($chars as $char) {
-            $candidate = $buffer . $char;
-            $candidateWidth = $this->metrics->measure($candidate, $token['style'], $token['fontSize'])->inlineSize;
-            if ($buffer !== '' && $candidateWidth > $availableWidth) {
-                $chunks[] = $this->retoken($token, $buffer); $buffer = $char;
-            } else $buffer = $candidate;
+            $candidate = $buffer . $char; $candidateWidth = $this->metrics->measure($candidate, $token['style'], $token['fontSize'])->inlineSize;
+            if ($buffer !== '' && $candidateWidth > $availableWidth) { $chunks[] = $this->retoken($token, $buffer); $buffer = $char; } else $buffer = $candidate;
         }
         if ($buffer !== '') $chunks[] = $this->retoken($token, $buffer);
         return $chunks === [] ? [$token] : $chunks;
     }
 
-    private function retoken(array $token, string $text): array
-    {
-        $token['text'] = $text;
-        $token['width'] = $this->metrics->measure($text, $token['style'], $token['fontSize'])->inlineSize;
-        return $token;
-    }
-
+    private function retoken(array $token, string $text): array { $token['text'] = $text; $token['width'] = $this->metrics->measure($text, $token['style'], $token['fontSize'])->inlineSize; return $token; }
     private function collapsesSpaces(string $whiteSpace): bool { return !in_array($whiteSpace, ['pre', 'pre-wrap'], true); }
     private function canBreakInsideWord(string $overflowWrap, string $wordBreak): bool { return $wordBreak === 'break-all' || in_array($overflowWrap, ['anywhere', 'break-word'], true); }
     private function countSpaceTokens(array $tokens): int { return count(array_filter($tokens, static fn(array $t): bool => $t['kind'] === 'space')); }
-    private function alignmentOffset(string $alignment, float $lineWidth, float $availableWidth): float
-    {
-        $slack = max(0.0, $availableWidth - $lineWidth);
-        return match ($alignment) { 'center' => $slack / 2.0, 'right', 'end' => $slack, default => 0.0 };
-    }
+    private function alignmentOffset(string $alignment, float $lineWidth, float $availableWidth): float { $slack = max(0.0, $availableWidth - $lineWidth); return match ($alignment) { 'center' => $slack / 2.0, 'right', 'end' => $slack, default => 0.0 }; }
 
     private function appendRun(array &$runs, TextRun $run): void
     {
         $key = array_key_last($runs); $last = $key !== null ? $runs[$key] : null;
         if ($last instanceof TextRun && $last->style === $run->style && abs($last->fontSize - $run->fontSize) < 1e-9 && abs(($last->x + $last->width) - $run->x) < 1e-9 && abs($last->baseline - $run->baseline) < 1e-9) {
-            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style);
-            return;
+            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style); return;
         }
         $runs[] = $run;
     }
@@ -292,9 +250,13 @@ final class InlineTextFormatter
     private function applyTextTransform(string $text, ComputedStyle $style): string
     {
         return match (strtolower($style->get('text-transform', 'none') ?? 'none')) {
-            'uppercase' => function_exists('mb_strtoupper') ? mb_strtoupper($text, 'UTF-8') : strtoupper($text),
-            'lowercase' => function_exists('mb_strtolower') ? mb_strtolower($text, 'UTF-8') : strtolower($text),
+            'uppercase' => $this->upper($text),
+            'lowercase' => $this->lower($text),
+            'capitalize' => preg_replace_callback('/(^|\s)(\p{L})/u', fn(array $m): string => $m[1] . $this->upper($m[2]), $text) ?? $text,
             default => $text,
         };
     }
+
+    private function upper(string $value): string { return function_exists('mb_strtoupper') ? mb_strtoupper($value, 'UTF-8') : strtoupper($value); }
+    private function lower(string $value): string { return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value); }
 }
