@@ -9,9 +9,11 @@ use Pagyra\Style\StyledNode;
 
 final readonly class AtomicInlineBox implements \JsonSerializable
 {
-    /** @param array{top:float,right:float,bottom:float,left:float} $margin
-     *  @param array{top:float,right:float,bottom:float,left:float} $padding
-     *  @param array{top:float,right:float,bottom:float,left:float} $border
+    /**
+     * @param array{top:float,right:float,bottom:float,left:float} $margin
+     * @param array{top:float,right:float,bottom:float,left:float} $padding
+     * @param array{top:float,right:float,bottom:float,left:float} $border
+     * @param list<LineBox> $contentLines
      */
     public function __construct(
         public StyledNode $source,
@@ -25,6 +27,7 @@ final readonly class AtomicInlineBox implements \JsonSerializable
         public array $margin = ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0],
         public array $padding = ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0],
         public array $border = ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0],
+        public array $contentLines = [],
     ) {
     }
 
@@ -41,6 +44,7 @@ final readonly class AtomicInlineBox implements \JsonSerializable
             'margin' => $this->margin,
             'padding' => $this->padding,
             'border' => $this->border,
+            'contentLines' => $this->contentLines,
             'style' => $this->style,
         ];
     }
