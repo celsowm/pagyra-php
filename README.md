@@ -6,7 +6,7 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM phase complete; initial CSS cascade/computed-style phase implemented. PDF rendering is intentionally not implemented yet.**
+**DOM phase complete; CSS cascade/computed-style phase is now substantial. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
@@ -23,10 +23,15 @@ Current foundation:
 - fragment/document normalization following the `pagyra-js` model;
 - attributes, IDs, classes, inline styles, text content, image and SVG recognition;
 - embedded `<style>` collection and stylesheet href discovery;
-- explicit text-whitespace normalization helpers;
-- CSS declaration and stylesheet parser bootstrap;
-- simple selector matching for tag, class, ID and compound simple selectors;
-- specificity, source-order resolution, inherited properties and inline-style precedence;
+- CSS declaration and stylesheet parsing foundation;
+- tag/class/ID compound selectors;
+- descendant and child combinators;
+- attribute selectors (`[attr]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`);
+- specificity and source-order resolution;
+- `!important`, including interaction with inline styles;
+- inherited properties;
+- CSS custom properties and `var()` fallback resolution;
+- initial UA/default styles for core block/inline elements, headings, paragraphs and lists;
 - styled DOM tree exposed by `prepareHtmlRender()`;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
@@ -35,7 +40,7 @@ Current foundation:
 - unit/integration/parity test suites kept separate;
 - deterministic bootstrap golden snapshot for `<p>Hello World</p>`.
 
-Not yet implemented in the cascade layer: combinators, pseudo-classes/elements, attribute selectors, `!important`, CSS variables, shorthands, UA styles, `@media`, `@page`, `@font-face`, external stylesheet loading and the full `pagyra-js` property parser set.
+Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, `@media`, `@page`, `@font-face`, external stylesheet loading and the remaining `pagyra-js` CSS surface.
 
 `Pagyra::renderHtmlToPdf()` currently throws deliberately. Layout, pagination, paint and PDF serialization will be added only after the lower-level parity layers are established.
 
