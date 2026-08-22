@@ -37,6 +37,8 @@ final class EmbeddedTrueTypePdfTest extends TestCase
         self::assertStringContainsString('<0004> <D83DDE00>', $pdf);
         self::assertStringContainsString('[<0001> 50 <0002> <0003> <0004>] TJ', $pdf);
         self::assertStringNotContainsString('/WinAnsiEncoding', $pdf);
+        self::assertSame(1, preg_match('/\/Length (\d+) \/Length1 \1/', $pdf, $match));
+        self::assertLessThan(strlen($font), (int) $match[1]);
     }
 
     private function fontFixture(): string
