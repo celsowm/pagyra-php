@@ -24,6 +24,20 @@ final class ReplacedInlineParityTest extends TestCase
         self::assertSame(100.0, $box->width);
     }
 
+    public function testMinWidthIsAppliedAfterAutoShrinkAndRestoresAspectRatio(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<p style="margin:0"><img width="200" height="100" style="min-width:80px"></p>',
+            'viewportWidth' => 70,
+            'viewportHeight' => 300,
+        ]);
+
+        $box = $prepared->layoutRoot->children[0]->lineBoxes[0]->atomicBoxes[0];
+
+        self::assertSame(80.0, $box->contentWidth);
+        self::assertSame(40.0, $box->contentHeight);
+    }
+
     public function testInlineSvgParticipatesAsAtomicReplacedElement(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
