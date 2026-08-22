@@ -17,7 +17,7 @@ final readonly class ImageMetadata
             throw new \InvalidArgumentException('Image dimensions must be positive');
         }
 
-        if (!in_array($format, ['png', 'jpeg'], true)) {
+        if (!in_array($format, ['png', 'jpeg', 'webp'], true)) {
             throw new \InvalidArgumentException('Unsupported image metadata format');
         }
 
