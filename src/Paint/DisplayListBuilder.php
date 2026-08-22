@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace Pagyra\Paint;
 
 use Pagyra\Css\Color\ColorParser;
+use Pagyra\Geometry\Rect;
 use Pagyra\Image\ImageMetadataReader;
 use Pagyra\Image\ImageSourceBytesResolver;
+use Pagyra\Image\ObjectFit;
+use Pagyra\Image\ObjectFitResolver;
+use Pagyra\Image\ObjectPositionParser;
 use Pagyra\Layout\LayoutNode;
 use Pagyra\Pagination\BlockFragment;
 use Pagyra\Pagination\LineFragment;
@@ -140,20 +144,36 @@ final class DisplayListBuilder
                     continue;
                 }
                 if (!in_array($metadata->format, ['jpeg', 'png'], true)) continue;
-
-                $contentX = $box->x + $box->margin['left'] + $box->border['left'] + $box->padding['left'];
-                $contentY = $box->y + $box->margin['top'] + $box->border['top'] + $box->padding['top'];
                 if ($box->contentWidth <= 0.0 || $box->contentHeight <= 0.0) continue;
+
+                $contentX = $box->x + $box->margin['left'] + $box->border['left'] + $box->padding['left'] + $margins['left'];
+                $contentY = $lineFragment->pageY
+                    + (($box->y + $box->margin['top'] + $box->border['top'] + $box->padding['top']) - $line->y)
+                    + $margins['top'];
+                $contentBox = new Rect($contentX, $contentY, $box->contentWidth, $box->contentHeight);
+                $fitRaw = strtolower(trim($box->style->get('object-fit', 'fill') ?? 'fill'));
+                $fit = ObjectFit::tryFrom($fitRaw) ?? ObjectFit::Fill;
+                $position = ObjectPositionParser::parse($box->style->get('object-position'));
+                $destination = ObjectFitResolver::resolve(
+                    $metadata->width,
+                    $metadata->height,
+                    $contentBox,
+                    $fit,
+                    $position,
+                );
+                $clipRect = ObjectFitResolver::needsClip($destination, $contentBox) ? $contentBox : null;
+
                 $commands[] = new ImagePaintCommand(
                     box: $box,
                     pageIndex: $lineFragment->pageIndex,
-                    x: $contentX + $margins['left'],
-                    y: $lineFragment->pageY + ($contentY - $line->y) + $margins['top'],
-                    width: $box->contentWidth,
-                    height: $box->contentHeight,
+                    x: $destination->x,
+                    y: $destination->y,
+                    width: $destination->width,
+                    height: $destination->height,
                     bytes: $bytes,
                     metadata: $metadata,
                     source: $source,
+                    clipRect: $clipRect,
                 );
             }
         }
