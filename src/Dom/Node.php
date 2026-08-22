@@ -98,9 +98,13 @@ final readonly class Node implements \JsonSerializable
         return $this->type === 'element' && $this->tagName === strtolower($tagName);
     }
 
+    /**
+     * Image-like replaced content participating atomically in inline layout.
+     * Inline SVG shares the same sizing path as raster images.
+     */
     public function isImage(): bool
     {
-        return $this->isElement('img');
+        return $this->isElement('img') || $this->isSvg();
     }
 
     public function isSvg(): bool
