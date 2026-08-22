@@ -144,15 +144,11 @@ final class PdfSerializer
             foreach ($page->commands as $command) {
                 if (!$command instanceof TextPaintCommand) continue;
                 [$key, $face, $base14] = $this->fontChoice($command, $fontRegistry);
-                if (!isset($usage[$key])) {
-                    $usage[$key] = ['face' => $face, 'base14' => $base14, 'glyphs' => []];
-                }
+                if (!isset($usage[$key])) $usage[$key] = ['face' => $face, 'base14' => $base14, 'glyphs' => []];
                 if ($face === null) continue;
                 foreach ($this->codePoints($command->text) as $codePoint) {
                     $gid = $face->metrics->glyphId($codePoint);
-                    if (!isset($usage[$key]['glyphs'][$gid])) {
-                        $usage[$key]['glyphs'][$gid] = $codePoint;
-                    }
+                    if (!isset($usage[$key]['glyphs'][$gid])) $usage[$key]['glyphs'][$gid] = $codePoint;
                 }
             }
         }
@@ -190,9 +186,7 @@ final class PdfSerializer
         sort($ids, SORT_NUMERIC);
         $scale = 1000.0 / $face->metrics->unitsPerEm;
         $parts = [];
-        foreach ($ids as $gid) {
-            $parts[] = $gid . ' [' . $this->number($face->metrics->advanceWidth($gid) * $scale) . ']';
-        }
+        foreach ($ids as $gid) $parts[] = $gid . ' [' . $this->number($face->metrics->advanceWidth($gid) * $scale) . ']';
         return implode(' ', $parts);
     }
 
@@ -204,18 +198,14 @@ final class PdfSerializer
         foreach ($glyphToCodePoint as $gid => $codePoint) {
             $entries[] = '<' . sprintf('%04X', $gid & 0xFFFF) . '> <' . $this->utf16BeHex($codePoint) . '>';
         }
-
         $body = '';
         foreach (array_chunk($entries, 100) as $chunk) {
             $body .= count($chunk) . " beginbfchar\n" . implode("\n", $chunk) . "\nendbfchar\n";
         }
         $cmapName = preg_replace('/[^A-Za-z0-9_.-]+/', '', $name) ?: 'PagyraUnicode';
-        return "/CIDInit /ProcSet findresource begin\n"
-            . "12 dict begin\n"
-            . "begincmap\n"
+        return "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
             . "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
-            . "/CMapName /" . $cmapName . " def\n"
-            . "/CMapType 2 def\n"
+            . "/CMapName /" . $cmapName . " def\n/CMapType 2 def\n"
             . "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
             . $body
             . "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
@@ -234,7 +224,6 @@ final class PdfSerializer
     {
         $color = $command->backgroundColor;
         if ($color === null || $color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) return '';
-
         $x = Units::pxToPt($command->x);
         $y = Units::pxToPt($pageHeightPx - $command->y - $command->height);
         $width = Units::pxToPt($command->width);
@@ -242,35 +231,39 @@ final class PdfSerializer
         [$r, $g, $b] = $color->toPdfRgb();
         return "q\n"
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
-            . $this->number($x) . ' ' . $this->number($y) . ' ' . $this->number($width) . ' ' . $this->number($height) . " re f\n"
-            . "Q\n";
+            . $this->number($x) . ' ' . $this->number($y) . ' ' . $this->number($width) . ' ' . $this->number($height) . " re f\nQ\n";
     }
 
     private function serializeEmbeddedText(TextPaintCommand $command, float $pageHeightPx, string $resourceName, RegisteredFont $face): string
     {
         $codePoints = $this->codePoints($command->text);
         $glyphs = array_map(fn (int $cp): int => $face->metrics->glyphId($cp), $codePoints);
+        $wordSpacing = $this->spacingPx($command, 'word-spacing');
         $items = [];
-        $previous = null;
-        foreach ($glyphs as $gid) {
-            if ($previous !== null) {
-                $kern = $face->metrics->kerning($previous, $gid);
-                if ($kern !== 0) $items[] = $this->number(-$kern * 1000.0 / $face->metrics->unitsPerEm);
-            }
+        $last = count($glyphs) - 1;
+        foreach ($glyphs as $i => $gid) {
             $items[] = '<' . sprintf('%04X', $gid & 0xFFFF) . '>';
-            $previous = $gid;
+            if ($i >= $last) continue;
+            $adjustment = 0.0;
+            $kern = $face->metrics->kerning($gid, $glyphs[$i + 1]);
+            if ($kern !== 0) $adjustment += -$kern * 1000.0 / $face->metrics->unitsPerEm;
+            if (($codePoints[$i] ?? null) === 0x20 && $wordSpacing !== 0.0 && $command->fontSize > 0.0) {
+                $adjustment += -$wordSpacing * 1000.0 / $command->fontSize;
+            }
+            if (abs($adjustment) > 0.0000001) $items[] = $this->number($adjustment);
         }
 
         $x = Units::pxToPt($command->x);
         $y = Units::pxToPt($pageHeightPx - $command->baseline);
         $fontSize = Units::pxToPt($command->fontSize);
+        $letterSpacingPt = Units::pxToPt($this->spacingPx($command, 'letter-spacing'));
         [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
         return "BT\n"
             . '/' . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
+            . ($letterSpacingPt !== 0.0 ? $this->number($letterSpacingPt) . " Tc\n" : '')
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
             . '1 0 0 1 ' . $this->number($x) . ' ' . $this->number($y) . " Tm\n"
-            . '[' . implode(' ', $items) . "] TJ\n"
-            . "ET\n";
+            . '[' . implode(' ', $items) . "] TJ\nET\n";
     }
 
     private function serializeBase14Text(TextPaintCommand $command, float $pageHeightPx, string $resourceName): string
@@ -279,13 +272,25 @@ final class PdfSerializer
         $x = Units::pxToPt($command->x);
         $y = Units::pxToPt($pageHeightPx - $command->baseline);
         $fontSize = Units::pxToPt($command->fontSize);
+        $letterSpacingPt = Units::pxToPt($this->spacingPx($command, 'letter-spacing'));
+        $wordSpacingPt = Units::pxToPt($this->spacingPx($command, 'word-spacing'));
         [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
         return "BT\n"
             . '/' . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
+            . ($letterSpacingPt !== 0.0 ? $this->number($letterSpacingPt) . " Tc\n" : '')
+            . ($wordSpacingPt !== 0.0 ? $this->number($wordSpacingPt) . " Tw\n" : '')
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
             . '1 0 0 1 ' . $this->number($x) . ' ' . $this->number($y) . " Tm\n"
-            . '(' . $this->escapePdfString($encoded) . ") Tj\n"
-            . "ET\n";
+            . '(' . $this->escapePdfString($encoded) . ") Tj\nET\n";
+    }
+
+    private function spacingPx(TextPaintCommand $command, string $property): float
+    {
+        $value = $command->run->style->get($property);
+        if ($value !== null && preg_match('/^(-?\d+(?:\.\d+)?)px$/', trim($value), $match) === 1) {
+            return (float) $match[1];
+        }
+        return 0.0;
     }
 
     private function base14Font(TextPaintCommand $command): string
@@ -295,7 +300,6 @@ final class PdfSerializer
         if (str_contains($first, 'courier') || str_contains($first, 'mono')) $base = 'Courier';
         elseif (str_contains($first, 'helvetica') || str_contains($first, 'arial') || str_contains($first, 'sans')) $base = 'Helvetica';
         else $base = 'Times';
-
         $bold = $command->fontWeight >= 600;
         $italic = str_contains($command->fontStyle, 'italic') || str_contains($command->fontStyle, 'oblique');
         return match ($base) {
@@ -368,13 +372,10 @@ final class PdfSerializer
             $offsets[$id] = strlen($pdf);
             $pdf .= $id . " 0 obj\n" . $object . "\nendobj\n";
         }
-
         $xrefOffset = strlen($pdf);
         $size = max(array_keys($objects)) + 1;
         $pdf .= "xref\n0 " . $size . "\n0000000000 65535 f \n";
-        for ($id = 1; $id < $size; $id++) {
-            $pdf .= sprintf('%010d 00000 n ', $offsets[$id] ?? 0) . "\n";
-        }
+        for ($id = 1; $id < $size; $id++) $pdf .= sprintf('%010d 00000 n ', $offsets[$id] ?? 0) . "\n";
         $pdf .= "trailer\n<< /Size " . $size . ' /Root ' . $rootId . " 0 R >>\n";
         $pdf .= "startxref\n" . $xrefOffset . "\n%%EOF\n";
         return $pdf;
