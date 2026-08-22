@@ -32,15 +32,25 @@ final class BlockLayoutEngine
     {
         $children = [];
         $cursorY = 0.0;
+        $previousBorderBottom = null;
+        $previousBottomMargin = 0.0;
 
         foreach ($root->children as $child) {
             if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) {
                 continue;
             }
 
-            $layout = $this->layoutBlock($child, 0.0, $cursorY, $this->viewportWidth, $this->viewportHeight, self::ROOT_FONT_SIZE);
+            $childFontSize = $this->resolveFontSize($child, self::ROOT_FONT_SIZE);
+            $childTopMargin = $this->resolveMarginSide($child, 'top', $this->viewportWidth, $this->viewportHeight, $childFontSize);
+            $flowY = $previousBorderBottom === null
+                ? $cursorY
+                : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
+
+            $layout = $this->layoutBlock($child, 0.0, $flowY, $this->viewportWidth, $this->viewportHeight, self::ROOT_FONT_SIZE);
             $children[] = $layout;
-            $cursorY = $layout->box->marginBox()->bottom();
+            $previousBorderBottom = $layout->box->borderBox()->bottom();
+            $previousBottomMargin = $layout->box->margin->bottom;
+            $cursorY = $previousBorderBottom + $previousBottomMargin;
         }
 
         $box = new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY)));
@@ -56,7 +66,16 @@ final class BlockLayoutEngine
         float $parentFontSize,
     ): LayoutNode {
         $fontSize = $this->resolveFontSize($styled, $parentFontSize);
-        $margin = $this->resolveEdges($styled, 'margin', $containingWidth, $containingHeight, $fontSize);
+        [$marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw] = $this->edgeRawValues($styled, 'margin');
+        $margin = $this->resolveRawEdges(
+            $marginTopRaw,
+            $marginRightRaw,
+            $marginBottomRaw,
+            $marginLeftRaw,
+            $containingWidth,
+            $containingHeight,
+            $fontSize,
+        );
         $padding = $this->resolveEdges($styled, 'padding', $containingWidth, $containingHeight, $fontSize);
         $border = $this->resolveBorderEdges($styled, $containingWidth, $containingHeight, $fontSize);
 
@@ -64,7 +83,7 @@ final class BlockLayoutEngine
         $horizontalNonContent = $padding->horizontal() + $border->horizontal();
         $widthValue = $styled->style->get('width', 'auto') ?? 'auto';
 
-        if (strtolower(trim($widthValue)) === 'auto') {
+        if ($this->isAuto($widthValue)) {
             $contentWidth = max(0.0, $available - $horizontalNonContent);
         } else {
             $resolvedWidth = $this->resolveLength($widthValue, $containingWidth, $fontSize, $containingWidth, $containingHeight, 'zero');
@@ -82,33 +101,55 @@ final class BlockLayoutEngine
             $fontSize,
         );
 
+        if (!$this->isAuto($widthValue)) {
+            $usedMargins = BlockMath::resolveAutoMargins(
+                $containingWidth,
+                $contentWidth + $horizontalNonContent,
+                $margin->left,
+                $margin->right,
+                $this->isAuto($marginLeftRaw ?? '0'),
+                $this->isAuto($marginRightRaw ?? '0'),
+            );
+            $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
+        }
+
         $contentX = $containingX + $margin->left + $border->left + $padding->left;
         $contentY = $flowY + $margin->top + $border->top + $padding->top;
         $cursorY = $contentY;
         $children = [];
+        $previousBorderBottom = null;
+        $previousBottomMargin = 0.0;
 
         foreach ($styled->children as $child) {
             if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) {
                 continue;
             }
 
+            $childFontSize = $this->resolveFontSize($child, $fontSize);
+            $childTopMargin = $this->resolveMarginSide($child, 'top', $contentWidth, $containingHeight, $childFontSize);
+            $childFlowY = $previousBorderBottom === null
+                ? $cursorY
+                : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
+
             $childLayout = $this->layoutBlock(
                 $child,
                 $contentX,
-                $cursorY,
+                $childFlowY,
                 $contentWidth,
                 $containingHeight,
                 $fontSize,
             );
             $children[] = $childLayout;
-            $cursorY = $childLayout->box->marginBox()->bottom();
+            $previousBorderBottom = $childLayout->box->borderBox()->bottom();
+            $previousBottomMargin = $childLayout->box->margin->bottom;
+            $cursorY = $previousBorderBottom + $previousBottomMargin;
         }
 
         $autoContentHeight = max(0.0, $cursorY - $contentY);
         $heightValue = $styled->style->get('height', 'auto') ?? 'auto';
         $verticalNonContent = $padding->vertical() + $border->vertical();
 
-        if (strtolower(trim($heightValue)) === 'auto') {
+        if ($this->isAuto($heightValue)) {
             $contentHeight = $autoContentHeight;
         } else {
             $resolvedHeight = $this->resolveLength($heightValue, $containingHeight, $fontSize, $containingWidth, $containingHeight, 'zero');
@@ -162,6 +203,24 @@ final class BlockLayoutEngine
         return max(0.0, $this->resolveLength($value, $parentFontSize, $parentFontSize, $this->viewportWidth, $this->viewportHeight, 'zero'));
     }
 
+    private function resolveMarginSide(
+        StyledNode $node,
+        string $side,
+        float $widthReference,
+        float $heightReference,
+        float $fontSize,
+    ): float {
+        [$top, $right, $bottom, $left] = $this->edgeRawValues($node, 'margin');
+        $value = match ($side) {
+            'top' => $top,
+            'right' => $right,
+            'bottom' => $bottom,
+            'left' => $left,
+            default => '0',
+        };
+        return $this->resolveLength($value ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero');
+    }
+
     private function resolveEdges(
         StyledNode $node,
         string $prefix,
@@ -169,15 +228,39 @@ final class BlockLayoutEngine
         float $heightReference,
         float $fontSize,
     ): Edges {
+        [$top, $right, $bottom, $left] = $this->edgeRawValues($node, $prefix);
+        return $this->resolveRawEdges($top, $right, $bottom, $left, $widthReference, $heightReference, $fontSize);
+    }
+
+    /** @return array{?string,?string,?string,?string} */
+    private function edgeRawValues(StyledNode $node, string $prefix): array
+    {
         $shorthand = $node->style->get($prefix);
         $parts = $shorthand !== null ? preg_split('/\s+/', trim($shorthand)) ?: [] : [];
-        [$st, $sr, $sb, $sl] = $this->expandFour($parts);
+        [$top, $right, $bottom, $left] = $this->expandFour($parts);
 
+        return [
+            $node->style->get($prefix . '-top', $top),
+            $node->style->get($prefix . '-right', $right),
+            $node->style->get($prefix . '-bottom', $bottom),
+            $node->style->get($prefix . '-left', $left),
+        ];
+    }
+
+    private function resolveRawEdges(
+        ?string $top,
+        ?string $right,
+        ?string $bottom,
+        ?string $left,
+        float $widthReference,
+        float $heightReference,
+        float $fontSize,
+    ): Edges {
         return new Edges(
-            $this->resolveLength($node->style->get($prefix . '-top', $st) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
-            $this->resolveLength($node->style->get($prefix . '-right', $sr) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
-            $this->resolveLength($node->style->get($prefix . '-bottom', $sb) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
-            $this->resolveLength($node->style->get($prefix . '-left', $sl) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($top ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($right ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($bottom ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($left ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
         );
     }
 
@@ -189,13 +272,13 @@ final class BlockLayoutEngine
     ): Edges {
         $shorthand = $node->style->get('border-width');
         $parts = $shorthand !== null ? preg_split('/\s+/', trim($shorthand)) ?: [] : [];
-        [$st, $sr, $sb, $sl] = $this->expandFour($parts);
+        [$top, $right, $bottom, $left] = $this->expandFour($parts);
 
         return new Edges(
-            $this->resolveLength($node->style->get('border-top-width', $st) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
-            $this->resolveLength($node->style->get('border-right-width', $sr) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
-            $this->resolveLength($node->style->get('border-bottom-width', $sb) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
-            $this->resolveLength($node->style->get('border-left-width', $sl) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($node->style->get('border-top-width', $top) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($node->style->get('border-right-width', $right) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($node->style->get('border-bottom-width', $bottom) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($node->style->get('border-left-width', $left) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
         );
     }
 
@@ -208,6 +291,11 @@ final class BlockLayoutEngine
             3 => [$parts[0], $parts[1], $parts[2], $parts[1]],
             default => [$parts[0] ?? null, $parts[1] ?? null, $parts[2] ?? null, $parts[3] ?? null],
         };
+    }
+
+    private function isAuto(string $value): bool
+    {
+        return strtolower(trim($value)) === 'auto';
     }
 
     private function resolveLength(
