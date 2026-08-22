@@ -14,11 +14,13 @@ final class BlockLayoutEngine
 {
     private const ROOT_FONT_SIZE = 16.0;
 
+    private readonly LengthParser $lengthParser;
+
     public function __construct(
         private readonly float $viewportWidth,
         private readonly float $viewportHeight,
-        private readonly LengthParser $lengthParser = new LengthParser(),
     ) {
+        $this->lengthParser = new LengthParser($viewportWidth, $viewportHeight);
     }
 
     public function layout(StyledNode $root): LayoutNode
@@ -32,10 +34,7 @@ final class BlockLayoutEngine
         $cursorY = 0.0;
 
         foreach ($root->children as $child) {
-            if ($this->display($child) === 'none') {
-                continue;
-            }
-            if (!$this->isBlockLevel($child)) {
+            if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) {
                 continue;
             }
 
@@ -57,8 +56,8 @@ final class BlockLayoutEngine
         float $parentFontSize,
     ): LayoutNode {
         $fontSize = $this->resolveFontSize($styled, $parentFontSize);
-        $margin = $this->resolveEdges($styled, 'margin', $containingWidth, $containingHeight, $fontSize, true);
-        $padding = $this->resolveEdges($styled, 'padding', $containingWidth, $containingHeight, $fontSize, false);
+        $margin = $this->resolveEdges($styled, 'margin', $containingWidth, $containingHeight, $fontSize);
+        $padding = $this->resolveEdges($styled, 'padding', $containingWidth, $containingHeight, $fontSize);
         $border = $this->resolveBorderEdges($styled, $containingWidth, $containingHeight, $fontSize);
 
         $available = max(0.0, $containingWidth - $margin->horizontal());
@@ -84,16 +83,12 @@ final class BlockLayoutEngine
         );
 
         $contentX = $containingX + $margin->left + $border->left + $padding->left;
-        $borderTopY = $flowY + $margin->top;
-        $contentY = $borderTopY + $border->top + $padding->top;
+        $contentY = $flowY + $margin->top + $border->top + $padding->top;
         $cursorY = $contentY;
         $children = [];
 
         foreach ($styled->children as $child) {
-            if ($this->display($child) === 'none') {
-                continue;
-            }
-            if (!$this->isBlockLevel($child)) {
+            if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) {
                 continue;
             }
 
@@ -173,23 +168,16 @@ final class BlockLayoutEngine
         float $widthReference,
         float $heightReference,
         float $fontSize,
-        bool $allowAuto,
     ): Edges {
         $shorthand = $node->style->get($prefix);
         $parts = $shorthand !== null ? preg_split('/\s+/', trim($shorthand)) ?: [] : [];
         [$st, $sr, $sb, $sl] = $this->expandFour($parts);
 
-        $top = $node->style->get($prefix . '-top', $st);
-        $right = $node->style->get($prefix . '-right', $sr);
-        $bottom = $node->style->get($prefix . '-bottom', $sb);
-        $left = $node->style->get($prefix . '-left', $sl);
-        $auto = $allowAuto ? 'zero' : 'zero';
-
         return new Edges(
-            $this->resolveLength($top ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, $auto),
-            $this->resolveLength($right ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, $auto),
-            $this->resolveLength($bottom ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, $auto),
-            $this->resolveLength($left ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, $auto),
+            $this->resolveLength($node->style->get($prefix . '-top', $st) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($node->style->get($prefix . '-right', $sr) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($node->style->get($prefix . '-bottom', $sb) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
+            $this->resolveLength($node->style->get($prefix . '-left', $sl) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'),
         );
     }
 
