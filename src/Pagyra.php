@@ -42,13 +42,7 @@ final class Pagyra
             }
         }
 
-        $pageStyle = (new PageStyleResolver())->resolve(
-            $cssText,
-            $options->pageWidth,
-            $options->pageHeight,
-            $options->margins,
-        );
-        [$viewportWidth, $viewportHeight] = self::resolvePrintViewport($options, $pageStyle);
+        [$pageStyle, $viewportWidth, $viewportHeight] = self::resolveStablePageConfiguration($cssText, $options);
 
         $rules = (new StylesheetParser())->parse(
             $cssText,
@@ -83,6 +77,56 @@ final class Pagyra
     }
 
     /**
+     * @return array{0:array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}},1:float,2:float}
+     */
+    private static function resolveStablePageConfiguration(string $cssText, RenderHtmlOptions $options): array
+    {
+        $resolver = new PageStyleResolver();
+        $viewportWidth = $options->viewportWidth;
+        $viewportHeight = $options->viewportHeight;
+        $pageStyle = $resolver->resolve(
+            $cssText,
+            $options->pageWidth,
+            $options->pageHeight,
+            $options->margins,
+            'print',
+            $viewportWidth,
+            $viewportHeight,
+        );
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            [$nextViewportWidth, $nextViewportHeight] = self::resolvePrintViewport($options, $pageStyle);
+            $nextPageStyle = $resolver->resolve(
+                $cssText,
+                $options->pageWidth,
+                $options->pageHeight,
+                $options->margins,
+                'print',
+                $nextViewportWidth,
+                $nextViewportHeight,
+            );
+
+            if (self::samePageConfiguration(
+                $pageStyle,
+                $viewportWidth,
+                $viewportHeight,
+                $nextPageStyle,
+                $nextViewportWidth,
+                $nextViewportHeight,
+            )) {
+                return [$nextPageStyle, $nextViewportWidth, $nextViewportHeight];
+            }
+
+            $pageStyle = $nextPageStyle;
+            $viewportWidth = $nextViewportWidth;
+            $viewportHeight = $nextViewportHeight;
+        }
+
+        [$viewportWidth, $viewportHeight] = self::resolvePrintViewport($options, $pageStyle);
+        return [$pageStyle, $viewportWidth, $viewportHeight];
+    }
+
+    /**
      * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $pageStyle
      * @return array{0:float,1:float}
      */
@@ -95,6 +139,33 @@ final class Pagyra
             min($options->viewportWidth, $contentWidth),
             min($options->viewportHeight, $contentHeight),
         ];
+    }
+
+    /**
+     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $leftStyle
+     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $rightStyle
+     */
+    private static function samePageConfiguration(
+        array $leftStyle,
+        float $leftViewportWidth,
+        float $leftViewportHeight,
+        array $rightStyle,
+        float $rightViewportWidth,
+        float $rightViewportHeight,
+    ): bool {
+        foreach ([
+            [$leftStyle['width'], $rightStyle['width']],
+            [$leftStyle['height'], $rightStyle['height']],
+            [$leftViewportWidth, $rightViewportWidth],
+            [$leftViewportHeight, $rightViewportHeight],
+        ] as [$left, $right]) {
+            if (abs($left - $right) > 0.01) return false;
+        }
+
+        foreach (['top', 'right', 'bottom', 'left'] as $side) {
+            if (abs($leftStyle['margins'][$side] - $rightStyle['margins'][$side]) > 0.01) return false;
+        }
+        return true;
     }
 
     /** @param array<string,mixed> $config */
