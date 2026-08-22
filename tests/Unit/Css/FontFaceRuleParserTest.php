@@ -28,6 +28,32 @@ final class FontFaceRuleParserTest extends TestCase
         ]], $faces);
     }
 
+    public function testPrefersSupportedSfntSourceOverWoff2(): void
+    {
+        $faces = (new FontFaceRuleParser())->parse('
+            @font-face {
+                font-family: Fixture;
+                src:
+                    url("fixture.woff2") format("woff2"),
+                    url("fixture.ttf") format("truetype");
+            }
+        ');
+
+        self::assertSame('fixture.ttf', $faces[0]['src']);
+    }
+
+    public function testKeepsBase64FontDataUrlIntact(): void
+    {
+        $faces = (new FontFaceRuleParser())->parse('
+            @font-face {
+                font-family: Embedded;
+                src: url("data:font/ttf;base64,QUJDRA==") format("truetype");
+            }
+        ');
+
+        self::assertSame('data:font/ttf;base64,QUJDRA==', $faces[0]['src']);
+    }
+
     public function testIgnoresIncompleteFontFaceRules(): void
     {
         $faces = (new FontFaceRuleParser())->parse('
