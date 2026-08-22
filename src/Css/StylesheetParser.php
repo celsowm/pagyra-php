@@ -28,9 +28,14 @@ final class StylesheetParser
             if ($selectorText === '' || str_starts_with($selectorText, '@')) {
                 continue;
             }
-            $declarations = $this->declarationParser->parse($match[2]);
-            if ($declarations === []) {
+
+            $parsed = $this->declarationParser->parseWithPriority($match[2]);
+            if ($parsed === []) {
                 continue;
+            }
+            $declarations = [];
+            foreach ($parsed as $property => $entry) {
+                $declarations[$property] = $entry['value'] . ($entry['important'] ? ' !important' : '');
             }
 
             foreach (explode(',', $selectorText) as $selector) {
