@@ -54,6 +54,22 @@ final class FontFaceRuleParserTest extends TestCase
         self::assertSame('data:font/ttf;base64,QUJDRA==', $faces[0]['src']);
     }
 
+    public function testFiltersFontFacesByMediaContext(): void
+    {
+        $faces = (new FontFaceRuleParser())->parse('
+            @media screen {
+                @font-face { font-family: ScreenOnly; src: url("screen.ttf"); }
+            }
+            @media print and (min-width: 700px) {
+                @font-face { font-family: PrintWide; src: url("print.ttf"); }
+            }
+        ', 'print', 800, 600);
+
+        self::assertCount(1, $faces);
+        self::assertSame('PrintWide', $faces[0]['family']);
+        self::assertSame('print.ttf', $faces[0]['src']);
+    }
+
     public function testIgnoresIncompleteFontFaceRules(): void
     {
         $faces = (new FontFaceRuleParser())->parse('
