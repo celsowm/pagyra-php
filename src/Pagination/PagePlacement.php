@@ -8,6 +8,7 @@ use Pagyra\Layout\LayoutNode;
 
 final readonly class PagePlacement implements \JsonSerializable
 {
+    /** @param list<PageFragment> $fragments */
     public function __construct(
         public LayoutNode $node,
         public int $pageIndex,
@@ -15,6 +16,7 @@ final readonly class PagePlacement implements \JsonSerializable
         public float $offsetY,
         public float $startY,
         public float $endY,
+        public array $fragments = [],
     ) {
     }
 
@@ -26,6 +28,7 @@ final readonly class PagePlacement implements \JsonSerializable
             'offsetY' => $this->offsetY,
             'startY' => $this->startY,
             'endY' => $this->endY,
+            'fragments' => $this->fragments,
             'node' => $this->node,
         ];
     }
