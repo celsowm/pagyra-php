@@ -15,7 +15,7 @@ final class PngPdfImageParser
         }
 
         $offset = 8;
-        $width = $height = $bitDepth = $colorType = $interlace = null;
+        $width = $height = $bitDepth = $colorType = null;
         $idat = '';
         $length = strlen($bytes);
 
@@ -57,7 +57,106 @@ final class PngPdfImageParser
             return new PngPdfImageData($width, $height, $bitDepth, 3, '/DeviceRGB', $idat);
         }
 
+        if ($bitDepth === 8 && in_array($colorType, [4, 6], true)) {
+            return $this->splitAlpha($width, $height, $colorType, $idat);
+        }
+
         return null;
+    }
+
+    private function splitAlpha(int $width, int $height, int $colorType, string $idat): ?PngPdfImageData
+    {
+        $decoded = @gzuncompress($idat);
+        if (!is_string($decoded)) return null;
+
+        $channels = $colorType === 6 ? 4 : 2;
+        $colorChannels = $colorType === 6 ? 3 : 1;
+        $rowBytes = $width * $channels;
+        $expected = $height * ($rowBytes + 1);
+        if (strlen($decoded) !== $expected) return null;
+
+        $previous = array_fill(0, $rowBytes, 0);
+        $color = '';
+        $alpha = '';
+        $cursor = 0;
+
+        for ($row = 0; $row < $height; $row++) {
+            $filter = ord($decoded[$cursor++]);
+            if ($filter < 0 || $filter > 4) return null;
+
+            $raw = substr($decoded, $cursor, $rowBytes);
+            $cursor += $rowBytes;
+            $reconstructed = $this->unfilter($raw, $previous, $channels, $filter);
+            if ($reconstructed === null) return null;
+
+            for ($x = 0; $x < $width; $x++) {
+                $base = $x * $channels;
+                if ($colorType === 6) {
+                    $color .= chr($reconstructed[$base])
+                        . chr($reconstructed[$base + 1])
+                        . chr($reconstructed[$base + 2]);
+                    $alpha .= chr($reconstructed[$base + 3]);
+                } else {
+                    $color .= chr($reconstructed[$base]);
+                    $alpha .= chr($reconstructed[$base + 1]);
+                }
+            }
+
+            $previous = $reconstructed;
+        }
+
+        $colorCompressed = gzcompress($color);
+        $alphaCompressed = gzcompress($alpha);
+        if (!is_string($colorCompressed) || !is_string($alphaCompressed)) return null;
+
+        return new PngPdfImageData(
+            width: $width,
+            height: $height,
+            bitsPerComponent: 8,
+            colors: $colorChannels,
+            colorSpace: $colorType === 6 ? '/DeviceRGB' : '/DeviceGray',
+            compressedData: $colorCompressed,
+            usesPngPredictor: false,
+            alphaCompressedData: $alphaCompressed,
+        );
+    }
+
+    /** @param list<int> $previous @return list<int>|null */
+    private function unfilter(string $raw, array $previous, int $bytesPerPixel, int $filter): ?array
+    {
+        $length = strlen($raw);
+        $row = [];
+
+        for ($i = 0; $i < $length; $i++) {
+            $value = ord($raw[$i]);
+            $left = $i >= $bytesPerPixel ? $row[$i - $bytesPerPixel] : 0;
+            $up = $previous[$i] ?? 0;
+            $upLeft = $i >= $bytesPerPixel ? ($previous[$i - $bytesPerPixel] ?? 0) : 0;
+
+            $predictor = match ($filter) {
+                0 => 0,
+                1 => $left,
+                2 => $up,
+                3 => intdiv($left + $up, 2),
+                4 => $this->paeth($left, $up, $upLeft),
+                default => null,
+            };
+            if ($predictor === null) return null;
+            $row[$i] = ($value + $predictor) & 0xff;
+        }
+
+        return $row;
+    }
+
+    private function paeth(int $left, int $up, int $upLeft): int
+    {
+        $p = $left + $up - $upLeft;
+        $pa = abs($p - $left);
+        $pb = abs($p - $up);
+        $pc = abs($p - $upLeft);
+        if ($pa <= $pb && $pa <= $pc) return $left;
+        if ($pb <= $pc) return $up;
+        return $upLeft;
     }
 
     private function u32(string $bytes, int $offset): int
