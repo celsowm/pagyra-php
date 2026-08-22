@@ -6,7 +6,13 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**Bootstrap slice implemented; PDF rendering is intentionally not implemented yet.**
+**DOM phase complete; initial CSS cascade/computed-style phase implemented. PDF rendering is intentionally not implemented yet.**
+
+Current pipeline:
+
+```text
+HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree
+```
 
 Current foundation:
 
@@ -14,12 +20,22 @@ Current foundation:
 - `Pagyra::prepareHtmlRender()` public API;
 - validated `RenderHtmlOptions` defaults;
 - Pagyra-owned DOM model backed by `DOMDocument` only at the parsing boundary;
-- CSS declaration parser bootstrap;
-- geometry primitive (`Rect`);
+- fragment/document normalization following the `pagyra-js` model;
+- attributes, IDs, classes, inline styles, text content, image and SVG recognition;
+- embedded `<style>` collection and stylesheet href discovery;
+- explicit text-whitespace normalization helpers;
+- CSS declaration and stylesheet parser bootstrap;
+- simple selector matching for tag, class, ID and compound simple selectors;
+- specificity, source-order resolution, inherited properties and inline-style precedence;
+- styled DOM tree exposed by `prepareHtmlRender()`;
+- geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
-- CSS length parsing for absolute, viewport, relative and percentage lengths;
+- CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
+- RGBA/hex/rgb/named-color parsing foundation;
 - unit/integration/parity test suites kept separate;
 - deterministic bootstrap golden snapshot for `<p>Hello World</p>`.
+
+Not yet implemented in the cascade layer: combinators, pseudo-classes/elements, attribute selectors, `!important`, CSS variables, shorthands, UA styles, `@media`, `@page`, `@font-face`, external stylesheet loading and the full `pagyra-js` property parser set.
 
 `Pagyra::renderHtmlToPdf()` currently throws deliberately. Layout, pagination, paint and PDF serialization will be added only after the lower-level parity layers are established.
 
