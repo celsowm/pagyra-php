@@ -18,6 +18,7 @@ final class ReplacedElementSizingResolver
         ?float $maxWidth = null,
         ?float $minHeight = null,
         ?float $maxHeight = null,
+        ?float $availableContentWidth = null,
     ): ReplacedElementSize {
         $intrinsicWidth = max(0.0, $intrinsicWidth);
         $intrinsicHeight = max(0.0, $intrinsicHeight);
@@ -39,6 +40,12 @@ final class ReplacedElementSizingResolver
             $height = $this->scaled($intrinsicHeight, $width, $intrinsicWidth);
         } elseif ($hasIntrinsic && !$hasWidth && $hasHeight) {
             $width = $this->scaled($intrinsicWidth, $height, $intrinsicHeight);
+        }
+
+        if (!$hasWidth && $availableContentWidth !== null && $availableContentWidth > 0.0 && $width > $availableContentWidth && $width > 0.0) {
+            $scale = $availableContentWidth / $width;
+            $width = $availableContentWidth;
+            $height = max(1.0, round($height * $scale));
         }
 
         [$width, $height] = $this->applyWidthConstraint(
