@@ -18,6 +18,10 @@ final class ImageMetadataReader
             return $this->readJpeg($bytes);
         }
 
+        if (strlen($bytes) >= 12 && substr($bytes, 0, 4) === 'RIFF' && substr($bytes, 8, 4) === 'WEBP') {
+            return $this->readWebp($bytes);
+        }
+
         throw new \InvalidArgumentException('Unsupported or invalid image data');
     }
 
@@ -95,6 +99,65 @@ final class ImageMetadataReader
         throw new \InvalidArgumentException('Invalid JPEG: missing SOF marker');
     }
 
+    private function readWebp(string $bytes): ImageMetadata
+    {
+        $length = strlen($bytes);
+        $offset = 12;
+
+        while ($offset + 8 <= $length) {
+            $fourCc = substr($bytes, $offset, 4);
+            $chunkSize = $this->uint32le($bytes, $offset + 4);
+            $dataOffset = $offset + 8;
+            if ($dataOffset + $chunkSize > $length) {
+                throw new \InvalidArgumentException('Invalid WebP chunk length');
+            }
+
+            if ($fourCc === 'VP8X') {
+                if ($chunkSize < 10) {
+                    throw new \InvalidArgumentException('Invalid WebP VP8X chunk');
+                }
+
+                $width = $this->uint24le($bytes, $dataOffset + 4) + 1;
+                $height = $this->uint24le($bytes, $dataOffset + 7) + 1;
+                return new ImageMetadata($width, $height, 'webp', 4, 8);
+            }
+
+            if ($fourCc === 'VP8L') {
+                if ($chunkSize < 5 || ord($bytes[$dataOffset]) !== 0x2f) {
+                    throw new \InvalidArgumentException('Invalid WebP VP8L chunk');
+                }
+
+                $bits = $this->uint32le($bytes, $dataOffset + 1);
+                $width = ($bits & 0x3fff) + 1;
+                $height = (($bits >> 14) & 0x3fff) + 1;
+                $version = ($bits >> 29) & 0x07;
+                if ($version !== 0) {
+                    throw new \InvalidArgumentException('Unsupported WebP VP8L version');
+                }
+
+                return new ImageMetadata($width, $height, 'webp', 4, 8);
+            }
+
+            if ($fourCc === 'VP8 ') {
+                if ($chunkSize < 10 || substr($bytes, $dataOffset + 3, 3) !== "\x9d\x01\x2a") {
+                    throw new \InvalidArgumentException('Invalid WebP VP8 frame header');
+                }
+
+                $width = $this->uint16le($bytes, $dataOffset + 6) & 0x3fff;
+                $height = $this->uint16le($bytes, $dataOffset + 8) & 0x3fff;
+                if ($width === 0 || $height === 0) {
+                    throw new \InvalidArgumentException('Invalid WebP VP8 dimensions');
+                }
+
+                return new ImageMetadata($width, $height, 'webp', 3, 8);
+            }
+
+            $offset = $dataOffset + $chunkSize + ($chunkSize % 2);
+        }
+
+        throw new \InvalidArgumentException('Invalid WebP: missing image chunk');
+    }
+
     private function isStartOfFrame(int $marker): bool
     {
         return in_array($marker, [
@@ -107,22 +170,46 @@ final class ImageMetadataReader
 
     private function uint16be(string $bytes, int $offset): int
     {
-        if ($offset < 0 || $offset + 2 > strlen($bytes)) {
-            throw new \InvalidArgumentException('Unexpected end of image data');
-        }
-
+        $this->assertAvailable($bytes, $offset, 2);
         return (ord($bytes[$offset]) << 8) | ord($bytes[$offset + 1]);
+    }
+
+    private function uint16le(string $bytes, int $offset): int
+    {
+        $this->assertAvailable($bytes, $offset, 2);
+        return ord($bytes[$offset]) | (ord($bytes[$offset + 1]) << 8);
+    }
+
+    private function uint24le(string $bytes, int $offset): int
+    {
+        $this->assertAvailable($bytes, $offset, 3);
+        return ord($bytes[$offset])
+            | (ord($bytes[$offset + 1]) << 8)
+            | (ord($bytes[$offset + 2]) << 16);
     }
 
     private function uint32be(string $bytes, int $offset): int
     {
-        if ($offset < 0 || $offset + 4 > strlen($bytes)) {
-            throw new \InvalidArgumentException('Unexpected end of image data');
-        }
-
+        $this->assertAvailable($bytes, $offset, 4);
         return (ord($bytes[$offset]) << 24)
             | (ord($bytes[$offset + 1]) << 16)
             | (ord($bytes[$offset + 2]) << 8)
             | ord($bytes[$offset + 3]);
+    }
+
+    private function uint32le(string $bytes, int $offset): int
+    {
+        $this->assertAvailable($bytes, $offset, 4);
+        return ord($bytes[$offset])
+            | (ord($bytes[$offset + 1]) << 8)
+            | (ord($bytes[$offset + 2]) << 16)
+            | (ord($bytes[$offset + 3]) << 24);
+    }
+
+    private function assertAvailable(string $bytes, int $offset, int $length): void
+    {
+        if ($offset < 0 || $offset + $length > strlen($bytes)) {
+            throw new \InvalidArgumentException('Unexpected end of image data');
+        }
     }
 }
