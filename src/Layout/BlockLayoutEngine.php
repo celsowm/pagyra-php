@@ -15,12 +15,14 @@ final class BlockLayoutEngine
     private const ROOT_FONT_SIZE = 16.0;
 
     private readonly LengthParser $lengthParser;
+    private readonly InlineTextFormatter $inlineTextFormatter;
 
     public function __construct(
         private readonly float $viewportWidth,
         private readonly float $viewportHeight,
     ) {
         $this->lengthParser = new LengthParser($viewportWidth, $viewportHeight);
+        $this->inlineTextFormatter = new InlineTextFormatter();
     }
 
     public function layout(StyledNode $root): LayoutNode
@@ -117,8 +119,15 @@ final class BlockLayoutEngine
         $contentY = $flowY + $margin->top + $border->top + $padding->top;
         $cursorY = $contentY;
         $children = [];
+        $lineBoxes = [];
         $previousBorderBottom = null;
         $previousBottomMargin = 0.0;
+
+        if (!$this->hasBlockChildren($styled)) {
+            $inline = $this->inlineTextFormatter->layout($styled, $contentX, $contentY, $contentWidth, $fontSize);
+            $lineBoxes = $inline->lines;
+            $cursorY += $inline->height;
+        }
 
         foreach ($styled->children as $child) {
             if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) {
@@ -177,6 +186,7 @@ final class BlockLayoutEngine
             ),
             $children,
             $fontSize,
+            $lineBoxes,
         );
     }
 
@@ -191,6 +201,16 @@ final class BlockLayoutEngine
     private function isBlockLevel(StyledNode $node): bool
     {
         return in_array($this->display($node), ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true);
+    }
+
+    private function hasBlockChildren(StyledNode $node): bool
+    {
+        foreach ($node->children as $child) {
+            if ($this->display($child) !== 'none' && $this->isBlockLevel($child)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function resolveFontSize(StyledNode $node, float $parentFontSize): float
