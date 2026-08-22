@@ -8,6 +8,7 @@ use Pagyra\Core\PreparedRender;
 use Pagyra\Core\RenderHtmlOptions;
 use Pagyra\Css\StylesheetParser;
 use Pagyra\Html\HtmlParser;
+use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Style\StyleComputer;
 use Pagyra\Units\Units;
 
@@ -25,10 +26,12 @@ final class Pagyra
         $cssText = $document->mergedEmbeddedCss($options->css);
         $rules = (new StylesheetParser())->parse($cssText);
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
+        $layoutRoot = (new BlockLayoutEngine($options->viewportWidth, $options->viewportHeight))->layout($styledRoot);
 
         return new PreparedRender(
             domRoot: $document->root,
             styledRoot: $styledRoot,
+            layoutRoot: $layoutRoot,
             cssText: $cssText,
             stylesheetHrefs: $document->stylesheetHrefs,
             pageSize: [
@@ -42,7 +45,7 @@ final class Pagyra
     public static function renderHtmlToPdf(array|RenderHtmlOptions $options): string
     {
         throw new \LogicException(
-            'PDF serialization is intentionally not implemented yet. The active pipeline currently stops after DOM and computed-style preparation.'
+            'PDF serialization is intentionally not implemented yet. The active pipeline currently stops after the first block-layout pass.'
         );
     }
 }
