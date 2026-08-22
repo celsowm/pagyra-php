@@ -69,4 +69,22 @@ final class ForcedPageBreakPaginationTest extends TestCase
         self::assertSame(320.0, $prepared->pagination->placements[1]->startY);
         self::assertSame(3, $prepared->pagination->pageCount);
     }
+
+    public function testTallBlockReportsAllPagesItSpans(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<style>'
+                . '@page { size:300px 200px; margin:20px; }'
+                . 'div { margin:0; height:350px; }'
+                . '</style><div>tall</div>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        self::assertNotNull($prepared->pagination);
+        $placement = $prepared->pagination->placements[0];
+        self::assertSame(0, $placement->pageIndex);
+        self::assertSame(2, $placement->endPageIndex);
+        self::assertSame(3, $prepared->pagination->pageCount);
+    }
 }
