@@ -8,12 +8,24 @@ use Pagyra\Units\Units;
 
 final class PageStyleResolver
 {
+    public function __construct(
+        private readonly MediaQueryEvaluator $mediaQueryEvaluator = new MediaQueryEvaluator(),
+    ) {
+    }
+
     /**
      * @param array{top:float,right:float,bottom:float,left:float} $fallbackMargins
      * @return array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}}
      */
-    public function resolve(string $css, float $fallbackWidth, float $fallbackHeight, array $fallbackMargins): array
-    {
+    public function resolve(
+        string $css,
+        float $fallbackWidth,
+        float $fallbackHeight,
+        array $fallbackMargins,
+        string $mediaType = 'print',
+        ?float $viewportWidth = null,
+        ?float $viewportHeight = null,
+    ): array {
         $css = preg_replace('~/\*.*?\*/~s', '', $css) ?? $css;
         $sizeCandidate = null;
         $margins = [
@@ -23,44 +35,40 @@ final class PageStyleResolver
             'left' => ['value' => (float) $fallbackMargins['left'], 'important' => false, 'order' => -1],
         ];
 
-        $ruleOrder = 0;
-        if (preg_match_all('/@page\s*\{([^{}]*)\}/is', $css, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $match) {
-                $declarationOrder = 0;
-                foreach ($this->declarations($match[1]) as $declaration) {
-                    $order = $ruleOrder * 10000 + $declarationOrder++;
-                    $property = $declaration['property'];
-                    $value = $declaration['value'];
-                    $important = $declaration['important'];
+        foreach ($this->activePageBodies($css, $mediaType, $viewportWidth, $viewportHeight) as $ruleOrder => $body) {
+            $declarationOrder = 0;
+            foreach ($this->declarations($body) as $declaration) {
+                $order = $ruleOrder * 10000 + $declarationOrder++;
+                $property = $declaration['property'];
+                $value = $declaration['value'];
+                $important = $declaration['important'];
 
-                    if ($property === 'size') {
-                        if ($this->wins($important, $order, $sizeCandidate)) {
-                            $sizeCandidate = ['value' => $value, 'important' => $important, 'order' => $order];
-                        }
-                        continue;
+                if ($property === 'size') {
+                    if ($this->wins($important, $order, $sizeCandidate)) {
+                        $sizeCandidate = ['value' => $value, 'important' => $important, 'order' => $order];
                     }
+                    continue;
+                }
 
-                    if ($property === 'margin') {
-                        $resolved = $this->marginShorthand($value);
-                        if ($resolved === null) continue;
-                        foreach ($resolved as $side => $sideValue) {
-                            if ($this->wins($important, $order, $margins[$side])) {
-                                $margins[$side] = ['value' => $sideValue, 'important' => $important, 'order' => $order];
-                            }
-                        }
-                        continue;
-                    }
-
-                    if (preg_match('/^margin-(top|right|bottom|left)$/', $property, $sideMatch) === 1) {
-                        $length = $this->absoluteLength($value);
-                        if ($length === null) continue;
-                        $side = $sideMatch[1];
+                if ($property === 'margin') {
+                    $resolved = $this->marginShorthand($value);
+                    if ($resolved === null) continue;
+                    foreach ($resolved as $side => $sideValue) {
                         if ($this->wins($important, $order, $margins[$side])) {
-                            $margins[$side] = ['value' => max(0.0, $length), 'important' => $important, 'order' => $order];
+                            $margins[$side] = ['value' => $sideValue, 'important' => $important, 'order' => $order];
                         }
+                    }
+                    continue;
+                }
+
+                if (preg_match('/^margin-(top|right|bottom|left)$/', $property, $sideMatch) === 1) {
+                    $length = $this->absoluteLength($value);
+                    if ($length === null) continue;
+                    $side = $sideMatch[1];
+                    if ($this->wins($important, $order, $margins[$side])) {
+                        $margins[$side] = ['value' => max(0.0, $length), 'important' => $important, 'order' => $order];
                     }
                 }
-                $ruleOrder++;
             }
         }
 
@@ -83,6 +91,95 @@ final class PageStyleResolver
                 'left' => $margins['left']['value'],
             ],
         ];
+    }
+
+    /** @return list<string> */
+    private function activePageBodies(
+        string $css,
+        string $mediaType,
+        ?float $viewportWidth,
+        ?float $viewportHeight,
+    ): array {
+        $bodies = [];
+        $this->collectActivePageBodies($css, $bodies, $mediaType, $viewportWidth, $viewportHeight);
+        return $bodies;
+    }
+
+    /** @param list<string> $bodies */
+    private function collectActivePageBodies(
+        string $css,
+        array &$bodies,
+        string $mediaType,
+        ?float $viewportWidth,
+        ?float $viewportHeight,
+    ): void {
+        $length = strlen($css);
+        $cursor = 0;
+
+        while ($cursor < $length) {
+            while ($cursor < $length && ctype_space($css[$cursor])) $cursor++;
+            if ($cursor >= $length) break;
+
+            $open = $this->findNextOpenBrace($css, $cursor);
+            if ($open === null) break;
+            $prelude = trim(substr($css, $cursor, $open - $cursor));
+            $close = $this->findMatchingBrace($css, $open);
+            if ($close === null) break;
+
+            $body = substr($css, $open + 1, $close - $open - 1);
+            $cursor = $close + 1;
+
+            if (preg_match('/^@media\s+(.+)$/is', $prelude, $mediaMatch) === 1) {
+                if ($this->mediaQueryEvaluator->matches($mediaMatch[1], $mediaType, $viewportWidth, $viewportHeight)) {
+                    $this->collectActivePageBodies($body, $bodies, $mediaType, $viewportWidth, $viewportHeight);
+                }
+                continue;
+            }
+
+            if (strcasecmp($prelude, '@page') === 0) {
+                $bodies[] = $body;
+            }
+        }
+    }
+
+    private function findNextOpenBrace(string $css, int $start): ?int
+    {
+        $quote = null;
+        $escaped = false;
+        $length = strlen($css);
+        for ($i = $start; $i < $length; $i++) {
+            $ch = $css[$i];
+            if ($escaped) { $escaped = false; continue; }
+            if ($ch === '\\') { $escaped = true; continue; }
+            if ($quote !== null) {
+                if ($ch === $quote) $quote = null;
+                continue;
+            }
+            if ($ch === '"' || $ch === "'") { $quote = $ch; continue; }
+            if ($ch === '{') return $i;
+        }
+        return null;
+    }
+
+    private function findMatchingBrace(string $css, int $open): ?int
+    {
+        $depth = 0;
+        $quote = null;
+        $escaped = false;
+        $length = strlen($css);
+        for ($i = $open; $i < $length; $i++) {
+            $ch = $css[$i];
+            if ($escaped) { $escaped = false; continue; }
+            if ($ch === '\\') { $escaped = true; continue; }
+            if ($quote !== null) {
+                if ($ch === $quote) $quote = null;
+                continue;
+            }
+            if ($ch === '"' || $ch === "'") { $quote = $ch; continue; }
+            if ($ch === '{') $depth++;
+            elseif ($ch === '}' && --$depth === 0) return $i;
+        }
+        return null;
     }
 
     /** @return list<array{property:string,value:string,important:bool}> */
