@@ -21,12 +21,22 @@ final class TtfParserTest extends TestCase
         self::assertSame(1, $metrics->glyphId(65));
         self::assertSame(2, $metrics->glyphId(66));
         self::assertSame(-50, $metrics->kerning(1, 2));
+        self::assertSame([
+            'xMin' => -20,
+            'yMin' => -200,
+            'xMax' => 900,
+            'yMax' => 800,
+        ], $metrics->bbox);
     }
 
     private function fontFixture(): string
     {
         $head = str_repeat("\0", 54);
         $head = substr_replace($head, pack('n', 1000), 18, 2);
+        $head = substr_replace($head, pack('n', 0x10000 - 20), 36, 2);
+        $head = substr_replace($head, pack('n', 0x10000 - 200), 38, 2);
+        $head = substr_replace($head, pack('n', 900), 40, 2);
+        $head = substr_replace($head, pack('n', 800), 42, 2);
 
         $hhea = str_repeat("\0", 36);
         $hhea = substr_replace($hhea, pack('n', 800), 4, 2);
