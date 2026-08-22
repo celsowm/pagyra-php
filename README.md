@@ -6,12 +6,12 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; block layout now includes the first text-metrics and line-box slice. PDF rendering is intentionally not implemented yet.**
+**DOM and substantial CSS cascade phases are implemented; block layout now supports both heuristic and parsed TTF/OTF text metrics. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> block layout -> text metrics -> line boxes
+HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> text metrics -> line boxes
 ```
 
 Current foundation:
@@ -33,7 +33,7 @@ Current foundation:
 - CSS custom properties and `var()` fallback resolution;
 - initial UA/default styles for core block/inline elements, headings, paragraphs and lists;
 - styled DOM tree exposed by `prepareHtmlRender()`;
-- first `LayoutNode`/`LayoutBox` tree exposed by `prepareHtmlRender()`;
+- `LayoutNode`/`LayoutBox` tree exposed by `prepareHtmlRender()`;
 - normal-flow block width/height resolution;
 - content/padding/border/margin box geometry;
 - CSS box sizing (`content-box` / `border-box`);
@@ -43,22 +43,42 @@ Current foundation:
 - block `display:none` filtering;
 - centralized `TextMetrics` abstraction;
 - heuristic text-metrics fallback ported from `pagyra-js` coefficients/calibration;
-- `line-height: normal`, unitless, percentage and px handling for the first text slice;
 - first word-wrapping formatter for text-only/inline-only block contents;
 - deterministic `LineBox` output with x/y/width/height/baseline/text;
 - text-driven intrinsic block height for headings and paragraphs;
+- big-endian sfnt binary reader;
+- TTF/OTF metric parsing for `head`, `hhea`, `maxp`, `hmtx` and Unicode `cmap` formats 4/12;
+- classic `kern` format-0 pair parsing;
+- font registry with family/weight/style selection;
+- glyph-advance and kerning-based text measurement with heuristic fallback;
+- `fontConfig.fontFaceDefs` support for local paths / `file://` sources;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
 - CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
 - RGBA/hex/rgb/named-color parsing foundation;
-- unit/integration/parity test suites kept separate;
-- deterministic bootstrap golden snapshot for `<p>Hello World</p>`.
+- unit/integration/parity test suites kept separate.
 
-The current text path intentionally uses the same kind of centralized heuristic fallback that `pagyra-js` uses when real glyph metrics are unavailable. Real TTF/OTF parsing, glyph advances/kerning, Base14 width tables, font fallback chains and embedding/subsetting are still pending.
+Example local font configuration:
+
+```php
+$prepared = Pagyra::prepareHtmlRender([
+    'html' => '<p style="font-family: MyFont">Hello</p>',
+    'fontConfig' => [
+        'fontFaceDefs' => [[
+            'family' => 'MyFont',
+            'weight' => 400,
+            'style' => 'normal',
+            'src' => '/path/to/font.ttf',
+        ]],
+    ],
+]);
+```
+
+The parsed-font path currently targets measurement, not rendering outlines. `glyf`/CFF outlines, GPOS kerning/class pairs, variable fonts, Base14 width tables, full fallback-chain policy and PDF embedding/subsetting remain pending.
 
 The first inline formatter currently handles blocks whose content is purely inline/textual. Mixed inline/block flow, styled inline runs, preserved whitespace modes, explicit newlines, overflow-wrap/word-break, text-align/justify, text transforms and decorations remain for the full inline-layout phase.
 
-Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and intrinsic sizing beyond the first text path.
+Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
 Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, `@media`, `@page`, `@font-face`, external stylesheet loading and the remaining `pagyra-js` CSS surface.
 
