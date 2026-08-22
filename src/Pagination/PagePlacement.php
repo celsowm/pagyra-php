@@ -11,6 +11,7 @@ final readonly class PagePlacement implements \JsonSerializable
     public function __construct(
         public LayoutNode $node,
         public int $pageIndex,
+        public int $endPageIndex,
         public float $offsetY,
         public float $startY,
         public float $endY,
@@ -21,6 +22,7 @@ final readonly class PagePlacement implements \JsonSerializable
     {
         return [
             'pageIndex' => $this->pageIndex,
+            'endPageIndex' => $this->endPageIndex,
             'offsetY' => $this->offsetY,
             'startY' => $this->startY,
             'endY' => $this->endY,
