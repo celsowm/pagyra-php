@@ -7,6 +7,8 @@ namespace Pagyra;
 use Pagyra\Core\PreparedRender;
 use Pagyra\Core\RenderHtmlOptions;
 use Pagyra\Css\StylesheetParser;
+use Pagyra\Fonts\FontRegistry;
+use Pagyra\Fonts\GlyphTextMetrics;
 use Pagyra\Html\HtmlParser;
 use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Style\StyleComputer;
@@ -26,7 +28,10 @@ final class Pagyra
         $cssText = $document->mergedEmbeddedCss($options->css);
         $rules = (new StylesheetParser())->parse($cssText);
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
-        $layoutRoot = (new BlockLayoutEngine($options->viewportWidth, $options->viewportHeight))->layout($styledRoot);
+
+        $registry = self::buildFontRegistry($options->fontConfig);
+        $textMetrics = new GlyphTextMetrics($registry);
+        $layoutRoot = (new BlockLayoutEngine($options->viewportWidth, $options->viewportHeight, $textMetrics))->layout($styledRoot);
 
         return new PreparedRender(
             domRoot: $document->root,
@@ -40,6 +45,27 @@ final class Pagyra
             ],
             margins: $options->margins,
         );
+    }
+
+    /** @param array<string,mixed> $config */
+    private static function buildFontRegistry(array $config): FontRegistry
+    {
+        $registry = new FontRegistry();
+        $defs = $config['fontFaceDefs'] ?? [];
+        if (!is_array($defs)) return $registry;
+
+        foreach ($defs as $def) {
+            if (!is_array($def)) continue;
+            $family = $def['family'] ?? $def['name'] ?? null;
+            $src = $def['src'] ?? null;
+            if (!is_string($family) || $family === '' || !is_string($src) || $src === '') continue;
+            if (str_starts_with($src, 'file://')) $src = substr($src, 7);
+            if (!is_file($src)) continue;
+            $weight = is_numeric($def['weight'] ?? null) ? (int) $def['weight'] : 400;
+            $style = is_string($def['style'] ?? null) ? $def['style'] : 'normal';
+            $registry->registerFile($family, $src, $weight, $style);
+        }
+        return $registry;
     }
 
     public static function renderHtmlToPdf(array|RenderHtmlOptions $options): string
