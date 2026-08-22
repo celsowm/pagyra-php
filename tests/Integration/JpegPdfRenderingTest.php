@@ -49,6 +49,56 @@ final class JpegPdfRenderingTest extends TestCase
         self::assertStringContainsString("15 0 0 7.5 ", $pdf);
     }
 
+    public function testObjectFitContainCentersImageWithoutClip(): void
+    {
+        $url = 'data:image/jpeg;base64,' . base64_encode($this->jpegFixture());
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<p style="margin:0"><img src="' . $url . '" style="width:100px;height:100px;object-fit:contain"></p>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        $images = array_values(array_filter(
+            $prepared->displayList?->pages[0]->commands ?? [],
+            static fn ($command): bool => $command instanceof ImagePaintCommand,
+        ));
+        self::assertCount(1, $images);
+        $image = $images[0];
+        self::assertSame(100.0, $image->width);
+        self::assertSame(50.0, $image->height);
+        self::assertNull($image->clipRect);
+        self::assertEqualsWithDelta(25.0, $image->y - ($image->box->y + $prepared->margins['top']), 0.001);
+    }
+
+    public function testObjectFitCoverRightBottomClipsOverflowInPdf(): void
+    {
+        $url = 'data:image/jpeg;base64,' . base64_encode($this->jpegFixture());
+        $options = [
+            'html' => '<style>@page{size:300px 200px;margin:10px}</style>'
+                . '<p style="margin:0"><img src="' . $url . '" style="width:100px;height:100px;object-fit:cover;object-position:right bottom"></p>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ];
+
+        $prepared = Pagyra::prepareHtmlRender($options);
+        $images = array_values(array_filter(
+            $prepared->displayList?->pages[0]->commands ?? [],
+            static fn ($command): bool => $command instanceof ImagePaintCommand,
+        ));
+        self::assertCount(1, $images);
+        $image = $images[0];
+        self::assertSame(200.0, $image->width);
+        self::assertSame(100.0, $image->height);
+        self::assertNotNull($image->clipRect);
+        self::assertEqualsWithDelta($image->clipRect->x - 100.0, $image->x, 0.001);
+        self::assertEqualsWithDelta($image->clipRect->y, $image->y, 0.001);
+
+        $pdf = Pagyra::renderHtmlToPdf($options);
+        self::assertStringContainsString(' re W n', $pdf);
+        self::assertStringContainsString('150 0 0 75 ', $pdf);
+        self::assertStringContainsString('/Im1 Do', $pdf);
+    }
+
     private function jpegFixture(): string
     {
         return "\xff\xd8"
