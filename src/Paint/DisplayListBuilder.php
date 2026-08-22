@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Pagyra\Paint;
 
 use Pagyra\Css\Color\ColorParser;
+use Pagyra\Image\ImageMetadataReader;
+use Pagyra\Image\ImageSourceBytesResolver;
 use Pagyra\Layout\LayoutNode;
 use Pagyra\Pagination\BlockFragment;
 use Pagyra\Pagination\LineFragment;
@@ -13,6 +15,14 @@ use Pagyra\Pagination\PhysicalPageEntry;
 
 final class DisplayListBuilder
 {
+    private readonly ImageMetadataReader $imageMetadata;
+
+    public function __construct(
+        private readonly ?ImageSourceBytesResolver $imageBytes = null,
+    ) {
+        $this->imageMetadata = new ImageMetadataReader();
+    }
+
     /**
      * @param array{top:float,right:float,bottom:float,left:float} $margins
      */
@@ -33,25 +43,17 @@ final class DisplayListBuilder
         return new DisplayList($pages);
     }
 
-    /**
-     * @param list<BoxPaintCommand|TextPaintCommand> $commands
-     * @param array{top:float,right:float,bottom:float,left:float} $margins
-     */
+    /** @param list<BoxPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendEntry(array &$commands, PhysicalPageEntry $entry, PaginationResult $pagination, array $margins): void
     {
         $node = $entry->placement->node;
         $pageIndex = $entry->fragment->pageIndex;
         $this->appendTopLevelBox($commands, $node, $pageIndex, $entry->placement->offsetY, $pagination, $margins);
         $this->appendLines($commands, $entry->fragment->lines, $margins);
-        foreach ($entry->fragment->blocks as $block) {
-            $this->appendBlock($commands, $block, $margins);
-        }
+        foreach ($entry->fragment->blocks as $block) $this->appendBlock($commands, $block, $margins);
     }
 
-    /**
-     * @param list<BoxPaintCommand|TextPaintCommand> $commands
-     * @param array{top:float,right:float,bottom:float,left:float} $margins
-     */
+    /** @param list<BoxPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendTopLevelBox(
         array &$commands,
         LayoutNode $node,
@@ -80,10 +82,7 @@ final class DisplayListBuilder
         );
     }
 
-    /**
-     * @param list<BoxPaintCommand|TextPaintCommand> $commands
-     * @param array{top:float,right:float,bottom:float,left:float} $margins
-     */
+    /** @param list<BoxPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendBlock(array &$commands, BlockFragment $block, array $margins): void
     {
         $border = $block->node->box->borderBox();
@@ -98,17 +97,13 @@ final class DisplayListBuilder
                 backgroundColor: ColorParser::parse($block->node->source->style->get('background-color')),
             );
         }
-
         $this->appendLines($commands, $block->lines, $margins);
-        foreach ($block->children as $child) {
-            $this->appendBlock($commands, $child, $margins);
-        }
+        foreach ($block->children as $child) $this->appendBlock($commands, $child, $margins);
     }
 
     /**
-     * @param list<BoxPaintCommand|TextPaintCommand> $commands
+     * @param list<BoxPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
      * @param list<LineFragment> $lines
-     * @param array{top:float,right:float,bottom:float,left:float} $margins
      */
     private function appendLines(array &$commands, array $lines, array $margins): void
     {
@@ -117,7 +112,6 @@ final class DisplayListBuilder
             foreach ($line->runs as $run) {
                 $weightRaw = strtolower(trim($run->style->get('font-weight', '400') ?? '400'));
                 $fontWeight = $weightRaw === 'bold' ? 700 : ($weightRaw === 'normal' ? 400 : (is_numeric($weightRaw) ? (int) $weightRaw : 400));
-
                 $commands[] = new TextPaintCommand(
                     run: $run,
                     pageIndex: $lineFragment->pageIndex,
@@ -130,6 +124,36 @@ final class DisplayListBuilder
                     fontWeight: max(100, min(900, $fontWeight)),
                     fontStyle: strtolower(trim($run->style->get('font-style', 'normal') ?? 'normal')),
                     color: ColorParser::parse($run->style->get('color', 'black')),
+                );
+            }
+
+            if ($this->imageBytes === null) continue;
+            foreach ($line->atomicBoxes as $box) {
+                $node = $box->source->node;
+                if (!$node->isElement('img')) continue;
+                $source = $node->attribute('src');
+                $bytes = $this->imageBytes->resolve($source);
+                if ($source === null || $bytes === null) continue;
+                try {
+                    $metadata = $this->imageMetadata->read($bytes);
+                } catch (\InvalidArgumentException) {
+                    continue;
+                }
+                if ($metadata->format !== 'jpeg') continue;
+
+                $contentX = $box->x + $box->margin['left'] + $box->border['left'] + $box->padding['left'];
+                $contentY = $box->y + $box->margin['top'] + $box->border['top'] + $box->padding['top'];
+                if ($box->contentWidth <= 0.0 || $box->contentHeight <= 0.0) continue;
+                $commands[] = new ImagePaintCommand(
+                    box: $box,
+                    pageIndex: $lineFragment->pageIndex,
+                    x: $contentX + $margins['left'],
+                    y: $lineFragment->pageY + ($contentY - $line->y) + $margins['top'],
+                    width: $box->contentWidth,
+                    height: $box->contentHeight,
+                    bytes: $bytes,
+                    metadata: $metadata,
+                    source: $source,
                 );
             }
         }
