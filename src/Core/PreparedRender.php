@@ -7,6 +7,7 @@ namespace Pagyra\Core;
 use Pagyra\Dom\Node;
 use Pagyra\Layout\LayoutNode;
 use Pagyra\Pagination\PaginationResult;
+use Pagyra\Paint\DisplayList;
 use Pagyra\Style\StyledNode;
 
 final readonly class PreparedRender implements \JsonSerializable
@@ -25,6 +26,7 @@ final readonly class PreparedRender implements \JsonSerializable
         public array $pageSize,
         public array $margins,
         public ?PaginationResult $pagination = null,
+        public ?DisplayList $displayList = null,
     ) {
     }
 
@@ -39,6 +41,7 @@ final readonly class PreparedRender implements \JsonSerializable
             'pageSize' => $this->pageSize,
             'margins' => $this->margins,
             'pagination' => $this->pagination,
+            'displayList' => $this->displayList,
         ];
     }
 }
