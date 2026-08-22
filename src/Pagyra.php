@@ -6,6 +6,7 @@ namespace Pagyra;
 
 use Pagyra\Core\PreparedRender;
 use Pagyra\Core\RenderHtmlOptions;
+use Pagyra\Css\FontFaceRuleParser;
 use Pagyra\Css\StylesheetParser;
 use Pagyra\Css\StylesheetSourceLoader;
 use Pagyra\Fonts\FontRegistry;
@@ -43,7 +44,7 @@ final class Pagyra
         $rules = (new StylesheetParser())->parse($cssText);
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
 
-        $registry = self::buildFontRegistry($options->fontConfig, $options->resourceBaseDir);
+        $registry = self::buildFontRegistry($options->fontConfig, $options->resourceBaseDir, $cssText);
         $textMetrics = new GlyphTextMetrics($registry);
         $layoutRoot = (new BlockLayoutEngine($options->viewportWidth, $options->viewportHeight, $textMetrics))->layout($styledRoot);
 
@@ -62,11 +63,15 @@ final class Pagyra
     }
 
     /** @param array<string,mixed> $config */
-    private static function buildFontRegistry(array $config, ?string $resourceBaseDir = null): FontRegistry
+    private static function buildFontRegistry(array $config, ?string $resourceBaseDir = null, string $cssText = ''): FontRegistry
     {
         $registry = new FontRegistry();
         $defs = $config['fontFaceDefs'] ?? [];
-        if (!is_array($defs)) return $registry;
+        if (!is_array($defs)) $defs = [];
+
+        foreach ((new FontFaceRuleParser())->parse($cssText) as $face) {
+            $defs[] = $face;
+        }
 
         foreach ($defs as $def) {
             if (!is_array($def)) continue;
@@ -79,7 +84,11 @@ final class Pagyra
 
             $weight = is_numeric($def['weight'] ?? null) ? (int) $def['weight'] : 400;
             $style = is_string($def['style'] ?? null) ? $def['style'] : 'normal';
-            $registry->registerFile($family, $path, $weight, $style);
+            try {
+                $registry->registerFile($family, $path, $weight, $style);
+            } catch (\InvalidArgumentException) {
+                continue;
+            }
         }
         return $registry;
     }
