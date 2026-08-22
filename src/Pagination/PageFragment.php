@@ -6,7 +6,7 @@ namespace Pagyra\Pagination;
 
 final readonly class PageFragment implements \JsonSerializable
 {
-    /** @param list<LineFragment> $lines */
+    /** @param list<LineFragment> $lines @param list<BlockFragment> $blocks */
     public function __construct(
         public int $pageIndex,
         public float $pageY,
@@ -14,6 +14,7 @@ final readonly class PageFragment implements \JsonSerializable
         public float $continuousStartY,
         public float $continuousEndY,
         public array $lines = [],
+        public array $blocks = [],
     ) {
     }
 
@@ -26,6 +27,7 @@ final readonly class PageFragment implements \JsonSerializable
             'continuousStartY' => $this->continuousStartY,
             'continuousEndY' => $this->continuousEndY,
             'lines' => $this->lines,
+            'blocks' => $this->blocks,
         ];
     }
 }
