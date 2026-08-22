@@ -6,6 +6,7 @@ namespace Pagyra\Layout;
 
 final readonly class LineBox implements \JsonSerializable
 {
+    /** @param list<TextRun> $runs */
     public function __construct(
         public float $x,
         public float $y,
@@ -13,6 +14,7 @@ final readonly class LineBox implements \JsonSerializable
         public float $height,
         public float $baseline,
         public string $text,
+        public array $runs = [],
     ) {
     }
 
@@ -25,6 +27,7 @@ final readonly class LineBox implements \JsonSerializable
             'height' => $this->height,
             'baseline' => $this->baseline,
             'text' => $this->text,
+            'runs' => $this->runs,
         ];
     }
 }
