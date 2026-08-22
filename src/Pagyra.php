@@ -17,6 +17,7 @@ use Pagyra\Image\ImageSourceBytesResolver;
 use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Pagination\PaginationEngine;
+use Pagyra\Paint\DisplayListBuilder;
 use Pagyra\Style\StyleComputer;
 use Pagyra\Units\Units;
 
@@ -67,6 +68,12 @@ final class Pagyra
             $pageStyle['height'] - $pageStyle['margins']['top'] - $pageStyle['margins']['bottom'],
         );
         $pagination = (new PaginationEngine())->paginate($layoutRoot, $pageContentHeight);
+        $displayList = (new DisplayListBuilder())->build(
+            $pagination,
+            $pageStyle['width'],
+            $pageStyle['height'],
+            $pageStyle['margins'],
+        );
 
         return new PreparedRender(
             domRoot: $document->root,
@@ -80,6 +87,7 @@ final class Pagyra
             ],
             margins: $pageStyle['margins'],
             pagination: $pagination,
+            displayList: $displayList,
         );
     }
 
@@ -268,7 +276,7 @@ final class Pagyra
     public static function renderHtmlToPdf(array|RenderHtmlOptions $options): string
     {
         throw new \LogicException(
-            'PDF serialization is intentionally not implemented yet. The active pipeline currently stops after the first block-layout pass.'
+            'PDF serialization is intentionally not implemented yet. The active pipeline now reaches pagination and a first physical display-list paint stage, but PDF serialization is not implemented yet.'
         );
     }
 }
