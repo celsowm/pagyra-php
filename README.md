@@ -49,9 +49,12 @@ Current foundation:
 - explicit newline preservation for preformatted modes;
 - oversized-word splitting for `overflow-wrap: anywhere`, `overflow-wrap: break-word` and `word-break: break-all`;
 - `text-align: left`, `center`, `right`, `end` and first-pass `justify` spacing;
-- `vertical-align: baseline`, `middle`, `top`, `bottom`, `text-top`, `text-bottom`, `super`, `sub` plus px/em/% shifts;
+- `vertical-align: baseline`, `middle`, `top`, `bottom`, `text-top`, `text-bottom`, `super`, `sub` plus px/pt/em/rem/% shifts;
 - two-pass inline vertical placement so raised/lowered runs can expand the effective line box;
+- fallback baseline follows the `pagyra-js` ascent/half-leading model (`0.75 * font-size` ascent when font ascent metrics are unavailable);
 - first atomic inline-box participation for `inline-block`, `inline-flex`, `inline-grid`, `inline-table` and images with explicit dimensions;
+- atomic inline wrapping uses full outer size: content + padding + border + margins;
+- `AtomicInlineBox` exposes content size plus margin/padding/border edge metrics for downstream paint/PDF work;
 - image `width`/`height` attributes recognized when CSS dimensions are not specified;
 - deterministic `LineBox` output with x/y/width/height/baseline/text plus styled `TextRun` and `AtomicInlineBox` children;
 - mixed-font-size baseline alignment inside a line;
