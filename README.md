@@ -6,12 +6,12 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; the first block-layout slice is now active. PDF rendering is intentionally not implemented yet.**
+**DOM and substantial CSS cascade phases are implemented; block layout now includes the first text-metrics and line-box slice. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> block layout tree
+HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> block layout -> text metrics -> line boxes
 ```
 
 Current foundation:
@@ -41,6 +41,12 @@ Current foundation:
 - horizontal `auto` margins for fixed-width blocks;
 - adjacent sibling vertical-margin collapsing;
 - block `display:none` filtering;
+- centralized `TextMetrics` abstraction;
+- heuristic text-metrics fallback ported from `pagyra-js` coefficients/calibration;
+- `line-height: normal`, unitless, percentage and px handling for the first text slice;
+- first word-wrapping formatter for text-only/inline-only block contents;
+- deterministic `LineBox` output with x/y/width/height/baseline/text;
+- text-driven intrinsic block height for headings and paragraphs;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
 - CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
@@ -48,7 +54,11 @@ Current foundation:
 - unit/integration/parity test suites kept separate;
 - deterministic bootstrap golden snapshot for `<p>Hello World</p>`.
 
-The active block-layout slice deliberately does **not** invent text metrics. Text/inline nodes do not yet create line boxes or intrinsic height; that belongs to the font/text phases. Parent/child margin collapsing, BFC rules, floats, positioning, inline formatting and intrinsic sizing are also still pending.
+The current text path intentionally uses the same kind of centralized heuristic fallback that `pagyra-js` uses when real glyph metrics are unavailable. Real TTF/OTF parsing, glyph advances/kerning, Base14 width tables, font fallback chains and embedding/subsetting are still pending.
+
+The first inline formatter currently handles blocks whose content is purely inline/textual. Mixed inline/block flow, styled inline runs, preserved whitespace modes, explicit newlines, overflow-wrap/word-break, text-align/justify, text transforms and decorations remain for the full inline-layout phase.
+
+Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and intrinsic sizing beyond the first text path.
 
 Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, `@media`, `@page`, `@font-face`, external stylesheet loading and the remaining `pagyra-js` CSS surface.
 
