@@ -26,6 +26,12 @@ final class PaginationEngine
                 $start += $beforeOffset;
             }
 
+            $lineConstraintOffset = $this->widowOrphanOffset($node, $start, $offset, $flow);
+            if ($lineConstraintOffset > self::EPSILON) {
+                $offset += $lineConstraintOffset;
+                $start += $lineConstraintOffset;
+            }
+
             $originalEnd = max($node->box->marginBox()->bottom(), $this->subtreeBottom($node));
             $end = $originalEnd + $offset;
             $pageIndex = $flow->pageIndexAt($start);
@@ -108,6 +114,52 @@ final class PaginationEngine
         }
 
         return $fragments;
+    }
+
+    private function widowOrphanOffset(LayoutNode $node, float $start, float $offset, PageFlow $flow): float
+    {
+        if (count($node->lineBoxes) < 2) {
+            return 0.0;
+        }
+
+        $pageCounts = [];
+        foreach ($node->lineBoxes as $line) {
+            $baseline = $line->baseline + $offset;
+            $pageIndex = $flow->pageIndexAt(max(0.0, $baseline - self::EPSILON));
+            $pageCounts[$pageIndex] = ($pageCounts[$pageIndex] ?? 0) + 1;
+        }
+
+        if (count($pageCounts) < 2) {
+            return 0.0;
+        }
+
+        ksort($pageCounts);
+        $firstPage = (int) array_key_first($pageCounts);
+        $lastPage = (int) array_key_last($pageCounts);
+        $orphans = $this->positiveIntegerStyle($node, 'orphans', 2);
+        $widows = $this->positiveIntegerStyle($node, 'widows', 2);
+
+        if (($pageCounts[$firstPage] ?? 0) >= $orphans && ($pageCounts[$lastPage] ?? 0) >= $widows) {
+            return 0.0;
+        }
+
+        $originalStart = $node->box->marginBox()->y;
+        $originalEnd = max($node->box->marginBox()->bottom(), $this->subtreeBottom($node));
+        if (($originalEnd - $originalStart) > $flow->contentHeight + self::EPSILON) {
+            return 0.0;
+        }
+
+        $currentPage = $flow->pageIndexAt($start);
+        return max(0.0, $flow->contentStartForPage($currentPage + 1) - $start);
+    }
+
+    private function positiveIntegerStyle(LayoutNode $node, string $property, int $fallback): int
+    {
+        $raw = trim($node->source->style->get($property, (string) $fallback) ?? (string) $fallback);
+        if (!preg_match('/^[+-]?\d+$/', $raw)) {
+            return $fallback;
+        }
+        return max(1, (int) $raw);
     }
 
     private function breakValue(LayoutNode $node, string $side): ?string
