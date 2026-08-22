@@ -5,17 +5,17 @@ declare(strict_types=1);
 namespace Pagyra\Html;
 
 use Pagyra\Dom\Node;
-use Pagyra\Image\ImageSourceMetadataResolver;
+use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 
 final class HtmlParser
 {
     private const SKIPPED_CONTENT_TAGS = ['head', 'meta', 'title', 'link', 'script'];
 
-    private readonly ImageSourceMetadataResolver $imageMetadataResolver;
+    private readonly ImageSourceIntrinsicSizeResolver $imageIntrinsicSizeResolver;
 
-    public function __construct(?ImageSourceMetadataResolver $imageMetadataResolver = null)
+    public function __construct(?ImageSourceIntrinsicSizeResolver $imageIntrinsicSizeResolver = null)
     {
-        $this->imageMetadataResolver = $imageMetadataResolver ?? new ImageSourceMetadataResolver();
+        $this->imageIntrinsicSizeResolver = $imageIntrinsicSizeResolver ?? new ImageSourceIntrinsicSizeResolver();
     }
 
     public function parse(string $html): Node
@@ -109,9 +109,9 @@ final class HtmlParser
         $intrinsicHeight = null;
 
         if ($tagName === 'img') {
-            $metadata = $this->imageMetadataResolver->resolve($attributes['src'] ?? null);
-            $intrinsicWidth = $metadata?->width !== null ? (float) $metadata->width : null;
-            $intrinsicHeight = $metadata?->height !== null ? (float) $metadata->height : null;
+            $size = $this->imageIntrinsicSizeResolver->resolve($attributes['src'] ?? null);
+            $intrinsicWidth = $size?->width;
+            $intrinsicHeight = $size?->height;
         } elseif ($tagName === 'svg') {
             [$intrinsicWidth, $intrinsicHeight] = $this->resolveSvgIntrinsicSize($attributes);
         }
@@ -169,8 +169,13 @@ final class HtmlParser
         }
 
         $parts = preg_split('/[\s,]+/', trim($raw)) ?: [];
-        if (count($parts) !== 4 || array_filter($parts, 'is_numeric') !== $parts) {
+        if (count($parts) !== 4) {
             return null;
+        }
+        foreach ($parts as $part) {
+            if (!is_numeric($part)) {
+                return null;
+            }
         }
 
         [$minX, $minY, $width, $height] = array_map('floatval', $parts);
