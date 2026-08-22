@@ -6,12 +6,12 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking and text alignment. PDF rendering is intentionally not implemented yet.**
+**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking, text alignment, vertical alignment and first atomic inline boxes. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> line boxes -> text runs
+HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> vertical placement -> line boxes -> text runs / atomic inline boxes
 ```
 
 Current foundation:
@@ -49,7 +49,11 @@ Current foundation:
 - explicit newline preservation for preformatted modes;
 - oversized-word splitting for `overflow-wrap: anywhere`, `overflow-wrap: break-word` and `word-break: break-all`;
 - `text-align: left`, `center`, `right`, `end` and first-pass `justify` spacing;
-- deterministic `LineBox` output with x/y/width/height/baseline/text plus styled `TextRun` children;
+- `vertical-align: baseline`, `middle`, `top`, `bottom`, `text-top`, `text-bottom`, `super`, `sub` plus px/em/% shifts;
+- two-pass inline vertical placement so raised/lowered runs can expand the effective line box;
+- first atomic inline-box participation for `inline-block`, `inline-flex`, `inline-grid`, `inline-table` and images with explicit dimensions;
+- image `width`/`height` attributes recognized when CSS dimensions are not specified;
+- deterministic `LineBox` output with x/y/width/height/baseline/text plus styled `TextRun` and `AtomicInlineBox` children;
 - mixed-font-size baseline alignment inside a line;
 - basic inherited `text-transform` application without requiring `ext-mbstring`;
 - text-driven intrinsic block height for headings and paragraphs;
@@ -90,9 +94,18 @@ Styled inline content is preserved through layout. For example:
 
 produces line boxes containing separate `TextRun` objects for the normal, bold and italic portions, each measured with its own computed style/font selection.
 
+Atomic inline content can now also participate in the same line:
+
+```html
+<p>
+  Texto <img width="24" height="30" style="vertical-align:middle"> depois
+  <span style="vertical-align:super">2</span>
+</p>
+```
+
 The parsed-font path currently targets measurement, not rendering outlines. `glyf`/CFF outlines, GPOS kerning/class pairs, variable fonts, Base14 width tables, full fallback-chain policy and PDF embedding/subsetting remain pending.
 
-The inline formatter still has deliberate limits: mixed inline/block formatting contexts, atomic inline boxes, richer Unicode line-breaking rules, hyphenation, full `vertical-align`, decorations and more browser-specific justification behavior remain for later slices.
+The inline formatter still has deliberate limits: mixed inline/block formatting contexts, intrinsic image decoding/aspect-ratio sizing, atomic-inline internal layout, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
