@@ -71,4 +71,41 @@ CSS,
         self::assertSame(120.0, $box->content->width);
         self::assertSame(30.0, $box->content->height);
     }
+
+    public function testHorizontalAutoMarginsCenterFixedWidthBlock(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<div class="centered"></div>',
+            'css' => '.centered { display:block; width:100px; height:10px; margin-left:auto; margin-right:auto; }',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        $box = $prepared->layoutRoot->children[0]->box;
+        self::assertSame(100.0, $box->margin->left);
+        self::assertSame(100.0, $box->margin->right);
+        self::assertSame(100.0, $box->content->x);
+        self::assertSame(300.0, $box->marginBox()->width);
+    }
+
+    public function testAdjacentVerticalMarginsCollapse(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<div class="a"></div><div class="b"></div>',
+            'css' => <<<'CSS'
+.a { display:block; height:10px; margin-bottom:20px; }
+.b { display:block; height:10px; margin-top:30px; }
+CSS,
+            'viewportWidth' => 100,
+            'viewportHeight' => 200,
+        ]);
+
+        $a = $prepared->layoutRoot->children[0];
+        $b = $prepared->layoutRoot->children[1];
+
+        self::assertSame(0.0, $a->box->content->y);
+        self::assertSame(40.0, $b->box->content->y);
+        self::assertSame(30.0, $b->box->borderBox()->y - $a->box->borderBox()->bottom());
+        self::assertSame(50.0, $prepared->layoutRoot->box->content->height);
+    }
 }
