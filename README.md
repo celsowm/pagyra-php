@@ -6,12 +6,12 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking, text alignment, vertical alignment and first atomic inline boxes. PDF rendering is intentionally not implemented yet.**
+**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking, text alignment, vertical alignment, atomic inline boxes, intrinsic image sizing and first internal inline-block layout. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> vertical placement -> line boxes -> text runs / atomic inline boxes
+HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> vertical placement -> line boxes -> text runs / atomic inline boxes -> nested inline-block line boxes
 ```
 
 Current foundation:
@@ -52,10 +52,16 @@ Current foundation:
 - `vertical-align: baseline`, `middle`, `top`, `bottom`, `text-top`, `text-bottom`, `super`, `sub` plus px/pt/em/rem/% shifts;
 - two-pass inline vertical placement so raised/lowered runs can expand the effective line box;
 - fallback baseline follows the `pagyra-js` ascent/half-leading model (`0.75 * font-size` ascent when font ascent metrics are unavailable);
-- first atomic inline-box participation for `inline-block`, `inline-flex`, `inline-grid`, `inline-table` and images with explicit dimensions;
+- atomic inline-box participation for `inline-block`, `inline-flex`, `inline-grid`, `inline-table` and images;
 - atomic inline wrapping uses full outer size: content + padding + border + margins;
-- `AtomicInlineBox` exposes content size plus margin/padding/border edge metrics for downstream paint/PDF work;
-- image `width`/`height` attributes recognized when CSS dimensions are not specified;
+- `AtomicInlineBox` exposes content size plus margin/padding/border edge metrics and nested `contentLines`;
+- image `width`/`height` attributes act as intrinsic dimensions when decoded image metadata is not yet available;
+- image sizing preserves intrinsic aspect ratio when only CSS width or height is specified;
+- image `min/max-width` and `min/max-height` constraints preserve aspect ratio when the opposite dimension remains automatic;
+- oversized intrinsic images shrink to the available inline width while maintaining ratio;
+- `inline-block` with `width:auto` uses internal max-content width as its initial intrinsic width;
+- explicit inline-block width runs the child inline formatter so internal wrapping determines automatic height;
+- nested inline-block line boxes are translated into their real content-box coordinates;
 - deterministic `LineBox` output with x/y/width/height/baseline/text plus styled `TextRun` and `AtomicInlineBox` children;
 - mixed-font-size baseline alignment inside a line;
 - basic inherited `text-transform` application without requiring `ext-mbstring`;
@@ -97,18 +103,22 @@ Styled inline content is preserved through layout. For example:
 
 produces line boxes containing separate `TextRun` objects for the normal, bold and italic portions, each measured with its own computed style/font selection.
 
-Atomic inline content can now also participate in the same line:
+Atomic inline content can now participate in the same line and expose an internal layout:
 
 ```html
 <p>
-  Texto <img width="24" height="30" style="vertical-align:middle"> depois
-  <span style="vertical-align:super">2</span>
+  antes
+  <span style="display:inline-block;width:60px;padding:4px">hello hello hello</span>
+  <img width="200" height="100" style="width:80px;vertical-align:middle">
+  depois
 </p>
 ```
 
+The span carries nested `contentLines` laid out inside its content box. The image resolves to `80 x 40` content pixels because only its width is overridden.
+
 The parsed-font path currently targets measurement, not rendering outlines. `glyf`/CFF outlines, GPOS kerning/class pairs, variable fonts, Base14 width tables, full fallback-chain policy and PDF embedding/subsetting remain pending.
 
-The inline formatter still has deliberate limits: mixed inline/block formatting contexts, intrinsic image decoding/aspect-ratio sizing, atomic-inline internal layout, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
+The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, decoded PNG/JPEG/SVG intrinsic dimensions, `aspect-ratio` property parsing, replaced-element object-fit/object-position paint, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
