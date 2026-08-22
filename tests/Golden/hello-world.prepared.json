@@ -14,6 +14,51 @@
             }
         ]
     },
+    "styledRoot": {
+        "node": {
+            "type": "document",
+            "children": [
+                {
+                    "type": "element",
+                    "tagName": "p",
+                    "children": [
+                        {
+                            "type": "text",
+                            "text": "Hello World"
+                        }
+                    ]
+                }
+            ]
+        },
+        "style": [],
+        "children": [
+            {
+                "node": {
+                    "type": "element",
+                    "tagName": "p",
+                    "children": [
+                        {
+                            "type": "text",
+                            "text": "Hello World"
+                        }
+                    ]
+                },
+                "style": [],
+                "children": [
+                    {
+                        "node": {
+                            "type": "text",
+                            "text": "Hello World"
+                        },
+                        "style": [],
+                        "children": []
+                    }
+                ]
+            }
+        ]
+    },
+    "cssText": "",
+    "stylesheetHrefs": [],
     "pageSize": {
         "widthPt": 600,
         "heightPt": 825
