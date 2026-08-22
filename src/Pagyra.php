@@ -79,12 +79,18 @@ final class Pagyra
             $src = $def['src'] ?? null;
             if (!is_string($family) || $family === '' || !is_string($src) || $src === '') continue;
 
-            $path = self::resolveFontPath($src, $resourceBaseDir);
-            if ($path === null || !is_file($path)) continue;
-
             $weight = is_numeric($def['weight'] ?? null) ? (int) $def['weight'] : 400;
             $style = is_string($def['style'] ?? null) ? $def['style'] : 'normal';
+
             try {
+                $embedded = self::decodeBase64FontDataUrl($src);
+                if ($embedded !== null) {
+                    $registry->registerData($family, $embedded, $weight, $style);
+                    continue;
+                }
+
+                $path = self::resolveFontPath($src, $resourceBaseDir);
+                if ($path === null || !is_file($path)) continue;
                 $registry->registerFile($family, $path, $weight, $style);
             } catch (\InvalidArgumentException|\RuntimeException) {
                 continue;
@@ -93,10 +99,31 @@ final class Pagyra
         return $registry;
     }
 
+    private static function decodeBase64FontDataUrl(string $src): ?string
+    {
+        if (!str_starts_with(strtolower(trim($src)), 'data:')) {
+            return null;
+        }
+
+        $comma = strpos($src, ',');
+        if ($comma === false) {
+            return null;
+        }
+
+        $metadata = substr($src, 5, $comma - 5);
+        if (preg_match('/(?:^|;)base64(?:;|$)/i', $metadata) !== 1) {
+            return null;
+        }
+
+        $payload = preg_replace('/\s+/', '', substr($src, $comma + 1)) ?? '';
+        $binary = base64_decode($payload, true);
+        return $binary === false ? null : $binary;
+    }
+
     private static function resolveFontPath(string $src, ?string $resourceBaseDir): ?string
     {
         $src = trim($src);
-        if ($src === '' || preg_match('/^(?:https?:)?\/\//i', $src) === 1) {
+        if ($src === '' || preg_match('/^(?:https?:)?\/\//i', $src) === 1 || str_starts_with(strtolower($src), 'data:')) {
             return null;
         }
 
