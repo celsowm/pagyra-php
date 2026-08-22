@@ -6,6 +6,7 @@ namespace Pagyra\Pdf;
 
 use Pagyra\Fonts\FontRegistry;
 use Pagyra\Fonts\RegisteredFont;
+use Pagyra\Fonts\Ttf\TtfSubsetter;
 use Pagyra\Paint\BoxPaintCommand;
 use Pagyra\Paint\DisplayList;
 use Pagyra\Paint\TextPaintCommand;
@@ -25,29 +26,7 @@ final class PdfSerializer
 
         $catalogId = $reserve();
         $pagesId = $reserve();
-
-        $usage = [];
-        foreach ($displayList->pages as $page) {
-            foreach ($page->commands as $command) {
-                if (!$command instanceof TextPaintCommand) continue;
-                [$key, $face, $base14] = $this->fontChoice($command, $fontRegistry);
-                if (!isset($usage[$key])) {
-                    $usage[$key] = [
-                        'face' => $face,
-                        'base14' => $base14,
-                        'glyphs' => [],
-                    ];
-                }
-                if ($face !== null) {
-                    foreach ($this->codePoints($command->text) as $codePoint) {
-                        $gid = $face->metrics->glyphId($codePoint);
-                        if (!isset($usage[$key]['glyphs'][$gid])) {
-                            $usage[$key]['glyphs'][$gid] = $codePoint;
-                        }
-                    }
-                }
-            }
-        }
+        $usage = $this->collectFontUsage($displayList, $fontRegistry);
 
         $fontResources = [];
         $fontIndex = 1;
@@ -70,8 +49,11 @@ final class PdfSerializer
             $type0Id = $reserve();
             $baseFont = $this->embeddedBaseFontName($face);
             $metrics = $face->metrics;
-            $objects[$fontFileId] = '<< /Length ' . strlen($face->binary) . ' /Length1 ' . strlen($face->binary)
-                . ">>\nstream\n" . $face->binary . "\nendstream";
+            $glyphIds = array_map('intval', array_keys($entry['glyphs']));
+            $fontProgram = (new TtfSubsetter())->subset($face->binary, $glyphIds) ?? $face->binary;
+
+            $objects[$fontFileId] = '<< /Length ' . strlen($fontProgram) . ' /Length1 ' . strlen($fontProgram)
+                . ">>\nstream\n" . $fontProgram . "\nendstream";
 
             $scale = 1000.0 / $metrics->unitsPerEm;
             $bbox = $metrics->bbox;
@@ -92,7 +74,7 @@ final class PdfSerializer
                 . ' /CapHeight ' . $ascent
                 . ' /StemV 80 /FontFile2 ' . $fontFileId . ' 0 R >>';
 
-            $widths = $this->cidWidths($face, array_keys($entry['glyphs']));
+            $widths = $this->cidWidths($face, $glyphIds);
             $defaultWidth = $this->number($metrics->advanceWidth(0) * $scale);
             $objects[$cidFontId] = '<< /Type /Font /Subtype /CIDFontType2 /BaseFont /' . $baseFont
                 . ' /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>'
@@ -119,14 +101,14 @@ final class PdfSerializer
                     $content .= $this->serializeBox($command, $page->height);
                     continue;
                 }
-                if ($command instanceof TextPaintCommand) {
-                    [$key] = $this->fontChoice($command, $fontRegistry);
-                    $resource = $fontResources[$key];
-                    $usedFonts[$resource['name']] = $resource['id'];
-                    $content .= $resource['face'] instanceof RegisteredFont
-                        ? $this->serializeEmbeddedText($command, $page->height, $resource['name'], $resource['face'])
-                        : $this->serializeBase14Text($command, $page->height, $resource['name']);
-                }
+                if (!$command instanceof TextPaintCommand) continue;
+
+                [$key] = $this->fontChoice($command, $fontRegistry);
+                $resource = $fontResources[$key];
+                $usedFonts[$resource['name']] = $resource['id'];
+                $content .= $resource['face'] instanceof RegisteredFont
+                    ? $this->serializeEmbeddedText($command, $page->height, $resource['name'], $resource['face'])
+                    : $this->serializeBase14Text($command, $page->height, $resource['name']);
             }
 
             $contentId = $reserve();
@@ -152,6 +134,29 @@ final class PdfSerializer
         $objects[$catalogId] = '<< /Type /Catalog /Pages ' . $pagesId . ' 0 R >>';
 
         return $this->assemble($objects, $catalogId);
+    }
+
+    /** @return array<string,array{face:RegisteredFont|null,base14:string|null,glyphs:array<int,int>}> */
+    private function collectFontUsage(DisplayList $displayList, ?FontRegistry $fontRegistry): array
+    {
+        $usage = [];
+        foreach ($displayList->pages as $page) {
+            foreach ($page->commands as $command) {
+                if (!$command instanceof TextPaintCommand) continue;
+                [$key, $face, $base14] = $this->fontChoice($command, $fontRegistry);
+                if (!isset($usage[$key])) {
+                    $usage[$key] = ['face' => $face, 'base14' => $base14, 'glyphs' => []];
+                }
+                if ($face === null) continue;
+                foreach ($this->codePoints($command->text) as $codePoint) {
+                    $gid = $face->metrics->glyphId($codePoint);
+                    if (!isset($usage[$key]['glyphs'][$gid])) {
+                        $usage[$key]['glyphs'][$gid] = $codePoint;
+                    }
+                }
+            }
+        }
+        return $usage;
     }
 
     /** @return array{0:string,1:RegisteredFont|null,2:string|null} */
@@ -181,7 +186,7 @@ final class PdfSerializer
     /** @param list<int|string> $glyphIds */
     private function cidWidths(RegisteredFont $face, array $glyphIds): string
     {
-        $ids = array_map('intval', $glyphIds);
+        $ids = array_values(array_unique(array_map('intval', $glyphIds)));
         sort($ids, SORT_NUMERIC);
         $scale = 1000.0 / $face->metrics->unitsPerEm;
         $parts = [];
@@ -228,16 +233,13 @@ final class PdfSerializer
     private function serializeBox(BoxPaintCommand $command, float $pageHeightPx): string
     {
         $color = $command->backgroundColor;
-        if ($color === null || $color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) {
-            return '';
-        }
+        if ($color === null || $color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) return '';
 
         $x = Units::pxToPt($command->x);
         $y = Units::pxToPt($pageHeightPx - $command->y - $command->height);
         $width = Units::pxToPt($command->width);
         $height = Units::pxToPt($command->height);
         [$r, $g, $b] = $color->toPdfRgb();
-
         return "q\n"
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
             . $this->number($x) . ' ' . $this->number($y) . ' ' . $this->number($width) . ' ' . $this->number($height) . " re f\n"
@@ -253,9 +255,7 @@ final class PdfSerializer
         foreach ($glyphs as $gid) {
             if ($previous !== null) {
                 $kern = $face->metrics->kerning($previous, $gid);
-                if ($kern !== 0) {
-                    $items[] = $this->number(-$kern * 1000.0 / $face->metrics->unitsPerEm);
-                }
+                if ($kern !== 0) $items[] = $this->number(-$kern * 1000.0 / $face->metrics->unitsPerEm);
             }
             $items[] = '<' . sprintf('%04X', $gid & 0xFFFF) . '>';
             $previous = $gid;
@@ -280,7 +280,6 @@ final class PdfSerializer
         $y = Units::pxToPt($pageHeightPx - $command->baseline);
         $fontSize = Units::pxToPt($command->fontSize);
         [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
-
         return "BT\n"
             . '/' . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
@@ -293,17 +292,12 @@ final class PdfSerializer
     {
         $family = strtolower($command->fontFamily ?? 'times new roman');
         $first = trim(explode(',', $family, 2)[0], " \t\n\r\0\x0B\"'");
-        if (str_contains($first, 'courier') || str_contains($first, 'mono')) {
-            $base = 'Courier';
-        } elseif (str_contains($first, 'helvetica') || str_contains($first, 'arial') || str_contains($first, 'sans')) {
-            $base = 'Helvetica';
-        } else {
-            $base = 'Times';
-        }
+        if (str_contains($first, 'courier') || str_contains($first, 'mono')) $base = 'Courier';
+        elseif (str_contains($first, 'helvetica') || str_contains($first, 'arial') || str_contains($first, 'sans')) $base = 'Helvetica';
+        else $base = 'Times';
 
         $bold = $command->fontWeight >= 600;
         $italic = str_contains($command->fontStyle, 'italic') || str_contains($command->fontStyle, 'oblique');
-
         return match ($base) {
             'Helvetica' => $bold && $italic ? 'Helvetica-BoldOblique' : ($bold ? 'Helvetica-Bold' : ($italic ? 'Helvetica-Oblique' : 'Helvetica')),
             'Courier' => $bold && $italic ? 'Courier-BoldOblique' : ($bold ? 'Courier-Bold' : ($italic ? 'Courier-Oblique' : 'Courier')),
@@ -318,34 +312,21 @@ final class PdfSerializer
         $length = strlen($text);
         for ($i = 0; $i < $length;) {
             $b1 = ord($text[$i]);
-            if ($b1 < 0x80) {
-                $result[] = $b1;
-                $i++;
-                continue;
-            }
+            if ($b1 < 0x80) { $result[] = $b1; $i++; continue; }
             if (($b1 & 0xE0) === 0xC0 && $i + 1 < $length) {
                 $b2 = ord($text[$i + 1]);
                 if (($b2 & 0xC0) !== 0x80) throw new \LogicException('Invalid UTF-8 text cannot be serialized to PDF.');
-                $result[] = (($b1 & 0x1F) << 6) | ($b2 & 0x3F);
-                $i += 2;
-                continue;
+                $result[] = (($b1 & 0x1F) << 6) | ($b2 & 0x3F); $i += 2; continue;
             }
             if (($b1 & 0xF0) === 0xE0 && $i + 2 < $length) {
-                $b2 = ord($text[$i + 1]);
-                $b3 = ord($text[$i + 2]);
+                $b2 = ord($text[$i + 1]); $b3 = ord($text[$i + 2]);
                 if (($b2 & 0xC0) !== 0x80 || ($b3 & 0xC0) !== 0x80) throw new \LogicException('Invalid UTF-8 text cannot be serialized to PDF.');
-                $result[] = (($b1 & 0x0F) << 12) | (($b2 & 0x3F) << 6) | ($b3 & 0x3F);
-                $i += 3;
-                continue;
+                $result[] = (($b1 & 0x0F) << 12) | (($b2 & 0x3F) << 6) | ($b3 & 0x3F); $i += 3; continue;
             }
             if (($b1 & 0xF8) === 0xF0 && $i + 3 < $length) {
-                $b2 = ord($text[$i + 1]);
-                $b3 = ord($text[$i + 2]);
-                $b4 = ord($text[$i + 3]);
+                $b2 = ord($text[$i + 1]); $b3 = ord($text[$i + 2]); $b4 = ord($text[$i + 3]);
                 if (($b2 & 0xC0) !== 0x80 || ($b3 & 0xC0) !== 0x80 || ($b4 & 0xC0) !== 0x80) throw new \LogicException('Invalid UTF-8 text cannot be serialized to PDF.');
-                $result[] = (($b1 & 0x07) << 18) | (($b2 & 0x3F) << 12) | (($b3 & 0x3F) << 6) | ($b4 & 0x3F);
-                $i += 4;
-                continue;
+                $result[] = (($b1 & 0x07) << 18) | (($b2 & 0x3F) << 12) | (($b3 & 0x3F) << 6) | ($b4 & 0x3F); $i += 4; continue;
             }
             throw new \LogicException('Invalid UTF-8 text cannot be serialized to PDF.');
         }
@@ -363,17 +344,10 @@ final class PdfSerializer
             0x02DC => 0x98, 0x2122 => 0x99, 0x0161 => 0x9A, 0x203A => 0x9B,
             0x0153 => 0x9C, 0x017E => 0x9E, 0x0178 => 0x9F,
         ];
-
         $out = '';
         foreach ($this->codePoints($text) as $codePoint) {
-            if ($codePoint <= 0x7F || ($codePoint >= 0xA0 && $codePoint <= 0xFF)) {
-                $out .= chr($codePoint);
-                continue;
-            }
-            if (isset($special[$codePoint])) {
-                $out .= chr($special[$codePoint]);
-                continue;
-            }
+            if ($codePoint <= 0x7F || ($codePoint >= 0xA0 && $codePoint <= 0xFF)) { $out .= chr($codePoint); continue; }
+            if (isset($special[$codePoint])) { $out .= chr($special[$codePoint]); continue; }
             throw new \LogicException(sprintf('Character U+%04X is not supported by the current WinAnsi PDF text serializer.', $codePoint));
         }
         return $out;
@@ -381,16 +355,7 @@ final class PdfSerializer
 
     private function escapePdfString(string $value): string
     {
-        return strtr($value, [
-            "\\" => "\\\\",
-            '(' => '\\(',
-            ')' => '\\)',
-            "\r" => '\\r',
-            "\n" => '\\n',
-            "\t" => '\\t',
-            "\b" => '\\b',
-            "\f" => '\\f',
-        ]);
+        return strtr($value, ["\\" => "\\\\", '(' => '\\(', ')' => '\\)', "\r" => '\\r', "\n" => '\\n', "\t" => '\\t', "\b" => '\\b', "\f" => '\\f']);
     }
 
     /** @param array<int,string> $objects */
@@ -406,11 +371,9 @@ final class PdfSerializer
 
         $xrefOffset = strlen($pdf);
         $size = max(array_keys($objects)) + 1;
-        $pdf .= "xref\n0 " . $size . "\n";
-        $pdf .= "0000000000 65535 f \n";
+        $pdf .= "xref\n0 " . $size . "\n0000000000 65535 f \n";
         for ($id = 1; $id < $size; $id++) {
-            $offset = $offsets[$id] ?? 0;
-            $pdf .= sprintf('%010d 00000 n ', $offset) . "\n";
+            $pdf .= sprintf('%010d 00000 n ', $offsets[$id] ?? 0) . "\n";
         }
         $pdf .= "trailer\n<< /Size " . $size . ' /Root ' . $rootId . " 0 R >>\n";
         $pdf .= "startxref\n" . $xrefOffset . "\n%%EOF\n";
@@ -420,7 +383,6 @@ final class PdfSerializer
     private function number(float $value): string
     {
         if (abs($value) < 0.0000001) return '0';
-        $formatted = number_format($value, 6, '.', '');
-        return rtrim(rtrim($formatted, '0'), '.');
+        return rtrim(rtrim(number_format($value, 6, '.', ''), '0'), '.');
     }
 }
