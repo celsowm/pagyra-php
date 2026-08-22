@@ -22,6 +22,12 @@ final class TtfParser
         $cmap = $this->table('cmap');
 
         $unitsPerEm = $this->reader->u16($head['offset'] + 18);
+        $bbox = [
+            'xMin' => $this->reader->i16($head['offset'] + 36),
+            'yMin' => $this->reader->i16($head['offset'] + 38),
+            'xMax' => $this->reader->i16($head['offset'] + 40),
+            'yMax' => $this->reader->i16($head['offset'] + 42),
+        ];
         $ascent = $this->reader->i16($hhea['offset'] + 4);
         $descent = $this->reader->i16($hhea['offset'] + 6);
         $lineGap = $this->reader->i16($hhea['offset'] + 8);
@@ -32,7 +38,16 @@ final class TtfParser
         $mapping = $this->parseCmap($cmap);
         $kerning = $this->parseKern();
 
-        return new TtfFontMetrics($unitsPerEm, $ascent, $descent, $lineGap, $advanceWidths, $mapping, $kerning);
+        return new TtfFontMetrics(
+            $unitsPerEm,
+            $ascent,
+            $descent,
+            $lineGap,
+            $advanceWidths,
+            $mapping,
+            $kerning,
+            $bbox,
+        );
     }
 
     public function parseFile(string $path): TtfFontMetrics
