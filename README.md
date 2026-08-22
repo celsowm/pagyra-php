@@ -6,18 +6,19 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking, text alignment, vertical alignment, atomic inline boxes, intrinsic raster/SVG sizing, linked local stylesheets, CSS `@font-face` loading and first-pass default `@page` resolution. PDF rendering is intentionally not implemented yet.**
+**DOM, substantial CSS cascade, block/inline layout, first-pass pagination, physical page fragmentation, display-list paint preparation and a first real pure-PHP PDF serializer are implemented. PDF output currently supports Base14/WinAnsi text and opaque background fills; Unicode Type0/custom-font embedding, images, borders, transparency and richer paint remain pending.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS/resources -> cascade -> computed style tree -> font resolution -> page style resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> vertical placement -> line boxes -> text runs / atomic inline boxes -> nested inline-block line boxes
+HTML -> Pagyra DOM -> merged CSS/resources -> cascade -> computed style tree -> font resolution -> page style resolution -> block/inline layout -> line boxes -> pagination -> physical page fragments -> display list -> PDF serialization
 ```
 
 Current foundation:
 
 - Composer + PHPUnit structure;
 - `Pagyra::prepareHtmlRender()` public API;
+- `Pagyra::renderHtmlToPdf()` now returns PDF bytes produced by the owned PHP pipeline for the currently supported paint subset;
 - validated `RenderHtmlOptions` defaults, including explicit `resourceBaseDir` for deterministic local resource resolution;
 - Pagyra-owned DOM model backed by `DOMDocument` only at the parsing boundary;
 - fragment/document normalization following the `pagyra-js` model;
@@ -83,7 +84,20 @@ Current foundation:
 - CSS font source selection prefers sfnt-compatible TrueType/OpenType sources while WOFF/WOFF2 decoding is still pending;
 - base64 embedded `@font-face` sources can be parsed directly from CSS and participate in text measurement;
 - default `@page { ... }` resolution for named/custom page sizes, portrait/landscape orientation, margin shorthand/longhands and `!important` precedence;
+- page style / print viewport stabilization so matching `@media` rules are re-evaluated when `@page` changes the printable area;
+- proportional clamping when page margins exceed the resolved page dimensions;
 - resolved default page size is exposed in `PreparedRender.pageSize` as points while page margins remain CSS pixels;
+- first-pass pagination for `break-before`, `break-after`, legacy `page-break-*`, `left`/`right` page parity, `break-inside: avoid`, `widows` and `orphans`;
+- physical page model with preserved skipped parity pages;
+- top-level `PagePlacement`, per-page `PageFragment`, per-line `LineFragment` and recursive descendant `BlockFragment` geometry;
+- descendant block and text-line fragmentation while preserving the continuous layout tree unchanged;
+- `PreparedRender.displayList` with physical per-page box/text paint commands and page-margin-adjusted coordinates;
+- opaque `background-color` fills represented in the first paint command model;
+- text paint commands preserve family, weight, style, font size and color;
+- pure-PHP PDF 1.4 object/xref/trailer serialization;
+- Base14 font selection for Times/Helvetica/Courier normal/bold/italic variants;
+- WinAnsi text serialization for ASCII, Latin-1 and common CP1252 punctuation;
+- unsupported characters outside the current WinAnsi repertoire fail explicitly instead of being silently corrupted;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
 - CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
@@ -133,6 +147,18 @@ Default page descriptors are also reflected by `prepareHtmlRender()`:
 <p>Hello</p>
 ```
 
+A first real PDF can now be produced directly:
+
+```php
+$pdf = Pagyra::renderHtmlToPdf([
+    'html' => '<h1>Hello</h1><p>PDF generated in pure PHP.</p>',
+]);
+
+file_put_contents('output.pdf', $pdf);
+```
+
+The current PDF serializer intentionally remains narrow. Custom TTF/OTF files are already used for layout measurement, but the PDF paint stage currently maps text to Base14 fonts rather than embedding those custom programs. Proper Type0/CID font embedding, ToUnicode CMaps, glyph subsetting and full Unicode output remain pending.
+
 Styled inline content is preserved through layout. For example:
 
 ```html
@@ -154,17 +180,17 @@ Atomic inline content can now participate in the same line and expose an interna
 
 The span carries nested `contentLines` laid out inside its content box. The image resolves to `80 x 40` content pixels because only its width is overridden.
 
-The parsed-font path currently targets measurement, not rendering outlines. `glyf`/CFF outlines, GPOS kerning/class pairs, variable fonts, WOFF/WOFF2 decoding, Base14 width tables, full fallback-chain policy and PDF embedding/subsetting remain pending.
+The parsed-font path currently targets accurate measurement. `glyf`/CFF outline painting, GPOS kerning/class pairs, variable fonts, WOFF/WOFF2 decoding, custom-font PDF embedding/subsetting and full fallback-chain parity remain pending.
 
 The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, replaced-element object-fit/object-position paint, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
-Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, page pseudo-class profiles (`:first`, `:left`, `:right`), richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
+Still pending in pagination/paint: page pseudo-class profiles (`:first`, `:left`, `:right`), variable per-page margins, full descendant forced-break propagation, stacking contexts/z-index, borders/radii, images/SVG paint, transparency, decorations and richer clipping.
+
+Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
 
 Remote HTTP resource loading is intentionally not enabled in the current PHP resource layer; local deterministic resources are resolved through explicit paths / `resourceBaseDir`.
-
-`Pagyra::renderHtmlToPdf()` currently throws deliberately. Pagination, paint and PDF serialization will be added only after the lower-level layout layers are established.
 
 See [PLAN.md](PLAN.md) for the porting roadmap and parity criteria.
 
