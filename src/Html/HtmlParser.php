@@ -105,16 +105,84 @@ final class HtmlParser
             }
         }
 
-        $metadata = $tagName === 'img'
-            ? $this->imageMetadataResolver->resolve($attributes['src'] ?? null)
-            : null;
+        $intrinsicWidth = null;
+        $intrinsicHeight = null;
+
+        if ($tagName === 'img') {
+            $metadata = $this->imageMetadataResolver->resolve($attributes['src'] ?? null);
+            $intrinsicWidth = $metadata?->width !== null ? (float) $metadata->width : null;
+            $intrinsicHeight = $metadata?->height !== null ? (float) $metadata->height : null;
+        } elseif ($tagName === 'svg') {
+            [$intrinsicWidth, $intrinsicHeight] = $this->resolveSvgIntrinsicSize($attributes);
+        }
 
         return Node::element(
             $tagName,
             $attributes,
             $children,
-            $metadata?->width !== null ? (float) $metadata->width : null,
-            $metadata?->height !== null ? (float) $metadata->height : null,
+            $intrinsicWidth,
+            $intrinsicHeight,
         );
+    }
+
+    /** @param array<string,string> $attributes @return array{0:float,1:float} */
+    private function resolveSvgIntrinsicSize(array $attributes): array
+    {
+        $width = $this->positiveSvgNumber($attributes['width'] ?? null);
+        $height = $this->positiveSvgNumber($attributes['height'] ?? null);
+
+        $viewBox = $this->parseViewBox($attributes['viewbox'] ?? null);
+        if ($viewBox !== null) {
+            if ($width === null) {
+                $width = $viewBox['width'];
+            }
+            if ($height === null) {
+                $height = $viewBox['height'];
+            }
+        }
+
+        $width ??= 100.0;
+        $height ??= $width;
+
+        return [$width > 0.0 ? $width : 100.0, $height > 0.0 ? $height : 100.0];
+    }
+
+    private function positiveSvgNumber(?string $raw): ?float
+    {
+        if ($raw === null || trim($raw) === '') {
+            return null;
+        }
+
+        if (preg_match('/^[\s]*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)/', $raw, $matches) !== 1) {
+            return null;
+        }
+
+        $value = (float) $matches[1];
+        return is_finite($value) && $value > 0.0 ? $value : null;
+    }
+
+    /** @return array{minX:float,minY:float,width:float,height:float}|null */
+    private function parseViewBox(?string $raw): ?array
+    {
+        if ($raw === null || trim($raw) === '') {
+            return null;
+        }
+
+        $parts = preg_split('/[\s,]+/', trim($raw)) ?: [];
+        if (count($parts) !== 4 || array_filter($parts, 'is_numeric') !== $parts) {
+            return null;
+        }
+
+        [$minX, $minY, $width, $height] = array_map('floatval', $parts);
+        if (!is_finite($width) || !is_finite($height) || $width <= 0.0 || $height <= 0.0) {
+            return null;
+        }
+
+        return [
+            'minX' => $minX,
+            'minY' => $minY,
+            'width' => $width,
+            'height' => $height,
+        ];
     }
 }
