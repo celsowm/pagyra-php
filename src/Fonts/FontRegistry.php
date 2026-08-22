@@ -9,25 +9,42 @@ use Pagyra\Fonts\Ttf\TtfParser;
 
 final class FontRegistry
 {
-    /** @var array<string,array<string,TtfFontMetrics>> */
+    /** @var array<string,array<string,RegisteredFont>> */
     private array $fonts = [];
 
-    public function register(string $family, TtfFontMetrics $metrics, int $weight = 400, string $style = 'normal'): void
+    public function register(string $family, TtfFontMetrics $metrics, int $weight = 400, string $style = 'normal', string $binary = ''): void
     {
-        $this->fonts[$this->familyKey($family)][$this->variantKey($weight, $style)] = $metrics;
+        $normalizedWeight = $this->normalizedWeight($weight);
+        $normalizedStyle = $this->normalizedStyle($style);
+        $this->fonts[$this->familyKey($family)][$this->variantKey($normalizedWeight, $normalizedStyle)] = new RegisteredFont(
+            family: $family,
+            weight: $normalizedWeight,
+            style: $normalizedStyle,
+            metrics: $metrics,
+            binary: $binary,
+        );
     }
 
     public function registerFile(string $family, string $path, int $weight = 400, string $style = 'normal'): void
     {
-        $this->register($family, (new TtfParser())->parseFile($path), $weight, $style);
+        $binary = @file_get_contents($path);
+        if ($binary === false) {
+            throw new \RuntimeException("Unable to read font: {$path}");
+        }
+        $this->registerData($family, $binary, $weight, $style);
     }
 
     public function registerData(string $family, string $binary, int $weight = 400, string $style = 'normal'): void
     {
-        $this->register($family, (new TtfParser())->parse($binary), $weight, $style);
+        $this->register($family, (new TtfParser())->parse($binary), $weight, $style, $binary);
     }
 
     public function resolve(?string $fontFamily, int $weight = 400, string $style = 'normal'): ?TtfFontMetrics
+    {
+        return $this->resolveFace($fontFamily, $weight, $style)?->metrics;
+    }
+
+    public function resolveFace(?string $fontFamily, int $weight = 400, string $style = 'normal'): ?RegisteredFont
     {
         $requestedWeight = $this->normalizedWeight($weight);
         $requestedStyle = $this->normalizedStyle($style);
@@ -48,22 +65,20 @@ final class FontRegistry
         return null;
     }
 
-    /**
-     * @param array<string,TtfFontMetrics> $variants
-     */
-    private function nearestVariant(array $variants, int $requestedWeight, string $requestedStyle, bool $requireStyle): ?TtfFontMetrics
+    /** @param array<string,RegisteredFont> $variants */
+    private function nearestVariant(array $variants, int $requestedWeight, string $requestedStyle, bool $requireStyle): ?RegisteredFont
     {
         $best = null;
         $bestDiff = PHP_INT_MAX;
 
-        foreach ($variants as $key => $metrics) {
+        foreach ($variants as $key => $font) {
             [$weight, $style] = $this->parseVariantKey($key);
             if ($requireStyle && $style !== $requestedStyle) continue;
 
             $diff = abs($weight - $requestedWeight);
             if ($diff < $bestDiff) {
                 $bestDiff = $diff;
-                $best = $metrics;
+                $best = $font;
             }
         }
 
