@@ -16,6 +16,8 @@ final readonly class Node implements \JsonSerializable
         public ?string $text = null,
         public array $attributes = [],
         public array $children = [],
+        public ?float $intrinsicWidth = null,
+        public ?float $intrinsicHeight = null,
     ) {
     }
 
@@ -26,9 +28,21 @@ final readonly class Node implements \JsonSerializable
     }
 
     /** @param array<string,string> $attributes @param list<Node> $children */
-    public static function element(string $tagName, array $attributes, array $children): self
-    {
-        return new self('element', strtolower($tagName), attributes: $attributes, children: $children);
+    public static function element(
+        string $tagName,
+        array $attributes,
+        array $children,
+        ?float $intrinsicWidth = null,
+        ?float $intrinsicHeight = null,
+    ): self {
+        return new self(
+            'element',
+            strtolower($tagName),
+            attributes: $attributes,
+            children: $children,
+            intrinsicWidth: $intrinsicWidth,
+            intrinsicHeight: $intrinsicHeight,
+        );
     }
 
     public static function text(string $text): self
@@ -106,6 +120,12 @@ final readonly class Node implements \JsonSerializable
         }
         if ($this->children !== []) {
             $data['children'] = $this->children;
+        }
+        if ($this->intrinsicWidth !== null) {
+            $data['intrinsicWidth'] = $this->intrinsicWidth;
+        }
+        if ($this->intrinsicHeight !== null) {
+            $data['intrinsicHeight'] = $this->intrinsicHeight;
         }
 
         return $data;
