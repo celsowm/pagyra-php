@@ -6,12 +6,12 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; block layout now supports both heuristic and parsed TTF/OTF text metrics. PDF rendering is intentionally not implemented yet.**
+**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics and the first styled-inline-run pipeline. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> text metrics -> line boxes
+HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> text metrics -> line boxes -> text runs
 ```
 
 Current foundation:
@@ -43,8 +43,12 @@ Current foundation:
 - block `display:none` filtering;
 - centralized `TextMetrics` abstraction;
 - heuristic text-metrics fallback ported from `pagyra-js` coefficients/calibration;
-- first word-wrapping formatter for text-only/inline-only block contents;
-- deterministic `LineBox` output with x/y/width/height/baseline/text;
+- first word-wrapping formatter for inline/textual block contents;
+- styled inline fragment collection preserving `font-family`, `font-size`, `font-weight`, `font-style`, color and other computed properties;
+- per-fragment token measurement, so style/font changes can affect wrapping;
+- deterministic `LineBox` output with x/y/width/height/baseline/text plus styled `TextRun` children;
+- mixed-font-size baseline alignment inside a line;
+- basic inherited `text-transform` application without requiring `ext-mbstring`;
 - text-driven intrinsic block height for headings and paragraphs;
 - big-endian sfnt binary reader;
 - TTF/OTF metric parsing for `head`, `hhea`, `maxp`, `hmtx` and Unicode `cmap` formats 4/12;
@@ -74,9 +78,17 @@ $prepared = Pagyra::prepareHtmlRender([
 ]);
 ```
 
+Styled inline content is now preserved through layout. For example:
+
+```html
+<p>Todo <strong>poder</strong> emana do <em>povo</em>.</p>
+```
+
+produces line boxes containing separate `TextRun` objects for the normal, bold and italic portions, each measured with its own computed style/font selection.
+
 The parsed-font path currently targets measurement, not rendering outlines. `glyf`/CFF outlines, GPOS kerning/class pairs, variable fonts, Base14 width tables, full fallback-chain policy and PDF embedding/subsetting remain pending.
 
-The first inline formatter currently handles blocks whose content is purely inline/textual. Mixed inline/block flow, styled inline runs, preserved whitespace modes, explicit newlines, overflow-wrap/word-break, text-align/justify, text transforms and decorations remain for the full inline-layout phase.
+The inline formatter still has deliberate limits: mixed inline/block formatting contexts, atomic inline boxes, preserved `white-space` modes, explicit newline policy, overflow-wrap/word-break, text-align/justify, decorations and the full vertical-align model remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
