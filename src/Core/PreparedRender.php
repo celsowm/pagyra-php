@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pagyra\Core;
 
 use Pagyra\Dom\Node;
+use Pagyra\Layout\LayoutNode;
 use Pagyra\Style\StyledNode;
 
 final readonly class PreparedRender implements \JsonSerializable
@@ -17,6 +18,7 @@ final readonly class PreparedRender implements \JsonSerializable
     public function __construct(
         public Node $domRoot,
         public StyledNode $styledRoot,
+        public LayoutNode $layoutRoot,
         public string $cssText,
         public array $stylesheetHrefs,
         public array $pageSize,
@@ -29,6 +31,7 @@ final readonly class PreparedRender implements \JsonSerializable
         return [
             'domRoot' => $this->domRoot,
             'styledRoot' => $this->styledRoot,
+            'layoutRoot' => $this->layoutRoot,
             'cssText' => $this->cssText,
             'stylesheetHrefs' => $this->stylesheetHrefs,
             'pageSize' => $this->pageSize,
