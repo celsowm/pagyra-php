@@ -349,6 +349,7 @@ final class InlineTextFormatter
         $horizontalExtras = $padding['left'] + $padding['right'] + $border['left'] + $border['right'];
         $verticalExtras = $padding['top'] + $padding['bottom'] + $border['top'] + $border['bottom'];
         $horizontalOuterExtras = $margin['left'] + $margin['right'] + $horizontalExtras;
+        $availableContentWidth = max(0.0, $referenceWidth - $horizontalOuterExtras);
         $boxSizing = strtolower($node->style->get('box-sizing', 'content-box') ?? 'content-box');
 
         $minWidth = $this->optionalImageConstraint($node, 'min-width', $referenceWidth, $fontSize, $intrinsicWidth);
@@ -368,17 +369,11 @@ final class InlineTextFormatter
             maxWidth: $maxWidth,
             minHeight: $minHeight,
             maxHeight: $maxHeight,
+            availableContentWidth: $availableContentWidth,
         );
 
         $width = $size->width;
         $height = $size->height;
-        $availableContentWidth = max(0.0, $referenceWidth - $horizontalOuterExtras);
-
-        if ($specifiedWidth === null && $availableContentWidth > 0.0 && $width > $availableContentWidth && $width > 0.0) {
-            $scale = $availableContentWidth / $width;
-            $width = $availableContentWidth;
-            $height = max(1.0, round($height * $scale));
-        }
 
         if ($width <= 0.0 && $height <= 0.0) {
             $width = $height = $this->metrics->lineHeight($node->style, $fontSize);
