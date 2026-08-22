@@ -6,24 +6,26 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking, text alignment, vertical alignment, atomic inline boxes, intrinsic image sizing and first internal inline-block layout. PDF rendering is intentionally not implemented yet.**
+**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking, text alignment, vertical alignment, atomic inline boxes, intrinsic raster/SVG sizing, linked local stylesheets and CSS `@font-face` loading. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> vertical placement -> line boxes -> text runs / atomic inline boxes -> nested inline-block line boxes
+HTML -> Pagyra DOM -> merged CSS/resources -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> vertical placement -> line boxes -> text runs / atomic inline boxes -> nested inline-block line boxes
 ```
 
 Current foundation:
 
 - Composer + PHPUnit structure;
 - `Pagyra::prepareHtmlRender()` public API;
-- validated `RenderHtmlOptions` defaults;
+- validated `RenderHtmlOptions` defaults, including explicit `resourceBaseDir` for deterministic local resource resolution;
 - Pagyra-owned DOM model backed by `DOMDocument` only at the parsing boundary;
 - fragment/document normalization following the `pagyra-js` model;
 - attributes, IDs, classes, inline styles, text content, image and SVG recognition;
-- embedded `<style>` collection and stylesheet href discovery;
+- embedded `<style>` collection plus local `<link rel="stylesheet">` loading;
+- linked stylesheet `url(...)` rewriting relative to the stylesheet file itself;
 - CSS declaration and stylesheet parsing foundation;
+- declaration splitting that preserves semicolons inside quoted/function values such as data URLs;
 - tag/class/ID compound selectors;
 - descendant and child combinators;
 - attribute selectors (`[attr]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`);
@@ -52,13 +54,16 @@ Current foundation:
 - `vertical-align: baseline`, `middle`, `top`, `bottom`, `text-top`, `text-bottom`, `super`, `sub` plus px/pt/em/rem/% shifts;
 - two-pass inline vertical placement so raised/lowered runs can expand the effective line box;
 - fallback baseline follows the `pagyra-js` ascent/half-leading model (`0.75 * font-size` ascent when font ascent metrics are unavailable);
-- atomic inline-box participation for `inline-block`, `inline-flex`, `inline-grid`, `inline-table` and images;
+- atomic inline-box participation for `inline-block`, `inline-flex`, `inline-grid`, `inline-table`, images and inline SVG;
 - atomic inline wrapping uses full outer size: content + padding + border + margins;
 - `AtomicInlineBox` exposes content size plus margin/padding/border edge metrics and nested `contentLines`;
-- image `width`/`height` attributes act as intrinsic dimensions when decoded image metadata is not yet available;
+- intrinsic PNG/JPEG/WebP metadata extraction from data URLs and readable local resources;
+- SVG intrinsic sizing from `width`/`height`/`viewBox` for inline SVG and SVG image sources;
+- relative image/SVG sources resolved against explicit `resourceBaseDir`;
+- image `width`/`height` attributes remain usable as sizing fallback when source metadata is unavailable;
 - image sizing preserves intrinsic aspect ratio when only CSS width or height is specified;
 - image `min/max-width` and `min/max-height` constraints preserve aspect ratio when the opposite dimension remains automatic;
-- oversized intrinsic images shrink to the available inline width while maintaining ratio;
+- oversized intrinsic images shrink to available content width after accounting for margin, padding and border;
 - `inline-block` with `width:auto` uses internal max-content width as its initial intrinsic width;
 - explicit inline-block width runs the child inline formatter so internal wrapping determines automatic height;
 - nested inline-block line boxes are translated into their real content-box coordinates;
@@ -71,7 +76,10 @@ Current foundation:
 - classic `kern` format-0 pair parsing;
 - font registry with family/weight/style selection;
 - glyph-advance and kerning-based text measurement with heuristic fallback;
-- `fontConfig.fontFaceDefs` support for local paths / `file://` sources;
+- `fontConfig.fontFaceDefs` support for local, `file://`, relative-to-`resourceBaseDir` and base64 data-URL sources;
+- CSS `@font-face` extraction from embedded and linked stylesheets;
+- CSS font source selection prefers sfnt-compatible TrueType/OpenType sources while WOFF/WOFF2 decoding is still pending;
+- base64 embedded `@font-face` sources can be parsed directly from CSS and participate in text measurement;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
 - CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
@@ -84,15 +92,29 @@ Example local font configuration:
 ```php
 $prepared = Pagyra::prepareHtmlRender([
     'html' => '<p style="font-family: MyFont">Hello</p>',
+    'resourceBaseDir' => '/path/to/document',
     'fontConfig' => [
         'fontFaceDefs' => [[
             'family' => 'MyFont',
             'weight' => 400,
             'style' => 'normal',
-            'src' => '/path/to/font.ttf',
+            'src' => 'fonts/my-font.ttf',
         ]],
     ],
 ]);
+```
+
+CSS `@font-face` can also load local or embedded sfnt font data:
+
+```html
+<style>
+@font-face {
+  font-family: "MyFont";
+  src: url("fonts/my-font.ttf") format("truetype");
+}
+p { font-family: "MyFont"; }
+</style>
+<p>Hello</p>
 ```
 
 Styled inline content is preserved through layout. For example:
@@ -116,13 +138,15 @@ Atomic inline content can now participate in the same line and expose an interna
 
 The span carries nested `contentLines` laid out inside its content box. The image resolves to `80 x 40` content pixels because only its width is overridden.
 
-The parsed-font path currently targets measurement, not rendering outlines. `glyf`/CFF outlines, GPOS kerning/class pairs, variable fonts, Base14 width tables, full fallback-chain policy and PDF embedding/subsetting remain pending.
+The parsed-font path currently targets measurement, not rendering outlines. `glyf`/CFF outlines, GPOS kerning/class pairs, variable fonts, WOFF/WOFF2 decoding, Base14 width tables, full fallback-chain policy and PDF embedding/subsetting remain pending.
 
-The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, decoded PNG/JPEG/SVG intrinsic dimensions, `aspect-ratio` property parsing, replaced-element object-fit/object-position paint, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
+The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, replaced-element object-fit/object-position paint, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
-Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, `@media`, `@page`, `@font-face`, external stylesheet loading and the remaining `pagyra-js` CSS surface.
+Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, `@media`, `@page`, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
+
+Remote HTTP resource loading is intentionally not enabled in the current PHP resource layer; local deterministic resources are resolved through explicit paths / `resourceBaseDir`.
 
 `Pagyra::renderHtmlToPdf()` currently throws deliberately. Pagination, paint and PDF serialization will be added only after the lower-level layout layers are established.
 
