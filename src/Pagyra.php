@@ -43,7 +43,7 @@ final class Pagyra
         $rules = (new StylesheetParser())->parse($cssText);
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
 
-        $registry = self::buildFontRegistry($options->fontConfig);
+        $registry = self::buildFontRegistry($options->fontConfig, $options->resourceBaseDir);
         $textMetrics = new GlyphTextMetrics($registry);
         $layoutRoot = (new BlockLayoutEngine($options->viewportWidth, $options->viewportHeight, $textMetrics))->layout($styledRoot);
 
@@ -62,7 +62,7 @@ final class Pagyra
     }
 
     /** @param array<string,mixed> $config */
-    private static function buildFontRegistry(array $config): FontRegistry
+    private static function buildFontRegistry(array $config, ?string $resourceBaseDir = null): FontRegistry
     {
         $registry = new FontRegistry();
         $defs = $config['fontFaceDefs'] ?? [];
@@ -73,13 +73,42 @@ final class Pagyra
             $family = $def['family'] ?? $def['name'] ?? null;
             $src = $def['src'] ?? null;
             if (!is_string($family) || $family === '' || !is_string($src) || $src === '') continue;
-            if (str_starts_with($src, 'file://')) $src = substr($src, 7);
-            if (!is_file($src)) continue;
+
+            $path = self::resolveFontPath($src, $resourceBaseDir);
+            if ($path === null || !is_file($path)) continue;
+
             $weight = is_numeric($def['weight'] ?? null) ? (int) $def['weight'] : 400;
             $style = is_string($def['style'] ?? null) ? $def['style'] : 'normal';
-            $registry->registerFile($family, $src, $weight, $style);
+            $registry->registerFile($family, $path, $weight, $style);
         }
         return $registry;
+    }
+
+    private static function resolveFontPath(string $src, ?string $resourceBaseDir): ?string
+    {
+        $src = trim($src);
+        if ($src === '' || preg_match('/^(?:https?:)?\/\//i', $src) === 1) {
+            return null;
+        }
+
+        if (str_starts_with(strtolower($src), 'file://')) {
+            $path = rawurldecode(substr($src, 7));
+            if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $path) === 1) {
+                $path = substr($path, 1);
+            }
+            return $path;
+        }
+
+        if (str_starts_with($src, '/') || str_starts_with($src, '\\\\') || preg_match('/^[a-zA-Z]:[\\\/]/', $src) === 1) {
+            return rawurldecode($src);
+        }
+
+        if ($resourceBaseDir === null) {
+            return null;
+        }
+
+        $relative = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, rawurldecode($src));
+        return rtrim($resourceBaseDir, '/\\') . DIRECTORY_SEPARATOR . ltrim($relative, '/\\');
     }
 
     public static function renderHtmlToPdf(array|RenderHtmlOptions $options): string
