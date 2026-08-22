@@ -30,6 +30,7 @@ final class PaginationEngine
             $end = $originalEnd + $offset;
             $pageIndex = $flow->pageIndexAt($start);
             $endPageIndex = $flow->pageIndexAt(max($start, $end - self::EPSILON));
+            $fragments = $this->fragmentsForRange($start, $end, $flow);
 
             $placements[] = new PagePlacement(
                 node: $node,
@@ -38,6 +39,7 @@ final class PaginationEngine
                 offsetY: $offset,
                 startY: $start,
                 endY: $end,
+                fragments: $fragments,
             );
             $maxEnd = max($maxEnd, $end);
 
@@ -50,6 +52,42 @@ final class PaginationEngine
 
         $pageCount = max(1, $flow->pageIndexAt(max(0.0, $maxEnd - self::EPSILON)) + 1);
         return new PaginationResult($flow, $placements, $pageCount);
+    }
+
+    /** @return list<PageFragment> */
+    private function fragmentsForRange(float $start, float $end, PageFlow $flow): array
+    {
+        if ($end <= $start + self::EPSILON) {
+            return [new PageFragment(
+                pageIndex: $flow->pageIndexAt($start),
+                pageY: $start - $flow->contentStartForPage($flow->pageIndexAt($start)),
+                height: 0.0,
+                continuousStartY: $start,
+                continuousEndY: $start,
+            )];
+        }
+
+        $firstPage = $flow->pageIndexAt($start);
+        $lastPage = $flow->pageIndexAt(max($start, $end - self::EPSILON));
+        $fragments = [];
+
+        for ($pageIndex = $firstPage; $pageIndex <= $lastPage; $pageIndex++) {
+            $pageStart = $flow->contentStartForPage($pageIndex);
+            $pageEnd = $pageStart + $flow->contentHeight;
+            $fragmentStart = max($start, $pageStart);
+            $fragmentEnd = min($end, $pageEnd);
+            if ($fragmentEnd < $fragmentStart) continue;
+
+            $fragments[] = new PageFragment(
+                pageIndex: $pageIndex,
+                pageY: $fragmentStart - $pageStart,
+                height: max(0.0, $fragmentEnd - $fragmentStart),
+                continuousStartY: $fragmentStart,
+                continuousEndY: $fragmentEnd,
+            );
+        }
+
+        return $fragments;
     }
 
     private function breakValue(LayoutNode $node, string $side): ?string
