@@ -86,7 +86,7 @@ final class Pagyra
             $style = is_string($def['style'] ?? null) ? $def['style'] : 'normal';
             try {
                 $registry->registerFile($family, $path, $weight, $style);
-            } catch (\InvalidArgumentException) {
+            } catch (\InvalidArgumentException|\RuntimeException) {
                 continue;
             }
         }
