@@ -16,6 +16,7 @@ use Pagyra\Html\HtmlParser;
 use Pagyra\Image\ImageSourceBytesResolver;
 use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 use Pagyra\Layout\BlockLayoutEngine;
+use Pagyra\Pagination\PaginationEngine;
 use Pagyra\Style\StyleComputer;
 use Pagyra\Units\Units;
 
@@ -42,7 +43,7 @@ final class Pagyra
             }
         }
 
-        [$pageStyle, $viewportWidth, $viewportHeight] = self::resolveStablePageConfiguration($cssText, $options);
+        [$pageStyle, $viewportWidth, $viewportHeight] = self::stabilizePageConfiguration($cssText, $options);
 
         $rules = (new StylesheetParser())->parse(
             $cssText,
@@ -61,6 +62,11 @@ final class Pagyra
         );
         $textMetrics = new GlyphTextMetrics($registry);
         $layoutRoot = (new BlockLayoutEngine($viewportWidth, $viewportHeight, $textMetrics))->layout($styledRoot);
+        $pageContentHeight = max(
+            1.0,
+            $pageStyle['height'] - $pageStyle['margins']['top'] - $pageStyle['margins']['bottom'],
+        );
+        $pagination = (new PaginationEngine())->paginate($layoutRoot, $pageContentHeight);
 
         return new PreparedRender(
             domRoot: $document->root,
@@ -73,13 +79,14 @@ final class Pagyra
                 'heightPt' => Units::pxToPt($pageStyle['height']),
             ],
             margins: $pageStyle['margins'],
+            pagination: $pagination,
         );
     }
 
     /**
      * @return array{0:array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}},1:float,2:float}
      */
-    private static function resolveStablePageConfiguration(string $cssText, RenderHtmlOptions $options): array
+    private static function stabilizePageConfiguration(string $cssText, RenderHtmlOptions $options): array
     {
         $resolver = new PageStyleResolver();
         $viewportWidth = $options->viewportWidth;
@@ -127,6 +134,33 @@ final class Pagyra
     }
 
     /**
+     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $left
+     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $right
+     */
+    private static function samePageConfiguration(
+        array $left,
+        float $leftViewportWidth,
+        float $leftViewportHeight,
+        array $right,
+        float $rightViewportWidth,
+        float $rightViewportHeight,
+    ): bool {
+        foreach ([
+            [$left['width'], $right['width']],
+            [$left['height'], $right['height']],
+            [$leftViewportWidth, $rightViewportWidth],
+            [$leftViewportHeight, $rightViewportHeight],
+        ] as [$a, $b]) {
+            if (abs($a - $b) > 0.01) return false;
+        }
+
+        foreach (['top', 'right', 'bottom', 'left'] as $side) {
+            if (abs($left['margins'][$side] - $right['margins'][$side]) > 0.01) return false;
+        }
+        return true;
+    }
+
+    /**
      * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $pageStyle
      * @return array{0:float,1:float}
      */
@@ -139,33 +173,6 @@ final class Pagyra
             min($options->viewportWidth, $contentWidth),
             min($options->viewportHeight, $contentHeight),
         ];
-    }
-
-    /**
-     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $leftStyle
-     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $rightStyle
-     */
-    private static function samePageConfiguration(
-        array $leftStyle,
-        float $leftViewportWidth,
-        float $leftViewportHeight,
-        array $rightStyle,
-        float $rightViewportWidth,
-        float $rightViewportHeight,
-    ): bool {
-        foreach ([
-            [$leftStyle['width'], $rightStyle['width']],
-            [$leftStyle['height'], $rightStyle['height']],
-            [$leftViewportWidth, $rightViewportWidth],
-            [$leftViewportHeight, $rightViewportHeight],
-        ] as [$left, $right]) {
-            if (abs($left - $right) > 0.01) return false;
-        }
-
-        foreach (['top', 'right', 'bottom', 'left'] as $side) {
-            if (abs($leftStyle['margins'][$side] - $rightStyle['margins'][$side]) > 0.01) return false;
-        }
-        return true;
     }
 
     /** @param array<string,mixed> $config */
