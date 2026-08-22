@@ -23,21 +23,39 @@ final class PngPdfImageParserTest extends TestCase
         self::assertSame(8, $data->bitsPerComponent);
         self::assertSame(3, $data->colors);
         self::assertSame('/DeviceRGB', $data->colorSpace);
+        self::assertTrue($data->usesPngPredictor);
+        self::assertNull($data->alphaCompressedData);
         self::assertSame($compressed, $data->compressedData);
     }
 
-    public function testRejectsAlphaPngForNow(): void
+    public function testSeparatesRgbaIntoRgbAndSoftMaskStreams(): void
     {
-        $compressed = gzcompress("\x00\xff\x00\x00\xff");
+        $compressed = gzcompress("\x00\xff\x00\x00\x80");
         self::assertIsString($compressed);
 
-        self::assertNull((new PngPdfImageParser())->parse($this->png(1, 1, 8, 6, $compressed)));
+        $data = (new PngPdfImageParser())->parse($this->png(1, 1, 8, 6, $compressed));
+
+        self::assertNotNull($data);
+        self::assertSame('/DeviceRGB', $data->colorSpace);
+        self::assertSame(3, $data->colors);
+        self::assertFalse($data->usesPngPredictor);
+        self::assertNotNull($data->alphaCompressedData);
+        self::assertSame("\xff\x00\x00", gzuncompress($data->compressedData));
+        self::assertSame("\x80", gzuncompress($data->alphaCompressedData));
     }
 
-    private function png(int $width, int $height, int $bitDepth, int $colorType, string $idat): string
+    public function testRejectsInterlacedPngForNow(): void
+    {
+        $compressed = gzcompress("\x00\xff\x00\x00");
+        self::assertIsString($compressed);
+
+        self::assertNull((new PngPdfImageParser())->parse($this->png(1, 1, 8, 2, $compressed, 1)));
+    }
+
+    private function png(int $width, int $height, int $bitDepth, int $colorType, string $idat, int $interlace = 0): string
     {
         $ihdr = pack('N', $width) . pack('N', $height)
-            . chr($bitDepth) . chr($colorType) . "\x00\x00\x00";
+            . chr($bitDepth) . chr($colorType) . "\x00\x00" . chr($interlace);
 
         return "\x89PNG\r\n\x1a\n"
             . $this->chunk('IHDR', $ihdr)
