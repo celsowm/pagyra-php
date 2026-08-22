@@ -83,12 +83,6 @@ final class PdfSerializer
         return $this->assemble($objects, $catalogId);
     }
 
-    /**
-     * @param array<string,array{face:RegisteredFont|null,base14:string|null,glyphs:array<int,int>}> $usage
-     * @param array<int,string> $objects
-     * @param callable():int $reserve
-     * @return array<string,array{name:string,id:int,face:RegisteredFont|null}>
-     */
     private function buildFontResources(array $usage, array &$objects, callable $reserve): array
     {
         $resources = [];
@@ -144,41 +138,60 @@ final class PdfSerializer
         return $resources;
     }
 
-    /**
-     * @param array<int,string> $objects
-     * @param callable():int $reserve
-     * @return array<string,array{name:string,id:int}>
-     */
     private function buildImageResources(DisplayList $displayList, array &$objects, callable $reserve): array
     {
         $resources = [];
         $index = 1;
+        $pngParser = new PngPdfImageParser();
+
         foreach ($displayList->pages as $page) {
             foreach ($page->commands as $command) {
-                if (!$command instanceof ImagePaintCommand || $command->metadata->format !== 'jpeg') continue;
+                if (!$command instanceof ImagePaintCommand) continue;
                 $key = hash('sha256', $command->bytes);
                 if (isset($resources[$key])) continue;
+
+                $dictionary = null;
+                $stream = null;
+                if ($command->metadata->format === 'jpeg') {
+                    $colorSpace = match ($command->metadata->channels) {
+                        1 => '/DeviceGray',
+                        4 => '/DeviceCMYK',
+                        default => '/DeviceRGB',
+                    };
+                    $stream = $command->bytes;
+                    $dictionary = '<< /Type /XObject /Subtype /Image'
+                        . ' /Width ' . $command->metadata->width
+                        . ' /Height ' . $command->metadata->height
+                        . ' /ColorSpace ' . $colorSpace
+                        . ' /BitsPerComponent ' . $command->metadata->bitsPerChannel
+                        . ' /Filter /DCTDecode /Length ' . strlen($stream) . ' >>';
+                } elseif ($command->metadata->format === 'png') {
+                    $png = $pngParser->parse($command->bytes);
+                    if ($png !== null) {
+                        $stream = $png->compressedData;
+                        $dictionary = '<< /Type /XObject /Subtype /Image'
+                            . ' /Width ' . $png->width
+                            . ' /Height ' . $png->height
+                            . ' /ColorSpace ' . $png->colorSpace
+                            . ' /BitsPerComponent ' . $png->bitsPerComponent
+                            . ' /Filter /FlateDecode'
+                            . ' /DecodeParms << /Predictor 15 /Colors ' . $png->colors
+                            . ' /BitsPerComponent ' . $png->bitsPerComponent
+                            . ' /Columns ' . $png->width . ' >>'
+                            . ' /Length ' . strlen($stream) . ' >>';
+                    }
+                }
+
+                if ($dictionary === null || $stream === null) continue;
                 $id = $reserve();
                 $name = 'Im' . $index++;
-                $colorSpace = match ($command->metadata->channels) {
-                    1 => '/DeviceGray',
-                    4 => '/DeviceCMYK',
-                    default => '/DeviceRGB',
-                };
-                $objects[$id] = '<< /Type /XObject /Subtype /Image'
-                    . ' /Width ' . $command->metadata->width
-                    . ' /Height ' . $command->metadata->height
-                    . ' /ColorSpace ' . $colorSpace
-                    . ' /BitsPerComponent ' . $command->metadata->bitsPerChannel
-                    . ' /Filter /DCTDecode /Length ' . strlen($command->bytes)
-                    . ">>\nstream\n" . $command->bytes . "\nendstream";
+                $objects[$id] = $dictionary . "\nstream\n" . $stream . "\nendstream";
                 $resources[$key] = ['name' => $name, 'id' => $id];
             }
         }
         return $resources;
     }
 
-    /** @return array<string,array{face:RegisteredFont|null,base14:string|null,glyphs:array<int,int>}> */
     private function collectFontUsage(DisplayList $displayList, ?FontRegistry $fontRegistry): array
     {
         $usage = [];
@@ -197,7 +210,6 @@ final class PdfSerializer
         return $usage;
     }
 
-    /** @return array{0:string,1:RegisteredFont|null,2:string|null} */
     private function fontChoice(TextPaintCommand $command, ?FontRegistry $registry): array
     {
         $face = $registry?->resolveFace($command->fontFamily, $command->fontWeight, $command->fontStyle);
@@ -349,7 +361,7 @@ final class PdfSerializer
             if (($b1 & 0xF0) === 0xE0 && $i + 2 < $length) {
                 $b2 = ord($text[$i + 1]); $b3 = ord($text[$i + 2]);
                 if (($b2 & 0xC0) !== 0x80 || ($b3 & 0xC0) !== 0x80) throw new \LogicException('Invalid UTF-8 text cannot be serialized to PDF.');
-                $result[] = (($b1 & 0x0F) << 12) | (($b2 & 0x3F) << 6) | $b3 & 0x3F; $i += 3; continue;
+                $result[] = (($b1 & 0x0F) << 12) | (($b2 & 0x3F) << 6) | ($b3 & 0x3F); $i += 3; continue;
             }
             if (($b1 & 0xF8) === 0xF0 && $i + 3 < $length) {
                 $b2 = ord($text[$i + 1]); $b3 = ord($text[$i + 2]); $b4 = ord($text[$i + 3]);
