@@ -18,9 +18,14 @@ final class HelloWorldSnapshotTest extends TestCase
             'margins' => ['top' => 20, 'right' => 20, 'bottom' => 20, 'left' => 20],
         ]);
 
-        $actual = json_encode($prepared, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+        $snapshot = $prepared->jsonSerialize();
+        unset($snapshot['layoutRoot']);
+
+        $actual = json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
         $expected = file_get_contents(__DIR__ . '/../Golden/hello-world.prepared.json');
 
         self::assertSame($expected, $actual);
+        self::assertSame(794.0, $prepared->layoutRoot->box->content->width);
+        self::assertSame(32.0, $prepared->layoutRoot->box->content->height);
     }
 }
