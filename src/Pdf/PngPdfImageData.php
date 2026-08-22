@@ -13,6 +13,8 @@ final readonly class PngPdfImageData
         public int $colors,
         public string $colorSpace,
         public string $compressedData,
+        public bool $usesPngPredictor = true,
+        public ?string $alphaCompressedData = null,
     ) {
     }
 }
