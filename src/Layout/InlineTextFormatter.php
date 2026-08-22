@@ -196,7 +196,7 @@ final class InlineTextFormatter
             }
 
             $fontSize = $this->resolveFontSize($child->style, $nodeFontSize);
-            if ($child->node->isImage() || in_array($display, ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'], true)) {
+            if ($child->node->isImage() || $child->node->isSvg() || in_array($display, ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'], true)) {
                 $metrics = $this->atomicBoxMetrics($child, $referenceWidth, $fontSize);
                 $tokens[] = [
                     'kind' => 'box',
@@ -310,8 +310,8 @@ final class InlineTextFormatter
         $padding = $this->edgeMetrics($node, 'padding', $referenceWidth, $fontSize);
         $border = $this->borderMetrics($node, $referenceWidth, $fontSize);
 
-        if ($node->node->isImage()) {
-            [$contentWidth, $contentHeight] = $this->imageContentSize($node, $referenceWidth, $fontSize, $padding, $border);
+        if ($node->node->isImage() || $node->node->isSvg()) {
+            [$contentWidth, $contentHeight] = $this->imageContentSize($node, $referenceWidth, $fontSize, $margin, $padding, $border);
             $contentLines = [];
         } else {
             [$contentWidth, $contentHeight, $contentLines] = $this->inlineBlockContentSize($node, $referenceWidth, $fontSize);
@@ -332,7 +332,7 @@ final class InlineTextFormatter
         ];
     }
 
-    private function imageContentSize(StyledNode $node, float $referenceWidth, float $fontSize, array $padding, array $border): array
+    private function imageContentSize(StyledNode $node, float $referenceWidth, float $fontSize, array $margin, array $padding, array $border): array
     {
         $intrinsicWidth = $this->numericAttribute($node, 'width');
         $intrinsicHeight = $this->numericAttribute($node, 'height');
@@ -348,6 +348,7 @@ final class InlineTextFormatter
 
         $horizontalExtras = $padding['left'] + $padding['right'] + $border['left'] + $border['right'];
         $verticalExtras = $padding['top'] + $padding['bottom'] + $border['top'] + $border['bottom'];
+        $horizontalOuterExtras = $margin['left'] + $margin['right'] + $horizontalExtras;
         $boxSizing = strtolower($node->style->get('box-sizing', 'content-box') ?? 'content-box');
 
         $minWidth = $this->optionalImageConstraint($node, 'min-width', $referenceWidth, $fontSize, $intrinsicWidth);
@@ -371,10 +372,11 @@ final class InlineTextFormatter
 
         $width = $size->width;
         $height = $size->height;
+        $availableContentWidth = max(0.0, $referenceWidth - $horizontalOuterExtras);
 
-        if ($specifiedWidth === null && $referenceWidth > 0.0 && $width > $referenceWidth && $width > 0.0) {
-            $scale = $referenceWidth / $width;
-            $width = $referenceWidth;
+        if ($specifiedWidth === null && $availableContentWidth > 0.0 && $width > $availableContentWidth && $width > 0.0) {
+            $scale = $availableContentWidth / $width;
+            $width = $availableContentWidth;
             $height = max(1.0, round($height * $scale));
         }
 
