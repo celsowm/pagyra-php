@@ -22,6 +22,11 @@ final class Units
         return ($mm / 10) * (1 / 2.54) * self::DPI;
     }
 
+    public static function qToPx(float $q): float
+    {
+        return ($q / 40) * (1 / 2.54) * self::DPI;
+    }
+
     public static function inToPx(float $inches): float
     {
         return $inches * self::DPI;
