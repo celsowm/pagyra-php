@@ -41,6 +41,20 @@ final class ImageSourceMetadataResolverTest extends TestCase
         self::assertSame('jpeg', $metadata->format);
     }
 
+    public function testResolvesWebpDataUrl(): void
+    {
+        $bytes = $this->webpVp8xBytes(640, 360);
+
+        $metadata = (new ImageSourceMetadataResolver())->resolve(
+            'data:image/webp;base64,' . base64_encode($bytes),
+        );
+
+        self::assertNotNull($metadata);
+        self::assertSame(640, $metadata->width);
+        self::assertSame(360, $metadata->height);
+        self::assertSame('webp', $metadata->format);
+    }
+
     public function testResolvesAbsoluteLocalFile(): void
     {
         $path = $this->temporaryPng(640, 360);
@@ -106,5 +120,22 @@ final class ImageSourceMetadataResolverTest extends TestCase
             . pack('N', $height)
             . "\x08\x06\x00\x00\x00"
             . "\x00\x00\x00\x00";
+    }
+
+    private function webpVp8xBytes(int $width, int $height): string
+    {
+        $data = "\x00\x00\x00\x00"
+            . $this->uint24le($width - 1)
+            . $this->uint24le($height - 1);
+        $chunk = 'VP8X' . pack('V', strlen($data)) . $data;
+
+        return 'RIFF' . pack('V', 4 + strlen($chunk)) . 'WEBP' . $chunk;
+    }
+
+    private function uint24le(int $value): string
+    {
+        return chr($value & 0xff)
+            . chr(($value >> 8) & 0xff)
+            . chr(($value >> 16) & 0xff);
     }
 }
