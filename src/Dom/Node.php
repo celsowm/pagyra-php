@@ -52,7 +52,22 @@ final readonly class Node implements \JsonSerializable
 
     public function attribute(string $name): ?string
     {
-        return $this->attributes[strtolower($name)] ?? null;
+        $name = strtolower($name);
+        $value = $this->attributes[$name] ?? null;
+        if ($value !== null) {
+            return $value;
+        }
+
+        if ($this->isImage()) {
+            if ($name === 'width' && $this->intrinsicWidth !== null) {
+                return $this->formatIntrinsicDimension($this->intrinsicWidth);
+            }
+            if ($name === 'height' && $this->intrinsicHeight !== null) {
+                return $this->formatIntrinsicDimension($this->intrinsicHeight);
+            }
+        }
+
+        return null;
     }
 
     public function id(): ?string
@@ -129,5 +144,10 @@ final readonly class Node implements \JsonSerializable
         }
 
         return $data;
+    }
+
+    private function formatIntrinsicDimension(float $value): string
+    {
+        return floor($value) === $value ? (string) (int) $value : rtrim(rtrim(sprintf('%.6F', $value), '0'), '.');
     }
 }
