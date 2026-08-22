@@ -26,14 +26,15 @@ final class PaginationEngine
                 $start += $beforeOffset;
             }
 
-            $originalStart = $node->box->marginBox()->y;
             $originalEnd = max($node->box->marginBox()->bottom(), $this->subtreeBottom($node));
             $end = $originalEnd + $offset;
             $pageIndex = $flow->pageIndexAt($start);
+            $endPageIndex = $flow->pageIndexAt(max($start, $end - self::EPSILON));
 
             $placements[] = new PagePlacement(
                 node: $node,
                 pageIndex: $pageIndex,
+                endPageIndex: $endPageIndex,
                 offsetY: $offset,
                 startY: $start,
                 endY: $end,
