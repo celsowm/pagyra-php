@@ -117,6 +117,23 @@ final class PageStyleResolverTest extends TestCase
         self::assertSame(1123.0, $resolved['height']);
     }
 
+    public function testMarginsAreScaledWhenTheyExceedPageDimensions(): void
+    {
+        $resolved = (new PageStyleResolver())->resolve(
+            '@page { size:100px 80px; margin:60px 80px 60px 40px; }',
+            794.0,
+            1123.0,
+            $this->fallbackMargins(),
+        );
+
+        self::assertEqualsWithDelta(100.0, $resolved['margins']['left'] + $resolved['margins']['right'], 0.0001);
+        self::assertEqualsWithDelta(80.0, $resolved['margins']['top'] + $resolved['margins']['bottom'], 0.0001);
+        self::assertEqualsWithDelta(100.0 / 3.0, $resolved['margins']['left'], 0.0001);
+        self::assertEqualsWithDelta(200.0 / 3.0, $resolved['margins']['right'], 0.0001);
+        self::assertSame(40.0, $resolved['margins']['top']);
+        self::assertSame(40.0, $resolved['margins']['bottom']);
+    }
+
     /** @return array{top:float,right:float,bottom:float,left:float} */
     private function fallbackMargins(): array
     {
