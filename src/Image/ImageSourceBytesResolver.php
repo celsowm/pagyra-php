@@ -6,6 +6,13 @@ namespace Pagyra\Image;
 
 final class ImageSourceBytesResolver
 {
+    private readonly ?string $resourceBaseDir;
+
+    public function __construct(?string $resourceBaseDir = null)
+    {
+        $this->resourceBaseDir = $this->normalizeBaseDir($resourceBaseDir);
+    }
+
     public function resolve(?string $source): ?string
     {
         if ($source === null || trim($source) === '') {
@@ -44,22 +51,59 @@ final class ImageSourceBytesResolver
 
     private function localFileBytes(string $source): ?string
     {
-        $path = $source;
-        if (str_starts_with(strtolower($source), 'file://')) {
-            $path = rawurldecode(substr($source, 7));
-            if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $path) === 1) {
-                $path = substr($path, 1);
-            }
-        } elseif (!$this->isAbsolutePath($source)) {
-            return null;
-        }
-
-        if ($path === '' || !is_file($path) || !is_readable($path)) {
+        $path = $this->resolveLocalPath($source);
+        if ($path === null || $path === '' || !is_file($path) || !is_readable($path)) {
             return null;
         }
 
         $bytes = @file_get_contents($path);
         return is_string($bytes) ? $bytes : null;
+    }
+
+    private function resolveLocalPath(string $source): ?string
+    {
+        if (str_starts_with(strtolower($source), 'file://')) {
+            return $this->normalizeFileUrlPath($source);
+        }
+
+        if ($this->isAbsolutePath($source)) {
+            return rawurldecode($source);
+        }
+
+        if ($this->resourceBaseDir === null || $this->hasUriScheme($source)) {
+            return null;
+        }
+
+        $relative = ltrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, rawurldecode($source)), DIRECTORY_SEPARATOR);
+        return rtrim($this->resourceBaseDir, '/\\') . DIRECTORY_SEPARATOR . $relative;
+    }
+
+    private function normalizeBaseDir(?string $baseDir): ?string
+    {
+        if ($baseDir === null || trim($baseDir) === '') {
+            return null;
+        }
+
+        $baseDir = trim($baseDir);
+        if (str_starts_with(strtolower($baseDir), 'file://')) {
+            return $this->normalizeFileUrlPath($baseDir);
+        }
+
+        return $this->isAbsolutePath($baseDir) ? rawurldecode($baseDir) : null;
+    }
+
+    private function normalizeFileUrlPath(string $source): string
+    {
+        $path = rawurldecode(substr($source, 7));
+        if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $path) === 1) {
+            return substr($path, 1);
+        }
+        return $path;
+    }
+
+    private function hasUriScheme(string $source): bool
+    {
+        return preg_match('/^[a-zA-Z][a-zA-Z0-9+.-]*:/', $source) === 1;
     }
 
     private function isAbsolutePath(string $path): bool
