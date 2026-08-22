@@ -7,6 +7,7 @@ namespace Pagyra;
 use Pagyra\Core\PreparedRender;
 use Pagyra\Core\RenderHtmlOptions;
 use Pagyra\Css\FontFaceRuleParser;
+use Pagyra\Css\PageStyleResolver;
 use Pagyra\Css\StylesheetParser;
 use Pagyra\Css\StylesheetSourceLoader;
 use Pagyra\Fonts\FontRegistry;
@@ -41,6 +42,13 @@ final class Pagyra
             }
         }
 
+        $pageStyle = (new PageStyleResolver())->resolve(
+            $cssText,
+            $options->pageWidth,
+            $options->pageHeight,
+            $options->margins,
+        );
+
         $rules = (new StylesheetParser())->parse(
             $cssText,
             mediaType: 'print',
@@ -66,10 +74,10 @@ final class Pagyra
             cssText: $cssText,
             stylesheetHrefs: $document->stylesheetHrefs,
             pageSize: [
-                'widthPt' => Units::pxToPt($options->pageWidth),
-                'heightPt' => Units::pxToPt($options->pageHeight),
+                'widthPt' => Units::pxToPt($pageStyle['width']),
+                'heightPt' => Units::pxToPt($pageStyle['height']),
             ],
-            margins: $options->margins,
+            margins: $pageStyle['margins'],
         );
     }
 
