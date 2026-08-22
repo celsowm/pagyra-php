@@ -6,7 +6,9 @@ namespace Pagyra;
 
 use Pagyra\Core\PreparedRender;
 use Pagyra\Core\RenderHtmlOptions;
+use Pagyra\Css\StylesheetParser;
 use Pagyra\Html\HtmlParser;
+use Pagyra\Style\StyleComputer;
 use Pagyra\Units\Units;
 
 final class Pagyra
@@ -18,10 +20,17 @@ final class Pagyra
     public static function prepareHtmlRender(array|RenderHtmlOptions $options): PreparedRender
     {
         $options = is_array($options) ? RenderHtmlOptions::fromArray($options) : $options;
-        $domRoot = (new HtmlParser())->parse($options->html);
+
+        $document = (new HtmlParser())->parseDocument($options->html);
+        $cssText = $document->mergedEmbeddedCss($options->css);
+        $rules = (new StylesheetParser())->parse($cssText);
+        $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
 
         return new PreparedRender(
-            domRoot: $domRoot,
+            domRoot: $document->root,
+            styledRoot: $styledRoot,
+            cssText: $cssText,
+            stylesheetHrefs: $document->stylesheetHrefs,
             pageSize: [
                 'widthPt' => Units::pxToPt($options->pageWidth),
                 'heightPt' => Units::pxToPt($options->pageHeight),
@@ -33,7 +42,7 @@ final class Pagyra
     public static function renderHtmlToPdf(array|RenderHtmlOptions $options): string
     {
         throw new \LogicException(
-            'PDF serialization is intentionally not implemented in the bootstrap slice. Use prepareHtmlRender() until the layout and paint pipeline exists.'
+            'PDF serialization is intentionally not implemented yet. The active pipeline currently stops after DOM and computed-style preparation.'
         );
     }
 }
