@@ -5,10 +5,18 @@ declare(strict_types=1);
 namespace Pagyra\Html;
 
 use Pagyra\Dom\Node;
+use Pagyra\Image\ImageSourceMetadataResolver;
 
 final class HtmlParser
 {
     private const SKIPPED_CONTENT_TAGS = ['head', 'meta', 'title', 'link', 'script'];
+
+    private readonly ImageSourceMetadataResolver $imageMetadataResolver;
+
+    public function __construct(?ImageSourceMetadataResolver $imageMetadataResolver = null)
+    {
+        $this->imageMetadataResolver = $imageMetadataResolver ?? new ImageSourceMetadataResolver();
+    }
 
     public function parse(string $html): Node
     {
@@ -97,6 +105,16 @@ final class HtmlParser
             }
         }
 
-        return Node::element($tagName, $attributes, $children);
+        $metadata = $tagName === 'img'
+            ? $this->imageMetadataResolver->resolve($attributes['src'] ?? null)
+            : null;
+
+        return Node::element(
+            $tagName,
+            $attributes,
+            $children,
+            $metadata?->width !== null ? (float) $metadata->width : null,
+            $metadata?->height !== null ? (float) $metadata->height : null,
+        );
     }
 }
