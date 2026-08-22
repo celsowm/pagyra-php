@@ -10,6 +10,8 @@ use Pagyra\Css\StylesheetParser;
 use Pagyra\Fonts\FontRegistry;
 use Pagyra\Fonts\GlyphTextMetrics;
 use Pagyra\Html\HtmlParser;
+use Pagyra\Image\ImageSourceBytesResolver;
+use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Style\StyleComputer;
 use Pagyra\Units\Units;
@@ -24,7 +26,9 @@ final class Pagyra
     {
         $options = is_array($options) ? RenderHtmlOptions::fromArray($options) : $options;
 
-        $document = (new HtmlParser())->parseDocument($options->html);
+        $sourceBytes = new ImageSourceBytesResolver($options->resourceBaseDir);
+        $imageSizes = new ImageSourceIntrinsicSizeResolver($sourceBytes);
+        $document = (new HtmlParser($imageSizes))->parseDocument($options->html);
         $cssText = $document->mergedEmbeddedCss($options->css);
         $rules = (new StylesheetParser())->parse($cssText);
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
