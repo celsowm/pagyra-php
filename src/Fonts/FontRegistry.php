@@ -22,6 +22,11 @@ final class FontRegistry
         $this->register($family, (new TtfParser())->parseFile($path), $weight, $style);
     }
 
+    public function registerData(string $family, string $binary, int $weight = 400, string $style = 'normal'): void
+    {
+        $this->register($family, (new TtfParser())->parse($binary), $weight, $style);
+    }
+
     public function resolve(?string $fontFamily, int $weight = 400, string $style = 'normal'): ?TtfFontMetrics
     {
         foreach ($this->families($fontFamily) as $family) {
