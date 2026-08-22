@@ -65,6 +65,32 @@ final class ReplacedElementSizingResolverTest extends TestCase
         self::assertSame(40.0, $size->height);
     }
 
+    public function testAutoShrinkRunsBeforeMinimumWidthConstraint(): void
+    {
+        $size = (new ReplacedElementSizingResolver())->resolve(
+            intrinsicWidth: 200.0,
+            intrinsicHeight: 100.0,
+            minWidth: 80.0,
+            availableContentWidth: 70.0,
+        );
+
+        self::assertSame(80.0, $size->width);
+        self::assertSame(40.0, $size->height);
+    }
+
+    public function testExplicitWidthDoesNotAutoShrinkToAvailableContentWidth(): void
+    {
+        $size = (new ReplacedElementSizingResolver())->resolve(
+            intrinsicWidth: 200.0,
+            intrinsicHeight: 100.0,
+            specifiedWidth: 120.0,
+            availableContentWidth: 70.0,
+        );
+
+        self::assertSame(120.0, $size->width);
+        self::assertSame(60.0, $size->height);
+    }
+
     public function testExplicitBothDimensionsDoNotForceIntrinsicRatio(): void
     {
         $size = (new ReplacedElementSizingResolver())->resolve(
