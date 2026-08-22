@@ -52,12 +52,10 @@ final class InlineTextFormatter
                 $current = [];
                 $currentWidth = 0.0;
                 $pendingSpace = null;
-            } else {
-                if ($pendingSpace !== null && $current !== []) {
-                    $current[] = $pendingSpace;
-                    $currentWidth += $pendingSpace['width'];
-                    $pendingSpace = null;
-                }
+            } elseif ($pendingSpace !== null && $current !== []) {
+                $current[] = $pendingSpace;
+                $currentWidth += $pendingSpace['width'];
+                $pendingSpace = null;
             }
 
             $current[] = $token;
@@ -174,12 +172,13 @@ final class InlineTextFormatter
     /** @param list<TextRun> $runs */
     private function appendRun(array &$runs, TextRun $run): void
     {
-        $last = $runs[array_key_last($runs)] ?? null;
+        $lastKey = array_key_last($runs);
+        $last = $lastKey !== null ? $runs[$lastKey] : null;
         if ($last instanceof TextRun
             && $last->style === $run->style
             && abs($last->fontSize - $run->fontSize) < 1e-9
             && abs(($last->x + $last->width) - $run->x) < 1e-9) {
-            $runs[array_key_last($runs)] = new TextRun(
+            $runs[$lastKey] = new TextRun(
                 x: $last->x,
                 y: min($last->y, $run->y),
                 width: $last->width + $run->width,
@@ -224,10 +223,24 @@ final class InlineTextFormatter
     private function applyTextTransform(string $text, ComputedStyle $style): string
     {
         return match (strtolower($style->get('text-transform', 'none') ?? 'none')) {
-            'uppercase' => mb_strtoupper($text, 'UTF-8'),
-            'lowercase' => mb_strtolower($text, 'UTF-8'),
-            'capitalize' => preg_replace_callback('/(^|\s)(\p{L})/u', static fn(array $m): string => $m[1] . mb_strtoupper($m[2], 'UTF-8'), $text) ?? $text,
+            'uppercase' => $this->upper($text),
+            'lowercase' => $this->lower($text),
+            'capitalize' => preg_replace_callback(
+                '/(^|\s)(\p{L})/u',
+                fn(array $m): string => $m[1] . $this->upper($m[2]),
+                $text,
+            ) ?? $text,
             default => $text,
         };
+    }
+
+    private function upper(string $value): string
+    {
+        return function_exists('mb_strtoupper') ? mb_strtoupper($value, 'UTF-8') : strtoupper($value);
+    }
+
+    private function lower(string $value): string
+    {
+        return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
     }
 }
