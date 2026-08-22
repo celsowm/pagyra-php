@@ -48,6 +48,34 @@ final class InlineBlockIntrinsicSizingTest extends TestCase
         self::assertSame(40.0, $box->contentHeight);
     }
 
+    public function testImageBorderBoxWidthSubtractsPaddingAndBorderBeforeAspectRatio(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<p style="margin:0"><img width="200" height="100" style="width:100px;padding:0 8px;border-width:2px;box-sizing:border-box"></p>',
+            'viewportWidth' => 400,
+            'viewportHeight' => 300,
+        ]);
+
+        $box = $prepared->layoutRoot->children[0]->lineBoxes[0]->atomicBoxes[0];
+        self::assertSame(80.0, $box->contentWidth);
+        self::assertSame(40.0, $box->contentHeight);
+        self::assertSame(100.0, $box->width);
+    }
+
+    public function testImageBorderBoxMaxWidthPreservesAutomaticHeightRatio(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<p style="margin:0"><img width="200" height="100" style="padding:0 5px;border-width:1px;box-sizing:border-box;max-width:92px"></p>',
+            'viewportWidth' => 400,
+            'viewportHeight' => 300,
+        ]);
+
+        $box = $prepared->layoutRoot->children[0]->lineBoxes[0]->atomicBoxes[0];
+        self::assertSame(80.0, $box->contentWidth);
+        self::assertSame(40.0, $box->contentHeight);
+        self::assertSame(92.0, $box->width);
+    }
+
     public function testInlineBlockAutoWidthUsesInternalContent(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
