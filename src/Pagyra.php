@@ -89,6 +89,7 @@ final class Pagyra
             margins: $pageStyle['margins'],
             pagination: $pagination,
             displayList: $displayList,
+            fontRegistry: $registry,
         );
     }
 
@@ -280,6 +281,6 @@ final class Pagyra
         if ($prepared->displayList === null) {
             throw new \LogicException('Display list generation failed before PDF serialization.');
         }
-        return (new PdfSerializer())->serialize($prepared->displayList);
+        return (new PdfSerializer())->serialize($prepared->displayList, $prepared->fontRegistry);
     }
 }
