@@ -47,11 +47,17 @@ final class StyleComputer
                 if (!$this->selectorMatcher->matches($node, $rule->selector)) {
                     continue;
                 }
+
                 foreach ($rule->declarations as $property => $value) {
                     $current = $winners[$property] ?? null;
-                    $weight = [$rule->specificity, $rule->sourceOrder];
-                    if ($current === null || $weight >= $current['weight']) {
-                        $winners[$property] = ['weight' => $weight, 'value' => $value];
+                    if ($current === null
+                        || $rule->specificity > $current['specificity']
+                        || ($rule->specificity === $current['specificity'] && $rule->sourceOrder >= $current['sourceOrder'])) {
+                        $winners[$property] = [
+                            'specificity' => $rule->specificity,
+                            'sourceOrder' => $rule->sourceOrder,
+                            'value' => $value,
+                        ];
                     }
                 }
             }
