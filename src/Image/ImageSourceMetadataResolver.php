@@ -31,7 +31,7 @@ final class ImageSourceMetadataResolver
 
     private function dataUrlBytes(string $source): ?string
     {
-        if (preg_match('/^data:image\/(png|jpeg|jpg);base64,(.+)$/is', $source, $matches) !== 1) {
+        if (preg_match('/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/is', $source, $matches) !== 1) {
             return null;
         }
 
