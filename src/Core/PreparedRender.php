@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pagyra\Core;
 
 use Pagyra\Dom\Node;
+use Pagyra\Fonts\FontRegistry;
 use Pagyra\Layout\LayoutNode;
 use Pagyra\Pagination\PaginationResult;
 use Pagyra\Paint\DisplayList;
@@ -27,6 +28,7 @@ final readonly class PreparedRender implements \JsonSerializable
         public array $margins,
         public ?PaginationResult $pagination = null,
         public ?DisplayList $displayList = null,
+        public ?FontRegistry $fontRegistry = null,
     ) {
     }
 
