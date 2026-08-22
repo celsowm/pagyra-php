@@ -19,7 +19,9 @@ final class InlineTextFormatter
     public function layout(StyledNode $block, float $x, float $y, float $availableWidth, float $fontSize): InlineTextLayout
     {
         $tokens = $this->collectTokens($block, $fontSize, $availableWidth);
-        if ($tokens === []) return new InlineTextLayout([], 0.0);
+        if ($tokens === []) {
+            return new InlineTextLayout([], 0.0);
+        }
 
         $whiteSpace = strtolower($block->style->get('white-space', 'normal') ?? 'normal');
         $overflowWrap = strtolower($block->style->get('overflow-wrap', 'normal') ?? 'normal');
@@ -29,6 +31,7 @@ final class InlineTextFormatter
         $lines = [];
         $current = [];
         $currentWidth = 0.0;
+
         foreach ($tokens as $token) {
             if ($token['kind'] === 'newline') {
                 $lines[] = $current;
@@ -36,12 +39,16 @@ final class InlineTextFormatter
                 $currentWidth = 0.0;
                 continue;
             }
+
             if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
-                if ($current === [] || ($current[array_key_last($current)]['kind'] ?? null) === 'space') continue;
+                if ($current === [] || ($current[array_key_last($current)]['kind'] ?? null) === 'space') {
+                    continue;
+                }
                 $token['text'] = ' ';
                 $token['width'] = $this->metrics->measure(' ', $token['style'], $token['fontSize'])->inlineSize;
             }
-            if ($allowSoftWrap && $availableWidth > 0 && $current !== [] && $currentWidth + $token['width'] > $availableWidth) {
+
+            if ($allowSoftWrap && $availableWidth > 0.0 && $current !== [] && $currentWidth + $token['width'] > $availableWidth) {
                 if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
                     $lines[] = $current;
                     $current = [];
@@ -52,7 +59,8 @@ final class InlineTextFormatter
                 $current = [];
                 $currentWidth = 0.0;
             }
-            if ($allowSoftWrap && $availableWidth > 0 && $token['kind'] === 'word' && $token['width'] > $availableWidth && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
+
+            if ($allowSoftWrap && $availableWidth > 0.0 && $token['kind'] === 'word' && $token['width'] > $availableWidth && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
                 foreach ($this->splitWordToken($token, $availableWidth) as $index => $chunk) {
                     if ($index > 0) {
                         $lines[] = $current;
@@ -64,17 +72,23 @@ final class InlineTextFormatter
                 }
                 continue;
             }
+
             $current[] = $token;
             $currentWidth += $token['width'];
         }
-        if ($current !== [] || $lines === []) $lines[] = $current;
+
+        if ($current !== [] || $lines === []) {
+            $lines[] = $current;
+        }
 
         $lineBoxes = [];
         $cursorY = $y;
         foreach ($lines as $lineIndex => $lineTokens) {
             $lineWidth = array_sum(array_column($lineTokens, 'width'));
             $nominalHeight = $this->metrics->lineHeight($block->style, $fontSize);
-            foreach ($lineTokens as $token) $nominalHeight = max($nominalHeight, $token['lineHeight']);
+            foreach ($lineTokens as $token) {
+                $nominalHeight = max($nominalHeight, $token['lineHeight']);
+            }
 
             $isLastLine = $lineIndex === count($lines) - 1;
             $alignment = strtolower($block->style->get('text-align', 'left') ?? 'left');
@@ -83,11 +97,11 @@ final class InlineTextFormatter
             $extraPerSpace = $spaceCount > 0 ? ($availableWidth - $lineWidth) / $spaceCount : 0.0;
             $offset = $justify ? 0.0 : $this->alignmentOffset($alignment, $lineWidth, $availableWidth);
 
-            // pagyra-js fallback baseline: ascent ~= 0.75 * font-size plus half-leading.
             $lineBaseline = $this->ownBaseline($fontSize, $nominalHeight);
             $placements = [];
             $minTop = 0.0;
             $maxBottom = $nominalHeight;
+
             foreach ($lineTokens as $token) {
                 if ($token['kind'] === 'box') {
                     $top = $this->boxTopOffset($token, $nominalHeight, $fontSize);
@@ -96,6 +110,7 @@ final class InlineTextFormatter
                     $maxBottom = max($maxBottom, $top + $token['lineHeight']);
                     continue;
                 }
+
                 $itemBaseline = $this->textBaseline($token, $lineBaseline, $nominalHeight);
                 $top = $itemBaseline - $this->ownBaseline($token['fontSize'], $token['lineHeight']);
                 $placements[] = ['token' => $token, 'top' => $top, 'baseline' => $itemBaseline];
@@ -109,11 +124,16 @@ final class InlineTextFormatter
             $runs = [];
             $boxes = [];
             $usedWidth = 0.0;
+
             foreach ($placements as $placement) {
                 $token = $placement['token'];
                 $width = $token['width'] + (($justify && $token['kind'] === 'space') ? $extraPerSpace : 0.0);
                 $itemY = $cursorY + ($placement['top'] - $minTop);
+
                 if ($token['kind'] === 'box') {
+                    $contentX = $runX + $token['margin']['left'] + $token['border']['left'] + $token['padding']['left'];
+                    $contentY = $itemY + $token['margin']['top'] + $token['border']['top'] + $token['padding']['top'];
+                    $contentLines = $this->translateLines($token['contentLines'], $contentX, $contentY);
                     $boxes[] = new AtomicInlineBox(
                         source: $token['source'],
                         x: $runX,
@@ -126,18 +146,31 @@ final class InlineTextFormatter
                         margin: $token['margin'],
                         padding: $token['padding'],
                         border: $token['border'],
+                        contentLines: $contentLines,
                     );
                 } else {
                     $runBaseline = $cursorY + (($placement['baseline'] ?? $lineBaseline) - $minTop);
-                    $this->appendRun($runs, new TextRun($runX, $itemY, $width, $token['lineHeight'], $runBaseline, $token['text'], $token['fontSize'], $token['style']));
+                    $this->appendRun($runs, new TextRun(
+                        $runX,
+                        $itemY,
+                        $width,
+                        $token['lineHeight'],
+                        $runBaseline,
+                        $token['text'],
+                        $token['fontSize'],
+                        $token['style'],
+                    ));
                 }
+
                 $runX += $width;
                 $usedWidth += $width;
             }
+
             $text = implode('', array_map(static fn(TextRun $run): string => $run->text, $runs));
             $lineBoxes[] = new LineBox($x + $offset, $cursorY, $usedWidth, $lineHeight, $baseline, $text, $runs, $boxes);
             $cursorY += $lineHeight;
         }
+
         return new InlineTextLayout($lineBoxes, $cursorY - $y);
     }
 
@@ -150,8 +183,12 @@ final class InlineTextFormatter
                 array_push($tokens, ...$this->tokenizeText($text, $node->style, $nodeFontSize));
                 continue;
             }
+
             $display = strtolower($child->style->get('display', 'inline') ?? 'inline');
-            if ($display === 'none' || in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true)) continue;
+            if ($display === 'none' || in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true)) {
+                continue;
+            }
+
             $fontSize = $this->resolveFontSize($child->style, $nodeFontSize);
             if ($child->node->isImage() || in_array($display, ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'], true)) {
                 $metrics = $this->atomicBoxMetrics($child, $referenceWidth, $fontSize);
@@ -168,9 +205,11 @@ final class InlineTextFormatter
                     'margin' => $metrics['margin'],
                     'padding' => $metrics['padding'],
                     'border' => $metrics['border'],
+                    'contentLines' => $metrics['contentLines'],
                 ];
                 continue;
             }
+
             array_push($tokens, ...$this->collectTokens($child, $fontSize, $referenceWidth));
         }
         return $tokens;
@@ -178,10 +217,14 @@ final class InlineTextFormatter
 
     private function tokenizeText(string $text, ComputedStyle $style, float $fontSize): array
     {
-        if ($text === '') return [];
+        if ($text === '') {
+            return [];
+        }
+
         $whiteSpace = strtolower($style->get('white-space', 'normal') ?? 'normal');
         $parts = preg_split('/(\r\n|\r|\n|[\t\f ]+)/u', $text, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
         $tokens = [];
+
         foreach ($parts as $part) {
             if (preg_match('/^(\r\n|\r|\n)$/u', $part) === 1) {
                 $preserve = in_array($whiteSpace, ['pre', 'pre-wrap', 'pre-line'], true);
@@ -192,6 +235,7 @@ final class InlineTextFormatter
                 $tokens[] = $this->textToken('word', $part, $style, $fontSize);
             }
         }
+
         return $tokens;
     }
 
@@ -213,6 +257,7 @@ final class InlineTextFormatter
         $value = strtolower(trim($token['style']->get('vertical-align', 'baseline') ?? 'baseline'));
         $fontSize = $token['fontSize'];
         $ownHeight = $token['lineHeight'];
+
         return match ($value) {
             'sub' => $lineBaseline + $fontSize * 0.2,
             'super' => $lineBaseline - $fontSize * 0.4,
@@ -227,6 +272,7 @@ final class InlineTextFormatter
     {
         $value = strtolower(trim($token['style']->get('vertical-align', 'baseline') ?? 'baseline'));
         $height = $token['lineHeight'];
+
         return match ($value) {
             'bottom', 'text-bottom' => max($lineHeight - $height, 0.0),
             'middle' => ($lineHeight - $height) / 2.0,
@@ -252,89 +298,216 @@ final class InlineTextFormatter
         return 0.0;
     }
 
-    /** @return array{contentWidth:float,contentHeight:float,outerWidth:float,outerHeight:float,margin:array{top:float,right:float,bottom:float,left:float},padding:array{top:float,right:float,bottom:float,left:float},border:array{top:float,right:float,bottom:float,left:float}} */
     private function atomicBoxMetrics(StyledNode $node, float $referenceWidth, float $fontSize): array
     {
-        $fallbackHeight = $this->metrics->lineHeight($node->style, $fontSize);
-        $fallbackWidth = $node->node->isImage() ? 0.0 : $fallbackHeight;
-        $contentWidth = $this->atomicDimension($node, 'width', $fallbackWidth, $fontSize, $referenceWidth);
-        $contentHeight = $this->atomicDimension($node, 'height', $fallbackHeight, $fontSize, $referenceWidth);
         $margin = $this->edgeMetrics($node, 'margin', $referenceWidth, $fontSize);
         $padding = $this->edgeMetrics($node, 'padding', $referenceWidth, $fontSize);
         $border = $this->borderMetrics($node, $referenceWidth, $fontSize);
 
+        if ($node->node->isImage()) {
+            [$contentWidth, $contentHeight] = $this->imageContentSize($node, $referenceWidth, $fontSize);
+            $contentLines = [];
+        } else {
+            [$contentWidth, $contentHeight, $contentLines] = $this->inlineBlockContentSize($node, $referenceWidth, $fontSize);
+        }
+
+        $horizontalExtras = $margin['left'] + $margin['right'] + $padding['left'] + $padding['right'] + $border['left'] + $border['right'];
+        $verticalExtras = $margin['top'] + $margin['bottom'] + $padding['top'] + $padding['bottom'] + $border['top'] + $border['bottom'];
+
         return [
             'contentWidth' => $contentWidth,
             'contentHeight' => $contentHeight,
-            'outerWidth' => $contentWidth + $margin['left'] + $margin['right'] + $padding['left'] + $padding['right'] + $border['left'] + $border['right'],
-            'outerHeight' => $contentHeight + $margin['top'] + $margin['bottom'] + $padding['top'] + $padding['bottom'] + $border['top'] + $border['bottom'],
+            'outerWidth' => $contentWidth + $horizontalExtras,
+            'outerHeight' => $contentHeight + $verticalExtras,
             'margin' => $margin,
             'padding' => $padding,
             'border' => $border,
+            'contentLines' => $contentLines,
         ];
     }
 
-    /** @return array{top:float,right:float,bottom:float,left:float} */
+    private function imageContentSize(StyledNode $node, float $referenceWidth, float $fontSize): array
+    {
+        $intrinsicWidth = $this->numericAttribute($node, 'width');
+        $intrinsicHeight = $this->numericAttribute($node, 'height');
+        $hasIntrinsic = $intrinsicWidth > 0.0 && $intrinsicHeight > 0.0;
+
+        $rawWidth = trim($node->style->get('width', 'auto') ?? 'auto');
+        $rawHeight = trim($node->style->get('height', 'auto') ?? 'auto');
+        $hasWidth = strtolower($rawWidth) !== 'auto';
+        $hasHeight = strtolower($rawHeight) !== 'auto';
+
+        $width = $hasWidth ? $this->resolveSimpleLength($rawWidth, $referenceWidth, $fontSize, $intrinsicWidth) : $intrinsicWidth;
+        $height = $hasHeight ? $this->resolveSimpleLength($rawHeight, $referenceWidth, $fontSize, $intrinsicHeight) : $intrinsicHeight;
+
+        if ($hasIntrinsic && $hasWidth && !$hasHeight) {
+            $height = max(1.0, round($intrinsicHeight * ($width / $intrinsicWidth)));
+        } elseif ($hasIntrinsic && !$hasWidth && $hasHeight) {
+            $width = max(1.0, round($intrinsicWidth * ($height / $intrinsicHeight)));
+        } elseif (!$hasIntrinsic) {
+            if ($width <= 0.0 && $height > 0.0) $width = $height;
+            if ($height <= 0.0 && $width > 0.0) $height = $width;
+        }
+
+        if (!$hasWidth && $referenceWidth > 0.0 && $width > $referenceWidth && $width > 0.0) {
+            $scale = $referenceWidth / $width;
+            $width = $referenceWidth;
+            $height = max(1.0, round($height * $scale));
+        }
+
+        [$width, $height] = $this->applyImageConstraints($node, $width, $height, $hasWidth, $hasHeight, $referenceWidth, $fontSize, $hasIntrinsic);
+
+        if ($width <= 0.0 && $height <= 0.0) {
+            $width = $height = $this->metrics->lineHeight($node->style, $fontSize);
+        }
+
+        return [max(0.0, $width), max(0.0, $height)];
+    }
+
+    private function applyImageConstraints(StyledNode $node, float $width, float $height, bool $hasWidth, bool $hasHeight, float $referenceWidth, float $fontSize, bool $hasIntrinsic): array
+    {
+        foreach ([['max-width', false], ['min-width', true]] as [$property, $isMin]) {
+            $raw = $node->style->get($property);
+            if ($raw === null || strtolower(trim($raw)) === 'auto') continue;
+            $limit = $this->resolveSimpleLength($raw, $referenceWidth, $fontSize, $width);
+            $violates = $isMin ? $width < $limit : $width > $limit;
+            if ($limit > 0.0 && $violates) {
+                if ($hasIntrinsic && !$hasHeight && $width > 0.0) $height = max(1.0, round($height * ($limit / $width)));
+                $width = $limit;
+            }
+        }
+        foreach ([['max-height', false], ['min-height', true]] as [$property, $isMin]) {
+            $raw = $node->style->get($property);
+            if ($raw === null || strtolower(trim($raw)) === 'auto') continue;
+            $limit = $this->resolveSimpleLength($raw, $referenceWidth, $fontSize, $height);
+            $violates = $isMin ? $height < $limit : $height > $limit;
+            if ($limit > 0.0 && $violates) {
+                if ($hasIntrinsic && !$hasWidth && $height > 0.0) $width = max(1.0, round($width * ($limit / $height)));
+                $height = $limit;
+            }
+        }
+        return [$width, $height];
+    }
+
+    private function inlineBlockContentSize(StyledNode $node, float $referenceWidth, float $fontSize): array
+    {
+        $rawWidth = trim($node->style->get('width', 'auto') ?? 'auto');
+        $rawHeight = trim($node->style->get('height', 'auto') ?? 'auto');
+        $hasWidth = strtolower($rawWidth) !== 'auto';
+        $hasHeight = strtolower($rawHeight) !== 'auto';
+
+        if ($hasWidth) {
+            $contentWidth = $this->resolveSimpleLength($rawWidth, $referenceWidth, $fontSize, $referenceWidth);
+        } else {
+            $contentWidth = min($referenceWidth > 0.0 ? $referenceWidth : INF, $this->maxContentWidth($node, $fontSize, $referenceWidth));
+            if (!is_finite($contentWidth) || $contentWidth <= 0.0) {
+                $contentWidth = $this->metrics->lineHeight($node->style, $fontSize);
+            }
+        }
+
+        $inner = $this->layout($node, 0.0, 0.0, max(0.0, $contentWidth), $fontSize);
+        $contentHeight = $hasHeight
+            ? $this->resolveSimpleLength($rawHeight, $referenceWidth, $fontSize, $inner->height)
+            : max($inner->height, $this->metrics->lineHeight($node->style, $fontSize));
+
+        $contentWidth = $this->clampDimension($node, 'width', $contentWidth, $referenceWidth, $fontSize);
+        $contentHeight = $this->clampDimension($node, 'height', $contentHeight, $referenceWidth, $fontSize);
+
+        if (!$hasWidth) {
+            $inner = $this->layout($node, 0.0, 0.0, max(0.0, $contentWidth), $fontSize);
+            if (!$hasHeight) $contentHeight = max($inner->height, $this->metrics->lineHeight($node->style, $fontSize));
+        }
+
+        return [$contentWidth, $contentHeight, $inner->lines];
+    }
+
+    private function maxContentWidth(StyledNode $node, float $fontSize, float $referenceWidth): float
+    {
+        $tokens = $this->collectTokens($node, $fontSize, $referenceWidth);
+        $line = 0.0;
+        $max = 0.0;
+        foreach ($tokens as $token) {
+            if ($token['kind'] === 'newline') {
+                $max = max($max, $line);
+                $line = 0.0;
+                continue;
+            }
+            $line += $token['width'];
+        }
+        return max($max, $line);
+    }
+
+    private function clampDimension(StyledNode $node, string $axis, float $value, float $referenceWidth, float $fontSize): float
+    {
+        $min = $node->style->get('min-' . $axis);
+        $max = $node->style->get('max-' . $axis);
+        if ($min !== null && strtolower(trim($min)) !== 'auto') {
+            $value = max($value, $this->resolveSimpleLength($min, $referenceWidth, $fontSize, $value));
+        }
+        if ($max !== null && strtolower(trim($max)) !== 'auto') {
+            $limit = $this->resolveSimpleLength($max, $referenceWidth, $fontSize, $value);
+            if ($limit > 0.0) $value = min($value, $limit);
+        }
+        return max(0.0, $value);
+    }
+
     private function edgeMetrics(StyledNode $node, string $property, float $referenceWidth, float $fontSize): array
     {
-        $parts = $this->expandFour($node->style->get($property));
+        $parts = $this->expandFour($node->style->get($property, '0') ?? '0');
         foreach (['top' => 0, 'right' => 1, 'bottom' => 2, 'left' => 3] as $side => $index) {
-            $parts[$index] = $node->style->get($property . '-' . $side, $parts[$index]);
+            $specific = $node->style->get($property . '-' . $side);
+            if ($specific !== null) $parts[$index] = $specific;
         }
         return [
-            'top' => $this->resolveAtomicLength($parts[0], $referenceWidth, $fontSize),
-            'right' => $this->resolveAtomicLength($parts[1], $referenceWidth, $fontSize),
-            'bottom' => $this->resolveAtomicLength($parts[2], $referenceWidth, $fontSize),
-            'left' => $this->resolveAtomicLength($parts[3], $referenceWidth, $fontSize),
+            'top' => $this->resolveSimpleLength($parts[0], $referenceWidth, $fontSize, 0.0),
+            'right' => $this->resolveSimpleLength($parts[1], $referenceWidth, $fontSize, 0.0),
+            'bottom' => $this->resolveSimpleLength($parts[2], $referenceWidth, $fontSize, 0.0),
+            'left' => $this->resolveSimpleLength($parts[3], $referenceWidth, $fontSize, 0.0),
         ];
     }
 
-    /** @return array{top:float,right:float,bottom:float,left:float} */
     private function borderMetrics(StyledNode $node, float $referenceWidth, float $fontSize): array
     {
-        $parts = $this->expandFour($node->style->get('border-width'));
+        $parts = $this->expandFour($node->style->get('border-width', '0') ?? '0');
         foreach (['top' => 0, 'right' => 1, 'bottom' => 2, 'left' => 3] as $side => $index) {
-            $parts[$index] = $node->style->get('border-' . $side . '-width', $parts[$index]);
+            $specific = $node->style->get('border-' . $side . '-width');
+            if ($specific !== null) $parts[$index] = $specific;
         }
         return [
-            'top' => $this->resolveAtomicLength($parts[0], $referenceWidth, $fontSize),
-            'right' => $this->resolveAtomicLength($parts[1], $referenceWidth, $fontSize),
-            'bottom' => $this->resolveAtomicLength($parts[2], $referenceWidth, $fontSize),
-            'left' => $this->resolveAtomicLength($parts[3], $referenceWidth, $fontSize),
+            'top' => $this->resolveSimpleLength($parts[0], $referenceWidth, $fontSize, 0.0),
+            'right' => $this->resolveSimpleLength($parts[1], $referenceWidth, $fontSize, 0.0),
+            'bottom' => $this->resolveSimpleLength($parts[2], $referenceWidth, $fontSize, 0.0),
+            'left' => $this->resolveSimpleLength($parts[3], $referenceWidth, $fontSize, 0.0),
         ];
     }
 
-    /** @return array{0:?string,1:?string,2:?string,3:?string} */
-    private function expandFour(?string $value): array
+    private function expandFour(string $raw): array
     {
-        $parts = $value !== null ? (preg_split('/\s+/', trim($value)) ?: []) : [];
+        $parts = preg_split('/\s+/', trim($raw)) ?: ['0'];
         return match (count($parts)) {
             1 => [$parts[0], $parts[0], $parts[0], $parts[0]],
             2 => [$parts[0], $parts[1], $parts[0], $parts[1]],
             3 => [$parts[0], $parts[1], $parts[2], $parts[1]],
-            default => [$parts[0] ?? null, $parts[1] ?? null, $parts[2] ?? null, $parts[3] ?? null],
+            default => [$parts[0], $parts[1], $parts[2], $parts[3]],
         };
     }
 
-    private function atomicDimension(StyledNode $node, string $property, float $fallback, float $fontSize, float $referenceWidth): float
+    private function numericAttribute(StyledNode $node, string $name): float
     {
-        $raw = $node->style->get($property);
-        if (($raw === null || strtolower(trim($raw)) === 'auto') && $node->node->isImage()) $raw = $node->node->attribute($property);
-        if ($raw === null || strtolower(trim($raw)) === 'auto') return $fallback;
-        return max(0.0, $this->resolveAtomicLength($raw, $referenceWidth, $fontSize, $fallback));
+        $value = $node->node->attribute($name);
+        return $value !== null && is_numeric($value) ? max(0.0, (float) $value) : 0.0;
     }
 
-    private function resolveAtomicLength(?string $raw, float $referenceWidth, float $fontSize, float $fallback = 0.0): float
+    private function resolveSimpleLength(string $raw, float $referenceWidth, float $fontSize, float $fallback): float
     {
-        if ($raw === null) return $fallback;
-        $value = strtolower(trim($raw));
-        if ($value === '' || $value === 'auto') return $fallback;
-        if (preg_match('/^(-?\d+(?:\.\d+)?)px$/', $value, $m) === 1) return (float) $m[1];
-        if (preg_match('/^(-?\d+(?:\.\d+)?)pt$/', $value, $m) === 1) return Units::ptToPx((float) $m[1]);
-        if (preg_match('/^(-?\d+(?:\.\d+)?)em$/', $value, $m) === 1) return (float) $m[1] * $fontSize;
-        if (preg_match('/^(-?\d+(?:\.\d+)?)rem$/', $value, $m) === 1) return (float) $m[1] * self::ROOT_FONT_SIZE;
-        if (preg_match('/^(-?\d+(?:\.\d+)?)%$/', $value, $m) === 1) return ((float) $m[1] / 100.0) * $referenceWidth;
-        return is_numeric($value) ? (float) $value : $fallback;
+        $raw = strtolower(trim($raw));
+        if ($raw === '' || $raw === 'auto') return $fallback;
+        if (preg_match('/^(-?\d+(?:\.\d+)?)px$/', $raw, $m) === 1) return max(0.0, (float) $m[1]);
+        if (preg_match('/^(-?\d+(?:\.\d+)?)pt$/', $raw, $m) === 1) return max(0.0, Units::ptToPx((float) $m[1]));
+        if (preg_match('/^(-?\d+(?:\.\d+)?)em$/', $raw, $m) === 1) return max(0.0, (float) $m[1] * $fontSize);
+        if (preg_match('/^(-?\d+(?:\.\d+)?)rem$/', $raw, $m) === 1) return max(0.0, (float) $m[1] * self::ROOT_FONT_SIZE);
+        if (preg_match('/^(-?\d+(?:\.\d+)?)%$/', $raw, $m) === 1) return max(0.0, ((float) $m[1] / 100.0) * $referenceWidth);
+        return is_numeric($raw) ? max(0.0, (float) $raw) : $fallback;
     }
 
     private function splitWordToken(array $token, float $availableWidth): array
@@ -363,13 +536,46 @@ final class InlineTextFormatter
         return $token;
     }
 
-    private function collapsesSpaces(string $whiteSpace): bool { return !in_array($whiteSpace, ['pre', 'pre-wrap'], true); }
-    private function canBreakInsideWord(string $overflowWrap, string $wordBreak): bool { return $wordBreak === 'break-all' || in_array($overflowWrap, ['anywhere', 'break-word'], true); }
-    private function countSpaceTokens(array $tokens): int { return count(array_filter($tokens, static fn(array $t): bool => $t['kind'] === 'space')); }
+    private function translateLines(array $lines, float $dx, float $dy): array
+    {
+        $translated = [];
+        foreach ($lines as $line) {
+            $runs = [];
+            foreach ($line->runs as $run) {
+                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style);
+            }
+            $boxes = [];
+            foreach ($line->atomicBoxes as $box) {
+                $boxes[] = new AtomicInlineBox($box->source, $box->x + $dx, $box->y + $dy, $box->width, $box->height, $box->style, $box->contentWidth, $box->contentHeight, $box->margin, $box->padding, $box->border, $this->translateLines($box->contentLines, $dx, $dy));
+            }
+            $translated[] = new LineBox($line->x + $dx, $line->y + $dy, $line->width, $line->height, $line->baseline + $dy, $line->text, $runs, $boxes);
+        }
+        return $translated;
+    }
+
+    private function collapsesSpaces(string $whiteSpace): bool
+    {
+        return !in_array($whiteSpace, ['pre', 'pre-wrap'], true);
+    }
+
+    private function canBreakInsideWord(string $overflowWrap, string $wordBreak): bool
+    {
+        return $wordBreak === 'break-all' || in_array($overflowWrap, ['anywhere', 'break-word'], true);
+    }
+
+    private function countSpaceTokens(array $tokens): int
+    {
+        return count(array_filter($tokens, static fn(array $token): bool => $token['kind'] === 'space'));
+    }
+
     private function alignmentOffset(string $alignment, float $lineWidth, float $availableWidth): float
     {
         $slack = max(0.0, $availableWidth - $lineWidth);
-        return match ($alignment) { 'center' => $slack / 2.0, 'right', 'end' => $slack, default => 0.0 };
+        return match ($alignment) {
+            'center' => $slack / 2.0,
+            'right', 'end' => $slack,
+            default => 0.0,
+        };
     }
 
     private function appendRun(array &$runs, TextRun $run): void
@@ -409,6 +615,13 @@ final class InlineTextFormatter
         };
     }
 
-    private function upper(string $value): string { return function_exists('mb_strtoupper') ? mb_strtoupper($value, 'UTF-8') : strtoupper($value); }
-    private function lower(string $value): string { return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value); }
+    private function upper(string $value): string
+    {
+        return function_exists('mb_strtoupper') ? mb_strtoupper($value, 'UTF-8') : strtoupper($value);
+    }
+
+    private function lower(string $value): string
+    {
+        return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+    }
 }
