@@ -30,7 +30,7 @@ final class PaginationEngine
             $end = $originalEnd + $offset;
             $pageIndex = $flow->pageIndexAt($start);
             $endPageIndex = $flow->pageIndexAt(max($start, $end - self::EPSILON));
-            $fragments = $this->fragmentsForRange($start, $end, $flow);
+            $fragments = $this->fragmentsForNode($node, $start, $end, $offset, $flow);
 
             $placements[] = new PagePlacement(
                 node: $node,
@@ -55,15 +55,34 @@ final class PaginationEngine
     }
 
     /** @return list<PageFragment> */
-    private function fragmentsForRange(float $start, float $end, PageFlow $flow): array
+    private function fragmentsForNode(LayoutNode $node, float $start, float $end, float $offset, PageFlow $flow): array
     {
+        $linesByPage = [];
+        foreach ($node->lineBoxes as $lineIndex => $line) {
+            $continuousY = $line->y + $offset;
+            $continuousBaseline = $line->baseline + $offset;
+            $pageIndex = $flow->pageIndexAt(max(0.0, $continuousBaseline - self::EPSILON));
+            $pageStart = $flow->contentStartForPage($pageIndex);
+            $linesByPage[$pageIndex][] = new LineFragment(
+                line: $line,
+                lineIndex: $lineIndex,
+                pageIndex: $pageIndex,
+                pageY: $continuousY - $pageStart,
+                pageBaseline: $continuousBaseline - $pageStart,
+                continuousY: $continuousY,
+                continuousBaseline: $continuousBaseline,
+            );
+        }
+
         if ($end <= $start + self::EPSILON) {
+            $pageIndex = $flow->pageIndexAt($start);
             return [new PageFragment(
-                pageIndex: $flow->pageIndexAt($start),
-                pageY: $start - $flow->contentStartForPage($flow->pageIndexAt($start)),
+                pageIndex: $pageIndex,
+                pageY: $start - $flow->contentStartForPage($pageIndex),
                 height: 0.0,
                 continuousStartY: $start,
                 continuousEndY: $start,
+                lines: $linesByPage[$pageIndex] ?? [],
             )];
         }
 
@@ -84,6 +103,7 @@ final class PaginationEngine
                 height: max(0.0, $fragmentEnd - $fragmentStart),
                 continuousStartY: $fragmentStart,
                 continuousEndY: $fragmentEnd,
+                lines: $linesByPage[$pageIndex] ?? [],
             );
         }
 
