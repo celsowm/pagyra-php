@@ -293,8 +293,18 @@ final class PdfSerializer
         $height = Units::pxToPt($command->height);
         $x = Units::pxToPt($command->x);
         $y = Units::pxToPt($pageHeightPx - $command->y - $command->height);
-        return "q\n" . $this->number($width) . ' 0 0 ' . $this->number($height) . ' '
+        $content = "q\n";
+        if ($command->clipRect !== null) {
+            $clipX = Units::pxToPt($command->clipRect->x);
+            $clipY = Units::pxToPt($pageHeightPx - $command->clipRect->y - $command->clipRect->height);
+            $clipWidth = Units::pxToPt($command->clipRect->width);
+            $clipHeight = Units::pxToPt($command->clipRect->height);
+            $content .= $this->number($clipX) . ' ' . $this->number($clipY) . ' '
+                . $this->number($clipWidth) . ' ' . $this->number($clipHeight) . " re W n\n";
+        }
+        $content .= $this->number($width) . ' 0 0 ' . $this->number($height) . ' '
             . $this->number($x) . ' ' . $this->number($y) . " cm\n/" . $resourceName . " Do\nQ\n";
+        return $content;
     }
 
     private function serializeEmbeddedText(TextPaintCommand $command, float $pageHeightPx, string $resourceName, RegisteredFont $face): string
