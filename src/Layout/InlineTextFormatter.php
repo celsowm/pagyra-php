@@ -6,6 +6,7 @@ namespace Pagyra\Layout;
 
 use Pagyra\Fonts\HeuristicTextMetrics;
 use Pagyra\Fonts\TextMetrics;
+use Pagyra\Image\ReplacedElementSizingResolver;
 use Pagyra\Style\ComputedStyle;
 use Pagyra\Style\StyledNode;
 use Pagyra\Units\Units;
@@ -14,7 +15,12 @@ final class InlineTextFormatter
 {
     private const ROOT_FONT_SIZE = 16.0;
 
-    public function __construct(private readonly TextMetrics $metrics = new HeuristicTextMetrics()) {}
+    private readonly ReplacedElementSizingResolver $replacedElementSizing;
+
+    public function __construct(private readonly TextMetrics $metrics = new HeuristicTextMetrics())
+    {
+        $this->replacedElementSizing = new ReplacedElementSizingResolver();
+    }
 
     public function layout(StyledNode $block, float $x, float $y, float $availableWidth, float $fontSize): InlineTextLayout
     {
@@ -305,7 +311,7 @@ final class InlineTextFormatter
         $border = $this->borderMetrics($node, $referenceWidth, $fontSize);
 
         if ($node->node->isImage()) {
-            [$contentWidth, $contentHeight] = $this->imageContentSize($node, $referenceWidth, $fontSize);
+            [$contentWidth, $contentHeight] = $this->imageContentSize($node, $referenceWidth, $fontSize, $padding, $border);
             $contentLines = [];
         } else {
             [$contentWidth, $contentHeight, $contentLines] = $this->inlineBlockContentSize($node, $referenceWidth, $fontSize);
@@ -326,36 +332,51 @@ final class InlineTextFormatter
         ];
     }
 
-    private function imageContentSize(StyledNode $node, float $referenceWidth, float $fontSize): array
+    private function imageContentSize(StyledNode $node, float $referenceWidth, float $fontSize, array $padding, array $border): array
     {
         $intrinsicWidth = $this->numericAttribute($node, 'width');
         $intrinsicHeight = $this->numericAttribute($node, 'height');
-        $hasIntrinsic = $intrinsicWidth > 0.0 && $intrinsicHeight > 0.0;
 
         $rawWidth = trim($node->style->get('width', 'auto') ?? 'auto');
         $rawHeight = trim($node->style->get('height', 'auto') ?? 'auto');
-        $hasWidth = strtolower($rawWidth) !== 'auto';
-        $hasHeight = strtolower($rawHeight) !== 'auto';
+        $specifiedWidth = strtolower($rawWidth) === 'auto'
+            ? null
+            : $this->resolveSimpleLength($rawWidth, $referenceWidth, $fontSize, $intrinsicWidth);
+        $specifiedHeight = strtolower($rawHeight) === 'auto'
+            ? null
+            : $this->resolveSimpleLength($rawHeight, $referenceWidth, $fontSize, $intrinsicHeight);
 
-        $width = $hasWidth ? $this->resolveSimpleLength($rawWidth, $referenceWidth, $fontSize, $intrinsicWidth) : $intrinsicWidth;
-        $height = $hasHeight ? $this->resolveSimpleLength($rawHeight, $referenceWidth, $fontSize, $intrinsicHeight) : $intrinsicHeight;
+        $horizontalExtras = $padding['left'] + $padding['right'] + $border['left'] + $border['right'];
+        $verticalExtras = $padding['top'] + $padding['bottom'] + $border['top'] + $border['bottom'];
+        $boxSizing = strtolower($node->style->get('box-sizing', 'content-box') ?? 'content-box');
 
-        if ($hasIntrinsic && $hasWidth && !$hasHeight) {
-            $height = max(1.0, round($intrinsicHeight * ($width / $intrinsicWidth)));
-        } elseif ($hasIntrinsic && !$hasWidth && $hasHeight) {
-            $width = max(1.0, round($intrinsicWidth * ($height / $intrinsicHeight)));
-        } elseif (!$hasIntrinsic) {
-            if ($width <= 0.0 && $height > 0.0) $width = $height;
-            if ($height <= 0.0 && $width > 0.0) $height = $width;
-        }
+        $minWidth = $this->optionalImageConstraint($node, 'min-width', $referenceWidth, $fontSize, $intrinsicWidth);
+        $maxWidth = $this->optionalImageConstraint($node, 'max-width', $referenceWidth, $fontSize, $intrinsicWidth);
+        $minHeight = $this->optionalImageConstraint($node, 'min-height', $referenceWidth, $fontSize, $intrinsicHeight);
+        $maxHeight = $this->optionalImageConstraint($node, 'max-height', $referenceWidth, $fontSize, $intrinsicHeight);
 
-        if (!$hasWidth && $referenceWidth > 0.0 && $width > $referenceWidth && $width > 0.0) {
+        $size = $this->replacedElementSizing->resolve(
+            intrinsicWidth: $intrinsicWidth,
+            intrinsicHeight: $intrinsicHeight,
+            specifiedWidth: $specifiedWidth,
+            specifiedHeight: $specifiedHeight,
+            boxSizing: $boxSizing,
+            horizontalExtras: $horizontalExtras,
+            verticalExtras: $verticalExtras,
+            minWidth: $minWidth,
+            maxWidth: $maxWidth,
+            minHeight: $minHeight,
+            maxHeight: $maxHeight,
+        );
+
+        $width = $size->width;
+        $height = $size->height;
+
+        if ($specifiedWidth === null && $referenceWidth > 0.0 && $width > $referenceWidth && $width > 0.0) {
             $scale = $referenceWidth / $width;
             $width = $referenceWidth;
             $height = max(1.0, round($height * $scale));
         }
-
-        [$width, $height] = $this->applyImageConstraints($node, $width, $height, $hasWidth, $hasHeight, $referenceWidth, $fontSize, $hasIntrinsic);
 
         if ($width <= 0.0 && $height <= 0.0) {
             $width = $height = $this->metrics->lineHeight($node->style, $fontSize);
@@ -364,29 +385,14 @@ final class InlineTextFormatter
         return [max(0.0, $width), max(0.0, $height)];
     }
 
-    private function applyImageConstraints(StyledNode $node, float $width, float $height, bool $hasWidth, bool $hasHeight, float $referenceWidth, float $fontSize, bool $hasIntrinsic): array
+    private function optionalImageConstraint(StyledNode $node, string $property, float $referenceWidth, float $fontSize, float $fallback): ?float
     {
-        foreach ([['max-width', false], ['min-width', true]] as [$property, $isMin]) {
-            $raw = $node->style->get($property);
-            if ($raw === null || strtolower(trim($raw)) === 'auto') continue;
-            $limit = $this->resolveSimpleLength($raw, $referenceWidth, $fontSize, $width);
-            $violates = $isMin ? $width < $limit : $width > $limit;
-            if ($limit > 0.0 && $violates) {
-                if ($hasIntrinsic && !$hasHeight && $width > 0.0) $height = max(1.0, round($height * ($limit / $width)));
-                $width = $limit;
-            }
+        $raw = $node->style->get($property);
+        if ($raw === null || in_array(strtolower(trim($raw)), ['auto', 'none'], true)) {
+            return null;
         }
-        foreach ([['max-height', false], ['min-height', true]] as [$property, $isMin]) {
-            $raw = $node->style->get($property);
-            if ($raw === null || strtolower(trim($raw)) === 'auto') continue;
-            $limit = $this->resolveSimpleLength($raw, $referenceWidth, $fontSize, $height);
-            $violates = $isMin ? $height < $limit : $height > $limit;
-            if ($limit > 0.0 && $violates) {
-                if ($hasIntrinsic && !$hasWidth && $height > 0.0) $width = max(1.0, round($width * ($limit / $height)));
-                $height = $limit;
-            }
-        }
-        return [$width, $height];
+
+        return $this->resolveSimpleLength($raw, $referenceWidth, $fontSize, $fallback);
     }
 
     private function inlineBlockContentSize(StyledNode $node, float $referenceWidth, float $fontSize): array
