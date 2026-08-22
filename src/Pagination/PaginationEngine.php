@@ -94,19 +94,8 @@ final class PaginationEngine
     {
         $linesByPage = [];
         foreach ($node->lineBoxes as $lineIndex => $line) {
-            $continuousY = $line->y + $offset;
-            $continuousBaseline = $line->baseline + $offset;
-            $pageIndex = $flow->pageIndexAt(max(0.0, $continuousBaseline - self::EPSILON));
-            $pageStart = $flow->contentStartForPage($pageIndex);
-            $linesByPage[$pageIndex][] = new LineFragment(
-                line: $line,
-                lineIndex: $lineIndex,
-                pageIndex: $pageIndex,
-                pageY: $continuousY - $pageStart,
-                pageBaseline: $continuousBaseline - $pageStart,
-                continuousY: $continuousY,
-                continuousBaseline: $continuousBaseline,
-            );
+            $lineFragment = $this->lineFragmentForPage($lineIndex, $line->y, $line->baseline, $line, $offset, $flow);
+            $linesByPage[$lineFragment->pageIndex][] = $lineFragment;
         }
 
         if ($end <= $start + self::EPSILON) {
@@ -147,6 +136,24 @@ final class PaginationEngine
         return $fragments;
     }
 
+    private function lineFragmentForPage(int $lineIndex, float $lineY, float $baseline, object $line, float $offset, PageFlow $flow): LineFragment
+    {
+        $continuousY = $lineY + $offset;
+        $continuousBaseline = $baseline + $offset;
+        $pageIndex = $flow->pageIndexAt(max(0.0, $continuousBaseline - self::EPSILON));
+        $pageStart = $flow->contentStartForPage($pageIndex);
+
+        return new LineFragment(
+            line: $line,
+            lineIndex: $lineIndex,
+            pageIndex: $pageIndex,
+            pageY: $continuousY - $pageStart,
+            pageBaseline: $continuousBaseline - $pageStart,
+            continuousY: $continuousY,
+            continuousBaseline: $continuousBaseline,
+        );
+    }
+
     /** @return list<BlockFragment> */
     private function blockFragmentsForPage(LayoutNode $node, int $pageIndex, float $offset, PageFlow $flow): array
     {
@@ -178,6 +185,12 @@ final class PaginationEngine
             if ($childFragment !== null) $children[] = $childFragment;
         }
 
+        $lines = [];
+        foreach ($node->lineBoxes as $lineIndex => $line) {
+            $lineFragment = $this->lineFragmentForPage($lineIndex, $line->y, $line->baseline, $line, $offset, $flow);
+            if ($lineFragment->pageIndex === $pageIndex) $lines[] = $lineFragment;
+        }
+
         return new BlockFragment(
             node: $node,
             pageIndex: $pageIndex,
@@ -185,6 +198,7 @@ final class PaginationEngine
             height: max(0.0, $fragmentEnd - $fragmentStart),
             continuousStartY: $fragmentStart,
             continuousEndY: $fragmentEnd,
+            lines: $lines,
             children: $children,
         );
     }
