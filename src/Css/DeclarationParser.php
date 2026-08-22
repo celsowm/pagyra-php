@@ -21,7 +21,7 @@ final class DeclarationParser
     public function parseWithPriority(string $css): array
     {
         $declarations = [];
-        foreach (explode(';', $css) as $chunk) {
+        foreach ($this->splitDeclarations($css) as $chunk) {
             $chunk = trim($chunk);
             if ($chunk === '' || !str_contains($chunk, ':')) {
                 continue;
@@ -45,5 +45,72 @@ final class DeclarationParser
 
         ksort($declarations);
         return $declarations;
+    }
+
+    /** @return list<string> */
+    private function splitDeclarations(string $css): array
+    {
+        $chunks = [];
+        $buffer = '';
+        $quote = null;
+        $depth = 0;
+        $escaped = false;
+        $length = strlen($css);
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+
+            if ($escaped) {
+                $buffer .= $char;
+                $escaped = false;
+                continue;
+            }
+
+            if ($char === '\\') {
+                $buffer .= $char;
+                $escaped = true;
+                continue;
+            }
+
+            if ($quote !== null) {
+                $buffer .= $char;
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $buffer .= $char;
+                continue;
+            }
+
+            if ($char === '(') {
+                $depth++;
+                $buffer .= $char;
+                continue;
+            }
+
+            if ($char === ')') {
+                $depth = max(0, $depth - 1);
+                $buffer .= $char;
+                continue;
+            }
+
+            if ($char === ';' && $depth === 0) {
+                $chunks[] = $buffer;
+                $buffer = '';
+                continue;
+            }
+
+            $buffer .= $char;
+        }
+
+        if ($buffer !== '') {
+            $chunks[] = $buffer;
+        }
+
+        return $chunks;
     }
 }
