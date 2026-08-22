@@ -6,12 +6,12 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking, text alignment, vertical alignment, atomic inline boxes, intrinsic raster/SVG sizing, linked local stylesheets and CSS `@font-face` loading. PDF rendering is intentionally not implemented yet.**
+**DOM and substantial CSS cascade phases are implemented; block layout now supports parsed font metrics, styled inline runs, whitespace policy, word breaking, text alignment, vertical alignment, atomic inline boxes, intrinsic raster/SVG sizing, linked local stylesheets, CSS `@font-face` loading and first-pass default `@page` resolution. PDF rendering is intentionally not implemented yet.**
 
 Current pipeline:
 
 ```text
-HTML -> Pagyra DOM -> merged CSS/resources -> cascade -> computed style tree -> font resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> vertical placement -> line boxes -> text runs / atomic inline boxes -> nested inline-block line boxes
+HTML -> Pagyra DOM -> merged CSS/resources -> cascade -> computed style tree -> font resolution -> page style resolution -> block layout -> styled inline fragments -> whitespace/token policy -> text metrics -> line breaking -> vertical placement -> line boxes -> text runs / atomic inline boxes -> nested inline-block line boxes
 ```
 
 Current foundation:
@@ -33,6 +33,7 @@ Current foundation:
 - `!important`, including interaction with inline styles;
 - inherited properties;
 - CSS custom properties and `var()` fallback resolution;
+- print `@media` evaluation for the currently supported media-query subset;
 - initial UA/default styles for core block/inline elements, headings, paragraphs and lists;
 - styled DOM tree exposed by `prepareHtmlRender()`;
 - `LayoutNode`/`LayoutBox` tree exposed by `prepareHtmlRender()`;
@@ -75,11 +76,14 @@ Current foundation:
 - TTF/OTF metric parsing for `head`, `hhea`, `maxp`, `hmtx` and Unicode `cmap` formats 4/12;
 - classic `kern` format-0 pair parsing;
 - font registry with family/weight/style selection;
+- font variant fallback aligned with `pagyra-js`: requested style is preferred first, then the nearest available numeric weight;
 - glyph-advance and kerning-based text measurement with heuristic fallback;
 - `fontConfig.fontFaceDefs` support for local, `file://`, relative-to-`resourceBaseDir` and base64 data-URL sources;
 - CSS `@font-face` extraction from embedded and linked stylesheets;
 - CSS font source selection prefers sfnt-compatible TrueType/OpenType sources while WOFF/WOFF2 decoding is still pending;
 - base64 embedded `@font-face` sources can be parsed directly from CSS and participate in text measurement;
+- default `@page { ... }` resolution for named/custom page sizes, portrait/landscape orientation, margin shorthand/longhands and `!important` precedence;
+- resolved default page size is exposed in `PreparedRender.pageSize` as points while page margins remain CSS pixels;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
 - CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
@@ -117,6 +121,18 @@ p { font-family: "MyFont"; }
 <p>Hello</p>
 ```
 
+Default page descriptors are also reflected by `prepareHtmlRender()`:
+
+```html
+<style>
+@page {
+  size: A4 landscape;
+  margin: 12mm 18mm;
+}
+</style>
+<p>Hello</p>
+```
+
 Styled inline content is preserved through layout. For example:
 
 ```html
@@ -144,7 +160,7 @@ The inline formatter still has deliberate limits: mixed inline/block formatting 
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
-Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, `@media`, `@page`, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
+Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, page pseudo-class profiles (`:first`, `:left`, `:right`), richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
 
 Remote HTTP resource loading is intentionally not enabled in the current PHP resource layer; local deterministic resources are resolved through explicit paths / `resourceBaseDir`.
 
