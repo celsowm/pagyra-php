@@ -6,7 +6,12 @@ namespace Pagyra\Fonts\Ttf;
 
 final readonly class TtfFontMetrics
 {
-    /** @param array<int,int> $advanceWidths @param array<int,int> $cmap @param array<int,array<int,int>> $kerning */
+    /**
+     * @param array<int,int> $advanceWidths
+     * @param array<int,int> $cmap
+     * @param array<int,array<int,int>> $kerning
+     * @param array{xMin:int,yMin:int,xMax:int,yMax:int} $bbox
+     */
     public function __construct(
         public int $unitsPerEm,
         public int $ascent,
@@ -15,6 +20,7 @@ final readonly class TtfFontMetrics
         public array $advanceWidths,
         public array $cmap,
         public array $kerning = [],
+        public array $bbox = ['xMin' => 0, 'yMin' => 0, 'xMax' => 0, 'yMax' => 0],
     ) {
         if ($unitsPerEm <= 0) {
             throw new \InvalidArgumentException('unitsPerEm must be greater than zero');
