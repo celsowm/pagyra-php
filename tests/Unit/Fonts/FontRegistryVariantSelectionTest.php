@@ -74,6 +74,21 @@ final class FontRegistryVariantSelectionTest extends TestCase
         self::assertSame($metrics, $registry->resolve('Missing, "Fixture", serif', 400, 'normal'));
     }
 
+    public function testResolvedFaceRetainsBinaryAndNormalizedVariant(): void
+    {
+        $registry = new FontRegistry();
+        $metrics = $this->metrics(400);
+        $registry->register('Fixture', $metrics, 450, 'oblique', "\x00\x01\x00\x00font");
+
+        $face = $registry->resolveFace('Fixture', 450, 'italic');
+        self::assertNotNull($face);
+        self::assertSame('Fixture', $face->family);
+        self::assertSame(450, $face->weight);
+        self::assertSame('italic', $face->style);
+        self::assertSame($metrics, $face->metrics);
+        self::assertSame("\x00\x01\x00\x00font", $face->binary);
+    }
+
     private function metrics(int $marker): TtfFontMetrics
     {
         return new TtfFontMetrics(
