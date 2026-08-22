@@ -18,6 +18,7 @@ use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Pagination\PaginationEngine;
 use Pagyra\Paint\DisplayListBuilder;
+use Pagyra\Pdf\PdfSerializer;
 use Pagyra\Style\StyleComputer;
 use Pagyra\Units\Units;
 
@@ -275,8 +276,10 @@ final class Pagyra
 
     public static function renderHtmlToPdf(array|RenderHtmlOptions $options): string
     {
-        throw new \LogicException(
-            'PDF serialization is intentionally not implemented yet. The active pipeline now reaches pagination and a first physical display-list paint stage, but PDF serialization is not implemented yet.'
-        );
+        $prepared = self::prepareHtmlRender($options);
+        if ($prepared->displayList === null) {
+            throw new \LogicException('Display list generation failed before PDF serialization.');
+        }
+        return (new PdfSerializer())->serialize($prepared->displayList);
     }
 }
