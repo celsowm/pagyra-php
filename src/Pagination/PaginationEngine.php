@@ -63,7 +63,30 @@ final class PaginationEngine
         }
 
         $pageCount = max(1, $flow->pageIndexAt(max(0.0, $maxEnd - self::EPSILON)) + 1);
-        return new PaginationResult($flow, $placements, $pageCount);
+        return new PaginationResult(
+            flow: $flow,
+            placements: $placements,
+            pageCount: $pageCount,
+            pages: $this->buildPhysicalPages($placements, $pageCount),
+        );
+    }
+
+    /** @param list<PagePlacement> $placements @return list<PhysicalPage> */
+    private function buildPhysicalPages(array $placements, int $pageCount): array
+    {
+        $entriesByPage = array_fill(0, $pageCount, []);
+        foreach ($placements as $placement) {
+            foreach ($placement->fragments as $fragment) {
+                if ($fragment->pageIndex < 0 || $fragment->pageIndex >= $pageCount) continue;
+                $entriesByPage[$fragment->pageIndex][] = new PhysicalPageEntry($placement, $fragment);
+            }
+        }
+
+        $pages = [];
+        for ($pageIndex = 0; $pageIndex < $pageCount; $pageIndex++) {
+            $pages[] = new PhysicalPage($pageIndex, $entriesByPage[$pageIndex]);
+        }
+        return $pages;
     }
 
     /** @return list<PageFragment> */
