@@ -169,15 +169,29 @@ final class PdfSerializer
                     $png = $pngParser->parse($command->bytes);
                     if ($png !== null) {
                         $stream = $png->compressedData;
+                        $softMask = '';
+                        if ($png->alphaCompressedData !== null) {
+                            $softMaskId = $reserve();
+                            $objects[$softMaskId] = '<< /Type /XObject /Subtype /Image'
+                                . ' /Width ' . $png->width
+                                . ' /Height ' . $png->height
+                                . ' /ColorSpace /DeviceGray /BitsPerComponent 8'
+                                . ' /Filter /FlateDecode /Length ' . strlen($png->alphaCompressedData) . ">>\nstream\n"
+                                . $png->alphaCompressedData . "\nendstream";
+                            $softMask = ' /SMask ' . $softMaskId . ' 0 R';
+                        }
+
+                        $decodeParms = $png->usesPngPredictor
+                            ? ' /DecodeParms << /Predictor 15 /Colors ' . $png->colors
+                                . ' /BitsPerComponent ' . $png->bitsPerComponent
+                                . ' /Columns ' . $png->width . ' >>'
+                            : '';
                         $dictionary = '<< /Type /XObject /Subtype /Image'
                             . ' /Width ' . $png->width
                             . ' /Height ' . $png->height
                             . ' /ColorSpace ' . $png->colorSpace
                             . ' /BitsPerComponent ' . $png->bitsPerComponent
-                            . ' /Filter /FlateDecode'
-                            . ' /DecodeParms << /Predictor 15 /Colors ' . $png->colors
-                            . ' /BitsPerComponent ' . $png->bitsPerComponent
-                            . ' /Columns ' . $png->width . ' >>'
+                            . ' /Filter /FlateDecode' . $decodeParms . $softMask
                             . ' /Length ' . strlen($stream) . ' >>';
                     }
                 }
