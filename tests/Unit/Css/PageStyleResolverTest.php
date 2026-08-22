@@ -79,6 +79,44 @@ final class PageStyleResolverTest extends TestCase
         self::assertSame($this->fallbackMargins(), $resolved['margins']);
     }
 
+    public function testPageRuleInsideMatchingMediaQueryIsApplied(): void
+    {
+        $resolved = (new PageStyleResolver())->resolve(
+            '@media print and (max-width:700px) { @page { size:500px 300px; margin:25px; } }',
+            794.0,
+            1123.0,
+            $this->fallbackMargins(),
+            'print',
+            650.0,
+            900.0,
+        );
+
+        self::assertSame(500.0, $resolved['width']);
+        self::assertSame(300.0, $resolved['height']);
+        self::assertSame([
+            'top' => 25.0,
+            'right' => 25.0,
+            'bottom' => 25.0,
+            'left' => 25.0,
+        ], $resolved['margins']);
+    }
+
+    public function testPageRuleInsideNonMatchingMediaQueryIsIgnored(): void
+    {
+        $resolved = (new PageStyleResolver())->resolve(
+            '@media print and (max-width:700px) { @page { size:500px 300px; } }',
+            794.0,
+            1123.0,
+            $this->fallbackMargins(),
+            'print',
+            750.0,
+            900.0,
+        );
+
+        self::assertSame(794.0, $resolved['width']);
+        self::assertSame(1123.0, $resolved['height']);
+    }
+
     /** @return array{top:float,right:float,bottom:float,left:float} */
     private function fallbackMargins(): array
     {
