@@ -48,12 +48,13 @@ final class Pagyra
             $options->pageHeight,
             $options->margins,
         );
+        [$viewportWidth, $viewportHeight] = self::resolvePrintViewport($options, $pageStyle);
 
         $rules = (new StylesheetParser())->parse(
             $cssText,
             mediaType: 'print',
-            viewportWidth: $options->viewportWidth,
-            viewportHeight: $options->viewportHeight,
+            viewportWidth: $viewportWidth,
+            viewportHeight: $viewportHeight,
         );
         $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
 
@@ -61,11 +62,11 @@ final class Pagyra
             $options->fontConfig,
             $options->resourceBaseDir,
             $cssText,
-            $options->viewportWidth,
-            $options->viewportHeight,
+            $viewportWidth,
+            $viewportHeight,
         );
         $textMetrics = new GlyphTextMetrics($registry);
-        $layoutRoot = (new BlockLayoutEngine($options->viewportWidth, $options->viewportHeight, $textMetrics))->layout($styledRoot);
+        $layoutRoot = (new BlockLayoutEngine($viewportWidth, $viewportHeight, $textMetrics))->layout($styledRoot);
 
         return new PreparedRender(
             domRoot: $document->root,
@@ -79,6 +80,21 @@ final class Pagyra
             ],
             margins: $pageStyle['margins'],
         );
+    }
+
+    /**
+     * @param array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}} $pageStyle
+     * @return array{0:float,1:float}
+     */
+    private static function resolvePrintViewport(RenderHtmlOptions $options, array $pageStyle): array
+    {
+        $contentWidth = max(1.0, $pageStyle['width'] - $pageStyle['margins']['left'] - $pageStyle['margins']['right']);
+        $contentHeight = max(1.0, $pageStyle['height'] - $pageStyle['margins']['top'] - $pageStyle['margins']['bottom']);
+
+        return [
+            min($options->viewportWidth, $contentWidth),
+            min($options->viewportHeight, $contentHeight),
+        ];
     }
 
     /** @param array<string,mixed> $config */
