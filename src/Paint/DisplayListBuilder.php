@@ -139,7 +139,7 @@ final class DisplayListBuilder
                 } catch (\InvalidArgumentException) {
                     continue;
                 }
-                if ($metadata->format !== 'jpeg') continue;
+                if (!in_array($metadata->format, ['jpeg', 'png'], true)) continue;
 
                 $contentX = $box->x + $box->margin['left'] + $box->border['left'] + $box->padding['left'];
                 $contentY = $box->y + $box->margin['top'] + $box->border['top'] + $box->padding['top'];
