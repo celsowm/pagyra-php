@@ -132,7 +132,7 @@ final class SelectorMatcher
 
         preg_match_all('/\[\s*([a-zA-Z_:][a-zA-Z0-9_:\-]*)(?:\s*(=|~=|\|=|\^=|\$=|\*=)\s*["\']?([^"\']*?)["\']?)?\s*\]/', $selector, $attrs, PREG_SET_ORDER);
         foreach ($attrs as $attr) {
-            $actual = $node->attribute($attr[1]);
+            $actual = $node->attributes[strtolower($attr[1])] ?? null;
             if ($actual === null) return false;
             $operator = $attr[2] ?? '';
             if ($operator === '') continue;
