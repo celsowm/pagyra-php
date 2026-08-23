@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pagyra\Pagination;
 
 use Pagyra\Layout\LayoutNode;
+use Pagyra\Layout\LineBox;
 
 final class PaginationEngine
 {
@@ -136,7 +137,7 @@ final class PaginationEngine
         return $fragments;
     }
 
-    private function lineFragmentForPage(int $lineIndex, float $lineY, float $baseline, object $line, float $offset, PageFlow $flow): LineFragment
+    private function lineFragmentForPage(int $lineIndex, float $lineY, float $baseline, LineBox $line, float $offset, PageFlow $flow): LineFragment
     {
         $continuousY = $lineY + $offset;
         $continuousBaseline = $baseline + $offset;
@@ -252,7 +253,7 @@ final class PaginationEngine
     private function positiveIntegerStyle(LayoutNode $node, string $property, int $fallback): int
     {
         $raw = trim($node->source->style->get($property, (string) $fallback) ?? (string) $fallback);
-        if (!preg_match('/^[+-]?\d+$/', $raw)) return $fallback;
+        if (!preg_match('/^\d+$/', $raw)) return $fallback;
         return max(1, (int) $raw);
     }
 
