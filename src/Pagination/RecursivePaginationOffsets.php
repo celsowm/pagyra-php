@@ -141,8 +141,6 @@ final class RecursivePaginationOffsets
         $border = $node->box->borderBox();
         $top = $border->y + $offset;
         $bottom = $border->bottom() + $offset;
-        if ($border->height > $flow->contentHeight + self::EPSILON) return 0.0;
-
         $startPage = $flow->pageIndexAt($top);
         $endPage = $flow->pageIndexAt(max($top, $bottom - self::EPSILON));
         if ($startPage === $endPage) return 0.0;
