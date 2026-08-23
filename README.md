@@ -6,7 +6,7 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, recursive pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid and rounded borders, CSS alpha and PDF serialization are implemented for the current supported subset.**
+**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, recursive pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid/dashed/dotted/rounded borders, CSS alpha and PDF serialization are implemented for the current supported subset.**
 
 Current pipeline:
 
@@ -35,7 +35,7 @@ Current foundation:
 - attribute selectors (`[attr]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`);
 - specificity and source-order resolution;
 - `!important`, including interaction with inline styles;
-- inherited properties;
+- inherited properties, including `visibility`;
 - CSS custom properties and `var()` fallback resolution;
 - print `@media` evaluation for the currently supported media-query subset;
 - initial UA/default styles for core block/inline elements, headings, paragraphs and lists;
@@ -48,6 +48,7 @@ Current foundation:
 - horizontal `auto` margins for fixed-width blocks;
 - adjacent sibling vertical-margin collapsing;
 - block `display:none` filtering;
+- `visibility:hidden|collapse` suppresses display-list paint while preserving normal layout geometry; descendants can override inherited visibility with `visibility:visible`;
 - centralized `TextMetrics` abstraction;
 - heuristic text-metrics fallback ported from `pagyra-js` coefficients/calibration;
 - styled inline fragment collection preserving `font-family`, `font-size`, `font-weight`, `font-style`, color and other computed properties;
@@ -63,6 +64,7 @@ Current foundation:
 - atomic inline wrapping uses full outer size: content + padding + border + margins;
 - `AtomicInlineBox` exposes content size plus margin/padding/border edge metrics and nested `contentLines`;
 - recursive atomic-inline paint for backgrounds, solid/rounded borders and nested `contentLines`, including nested inline-block text;
+- `LineBox` exposes a unified ordered inline item view so surrounding `TextRun` and `AtomicInlineBox` paint in inline/layout order instead of all text first and atomics afterward;
 - intrinsic PNG/JPEG/WebP metadata extraction from data URLs and readable local resources;
 - SVG intrinsic sizing from `width`/`height`/`viewBox` for inline SVG and SVG image sources;
 - relative image/SVG sources resolved against explicit `resourceBaseDir`;
@@ -116,8 +118,9 @@ Current foundation:
 - fragmented top-level rounded boxes keep only the applicable top or bottom corner radii on their first/last physical page fragments;
 - per-side solid border fills with independent widths/colors and `currentColor` fallback;
 - uniform solid rounded borders are painted as vector outer-minus-inner rounded rings using PDF even-odd fill;
+- mixed/non-solid border sets follow the reference side-stroke geometry: centered side paths, `dashed` as `3w on / 3w off`, `dotted` as `w on / w off`, butt caps, and fragment-aware top/bottom suppression;
 - text paint commands preserve family, weight, style, font size and color;
-- CSS color alpha for background, solid borders and text through deduplicated PDF `ExtGState` resources;
+- CSS color alpha for background, solid/patterned borders and text through deduplicated PDF `ExtGState` resources;
 - JPEG XObjects embedded directly with `/DCTDecode` and resource deduplication;
 - PNG grayscale/RGB XObjects using original `IDAT` + `/FlateDecode` + PNG predictor when possible;
 - PNG RGBA and grayscale+alpha split into color plus `/SMask` without GD/Imagick;
@@ -213,13 +216,13 @@ Atomic inline content can participate in the same line, expose an internal layou
 </p>
 ```
 
-The span carries nested `contentLines` laid out inside its content box, and its background/border/text participate in the display list. The image resolves to `80 x 40` content pixels because only its width is overridden.
+The span carries nested `contentLines` laid out inside its content box, and its background/border/text participate in the display list. The image resolves to `80 x 40` content pixels because only its width is overridden. Text and atomic boxes are consumed in one ordered inline sequence for paint.
 
 The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
-Still pending in pagination/paint: stacking contexts/z-index, exact inline atomic paint ordering relative to surrounding text runs, rounded asymmetric per-side borders, non-solid border paint (`dashed`, `dotted`, `double`, etc.), WebP/SVG paint, Adam7 PNG, element-level opacity, decorations and richer clipping/overflow behavior.
+Still pending in pagination/paint: stacking contexts/z-index, rounded asymmetric per-side borders, border styles beyond the current solid/dashed/dotted subset (`double`, `groove`, `ridge`, `inset`, `outset`), WebP/SVG paint, Adam7 PNG, element-level opacity, decorations and richer clipping/overflow behavior.
 
 Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, the remaining shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
 
