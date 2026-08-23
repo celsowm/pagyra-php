@@ -52,15 +52,46 @@ final class PngPdfImageTest extends TestCase
         self::assertStringContainsString('/Im1 Do', $pdf);
     }
 
-    private function png(int $width, int $height, int $bitDepth, int $colorType, string $idat): string
+    public function testIndexedPngUsesPaletteAndTransparencySoftMask(): void
     {
+        $compressed = gzcompress("\x00\x1b");
+        self::assertIsString($compressed);
+        $palette = "\xff\x00\x00" . "\x00\xff\x00" . "\x00\x00\xff" . "\xff\xff\xff";
+        $transparency = "\xff\x80\x00\xff";
+        $png = $this->png(4, 1, 2, 3, $compressed, $palette, $transparency);
+        $src = 'data:image/png;base64,' . base64_encode($png);
+
+        $pdf = Pagyra::renderHtmlToPdf([
+            'html' => '<p style="margin:0"><img src="' . $src . '" style="width:40px;height:10px"></p>',
+            'viewportWidth' => 200,
+            'viewportHeight' => 100,
+        ]);
+
+        self::assertStringContainsString('/ColorSpace [/Indexed /DeviceRGB 3 <FF000000FF000000FFFFFFFF>]', $pdf);
+        self::assertStringContainsString('/BitsPerComponent 2', $pdf);
+        self::assertStringContainsString('/Predictor 15', $pdf);
+        self::assertStringContainsString('/Colors 1', $pdf);
+        self::assertStringContainsString('/SMask ', $pdf);
+        self::assertSame(2, substr_count($pdf, '/Subtype /Image'));
+        self::assertStringContainsString('/Im1 Do', $pdf);
+    }
+
+    private function png(
+        int $width,
+        int $height,
+        int $bitDepth,
+        int $colorType,
+        string $idat,
+        ?string $palette = null,
+        ?string $transparency = null,
+    ): string {
         $ihdr = pack('N', $width) . pack('N', $height)
             . chr($bitDepth) . chr($colorType) . "\x00\x00\x00";
 
-        return "\x89PNG\r\n\x1a\n"
-            . $this->chunk('IHDR', $ihdr)
-            . $this->chunk('IDAT', $idat)
-            . $this->chunk('IEND', '');
+        $png = "\x89PNG\r\n\x1a\n" . $this->chunk('IHDR', $ihdr);
+        if ($palette !== null) $png .= $this->chunk('PLTE', $palette);
+        if ($transparency !== null) $png .= $this->chunk('tRNS', $transparency);
+        return $png . $this->chunk('IDAT', $idat) . $this->chunk('IEND', '');
     }
 
     private function chunk(string $type, string $data): string
