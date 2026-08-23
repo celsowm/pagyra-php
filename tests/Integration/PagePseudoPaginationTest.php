@@ -97,4 +97,29 @@ final class PagePseudoPaginationTest extends TestCase
         self::assertSame(130.0, $box->width);
         self::assertSame(70.0, $prepared->pagination->flow->minimumUsableHeight());
     }
+
+    public function testRightParityBreakUsesVariableContentStarts(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<style>'
+                . '@page { size:200px 100px; margin:10px; }'
+                . '@page :first { margin-top:20px; margin-bottom:20px; }'
+                . '@page :left { margin-top:5px; margin-bottom:15px; }'
+                . '@page :right { margin-top:10px; margin-bottom:20px; }'
+                . 'div { margin:0; height:20px; } #second { break-before:right; }'
+                . '</style><div></div><div id="second"></div>',
+            'pageWidth' => 200.0,
+            'pageHeight' => 100.0,
+            'viewportWidth' => 200.0,
+            'viewportHeight' => 100.0,
+            'margins' => ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0],
+        ]);
+
+        self::assertSame(3, $prepared->pagination->pageCount);
+        self::assertSame(0, $prepared->pagination->placements[0]->pageIndex);
+        self::assertSame(2, $prepared->pagination->placements[1]->pageIndex);
+        self::assertSame(120.0, $prepared->pagination->placements[1]->offsetY);
+        self::assertSame(140.0, $prepared->pagination->placements[1]->startY);
+        self::assertCount(0, $prepared->pagination->pages[1]->entries);
+    }
 }
