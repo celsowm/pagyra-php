@@ -14,7 +14,7 @@ final class RoundedBorderPdfTest extends TestCase
     public function testUniformSolidRoundedBorderUsesEvenOddRing(): void
     {
         $html = '<style>@page{size:200px 100px;margin:0}</style>'
-            . '<div style="margin:0;width:100px;height:40px;border-width:4px;border-style:solid;border-color:rgba(255,0,0,.5);border-radius:20px"></div>';
+            . '<div style="margin:0;width:100px;height:40px;border:4px solid rgba(255,0,0,.5);border-radius:20px"></div>';
         $prepared = Pagyra::prepareHtmlRender([
             'html' => $html,
             'viewportWidth' => 200,
