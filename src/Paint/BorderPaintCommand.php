@@ -8,7 +8,7 @@ use Pagyra\Css\Color\Rgba;
 use Pagyra\Layout\AtomicInlineBox;
 use Pagyra\Layout\LayoutNode;
 
-readonly class BorderPaintCommand implements \JsonSerializable
+final readonly class BorderPaintCommand implements \JsonSerializable
 {
     public function __construct(
         public LayoutNode|AtomicInlineBox $node,
