@@ -51,6 +51,21 @@ final class WidowOrphanPaginationTest extends TestCase
         self::assertCount(1, $paragraph->fragments[1]->lines);
     }
 
+    public function testSignedWidowOrphanValuesAreInvalidAndUseFallback(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => "<style>@page { size:300px 100px; margin:10px; } .spacer { height:40px; margin:0; } p { margin:0; white-space:pre; font-size:16px; line-height:20px; widows:+1; orphans:+1; }</style><div class=\"spacer\"></div><p>one\ntwo\nthree</p>",
+            'viewportWidth' => 300,
+            'viewportHeight' => 100,
+        ]);
+
+        self::assertNotNull($prepared->pagination);
+        $paragraph = $prepared->pagination->placements[1];
+        self::assertSame(1, $paragraph->pageIndex);
+        self::assertSame(40.0, $paragraph->offsetY);
+        self::assertCount(3, $paragraph->fragments[0]->lines);
+    }
+
     public function testOversizedParagraphIsNotMovedForWidowOrphanConstraint(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
