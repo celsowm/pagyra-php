@@ -23,6 +23,13 @@ final class ObjectPositionParserTest extends TestCase
         self::assertSame(1.0, $position->y);
     }
 
+    public function testParsesVerticalHorizontalKeywordOrderLikeJsReference(): void
+    {
+        $position = ObjectPositionParser::parse('top left');
+        self::assertSame(0.0, $position->x);
+        self::assertSame(0.0, $position->y);
+    }
+
     public function testSingleVerticalKeywordKeepsHorizontalCenter(): void
     {
         $position = ObjectPositionParser::parse('top');
@@ -35,5 +42,19 @@ final class ObjectPositionParserTest extends TestCase
         $position = ObjectPositionParser::parse('25% 75%');
         self::assertSame(0.25, $position->x);
         self::assertSame(0.75, $position->y);
+    }
+
+    public function testParsesLeadingSignAndFractionalPercentageLikeJsReference(): void
+    {
+        $position = ObjectPositionParser::parse('+.5% -25%');
+        self::assertSame(0.005, $position->x);
+        self::assertSame(-0.25, $position->y);
+    }
+
+    public function testInvalidPairFallsBackToInitialCenter(): void
+    {
+        $position = ObjectPositionParser::parse('left right');
+        self::assertSame(0.5, $position->x);
+        self::assertSame(0.5, $position->y);
     }
 }
