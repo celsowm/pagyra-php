@@ -15,6 +15,7 @@ use Pagyra\Image\ObjectPositionParser;
 use Pagyra\Layout\AtomicInlineBox;
 use Pagyra\Layout\LayoutNode;
 use Pagyra\Layout\LineBox;
+use Pagyra\Layout\TextRun;
 use Pagyra\Pagination\BlockFragment;
 use Pagyra\Pagination\LineFragment;
 use Pagyra\Pagination\PaginationResult;
@@ -278,28 +279,34 @@ final class DisplayListBuilder
     {
         foreach ($lines as $lineFragment) {
             $line = $lineFragment->line;
-            foreach ($line->runs as $run) {
-                $weightRaw = strtolower(trim($run->style->get('font-weight', '400') ?? '400'));
-                $fontWeight = $weightRaw === 'bold' ? 700 : ($weightRaw === 'normal' ? 400 : (is_numeric($weightRaw) ? (int) $weightRaw : 400));
-                $commands[] = new TextPaintCommand(
-                    run: $run,
-                    pageIndex: $lineFragment->pageIndex,
-                    x: $run->x + $margins['left'],
-                    y: $lineFragment->pageY + ($run->y - $line->y) + $margins['top'],
-                    baseline: $lineFragment->pageBaseline + ($run->baseline - $line->baseline) + $margins['top'],
-                    text: $run->text,
-                    fontSize: $run->fontSize,
-                    fontFamily: $run->style->get('font-family'),
-                    fontWeight: max(100, min(900, $fontWeight)),
-                    fontStyle: strtolower(trim($run->style->get('font-style', 'normal') ?? 'normal')),
-                    color: ColorParser::parse($run->style->get('color', 'black')),
-                );
-            }
-
-            foreach ($line->atomicBoxes as $box) {
-                $this->appendAtomicBox($commands, $box, $line, $lineFragment, $margins);
+            foreach ($line->orderedItems() as $item) {
+                if ($item instanceof TextRun) {
+                    $this->appendTextRun($commands, $item, $line, $lineFragment, $margins);
+                    continue;
+                }
+                $this->appendAtomicBox($commands, $item, $line, $lineFragment, $margins);
             }
         }
+    }
+
+    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    private function appendTextRun(array &$commands, TextRun $run, LineBox $line, LineFragment $lineFragment, array $margins): void
+    {
+        $weightRaw = strtolower(trim($run->style->get('font-weight', '400') ?? '400'));
+        $fontWeight = $weightRaw === 'bold' ? 700 : ($weightRaw === 'normal' ? 400 : (is_numeric($weightRaw) ? (int) $weightRaw : 400));
+        $commands[] = new TextPaintCommand(
+            run: $run,
+            pageIndex: $lineFragment->pageIndex,
+            x: $run->x + $margins['left'],
+            y: $lineFragment->pageY + ($run->y - $line->y) + $margins['top'],
+            baseline: $lineFragment->pageBaseline + ($run->baseline - $line->baseline) + $margins['top'],
+            text: $run->text,
+            fontSize: $run->fontSize,
+            fontFamily: $run->style->get('font-family'),
+            fontWeight: max(100, min(900, $fontWeight)),
+            fontStyle: strtolower(trim($run->style->get('font-style', 'normal') ?? 'normal')),
+            color: ColorParser::parse($run->style->get('color', 'black')),
+        );
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
