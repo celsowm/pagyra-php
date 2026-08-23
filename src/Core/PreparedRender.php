@@ -29,6 +29,7 @@ final readonly class PreparedRender implements \JsonSerializable
         public ?PaginationResult $pagination = null,
         public ?DisplayList $displayList = null,
         public ?FontRegistry $fontRegistry = null,
+        public ?array $pageMargins = null,
     ) {
     }
 
@@ -42,6 +43,7 @@ final readonly class PreparedRender implements \JsonSerializable
             'stylesheetHrefs' => $this->stylesheetHrefs,
             'pageSize' => $this->pageSize,
             'margins' => $this->margins,
+            'pageMargins' => $this->pageMargins,
             'pagination' => $this->pagination,
             'displayList' => $this->displayList,
         ];
