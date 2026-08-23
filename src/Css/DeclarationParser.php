@@ -49,16 +49,24 @@ final class DeclarationParser
             $expanded = $this->borderShorthandExpander->expand($property, $value);
             if ($expanded !== null) {
                 foreach ($expanded as $expandedProperty => $expandedValue) {
-                    $declarations[$expandedProperty] = ['value' => $expandedValue, 'important' => $important];
+                    $this->assignDeclaration($declarations, $expandedProperty, $expandedValue, $important);
                 }
                 continue;
             }
 
-            $declarations[$property] = ['value' => $value, 'important' => $important];
+            $this->assignDeclaration($declarations, $property, $value, $important);
         }
 
         ksort($declarations);
         return $declarations;
+    }
+
+    /** @param array<string,array{value:string,important:bool}> $declarations */
+    private function assignDeclaration(array &$declarations, string $property, string $value, bool $important): void
+    {
+        $current = $declarations[$property] ?? null;
+        if ($current !== null && $current['important'] && !$important) return;
+        $declarations[$property] = ['value' => $value, 'important' => $important];
     }
 
     /** @return list<string> */
