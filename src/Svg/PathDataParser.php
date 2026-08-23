@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Pagyra\Svg;
 
 /**
- * Normalizes the core SVG path command set to absolute M/L/C/Z segments.
- * Quadratic commands are converted to cubic curves to match pagyra-js.
+ * Normalizes SVG path commands to absolute M/L/C/Z segments.
+ * Quadratic and elliptical-arc commands are converted to cubic curves to match pagyra-js.
  */
 final class PathDataParser
 {
@@ -146,6 +146,40 @@ final class PathDataParser
                     }
                     break;
 
+                case 'A': case 'a':
+                    $relative = $command === 'a';
+                    while (true) {
+                        $rx = $this->number();
+                        $ry = $this->number();
+                        $rotation = $this->number();
+                        $largeArc = $this->flag();
+                        $sweep = $this->flag();
+                        $end = $this->pair();
+                        if ($rx === null || $ry === null || $rotation === null || $largeArc === null || $sweep === null || $end === null) break;
+
+                        $ex = $relative ? $x + $end[0] : $end[0];
+                        $ey = $relative ? $y + $end[1] : $end[1];
+                        $curves = $this->arcToCubicCurves($x, $y, $rx, $ry, $rotation, $largeArc === 1, $sweep === 1, $ex, $ey);
+                        if ($curves === []) {
+                            if ($x !== $ex || $y !== $ey) $segments[] = ['type' => 'L', 'x' => $ex, 'y' => $ey];
+                        } else {
+                            foreach ($curves as $curve) {
+                                $segments[] = [
+                                    'type' => 'C',
+                                    'x1' => $curve[0], 'y1' => $curve[1],
+                                    'x2' => $curve[2], 'y2' => $curve[3],
+                                    'x' => $curve[4], 'y' => $curve[5],
+                                ];
+                            }
+                        }
+                        $x = $ex; $y = $ey;
+                        $last = $curves === [] ? null : $curves[array_key_last($curves)];
+                        $prevCubicX = $last[2] ?? null;
+                        $prevCubicY = $last[3] ?? null;
+                        $prevQuadX = $prevQuadY = null;
+                    }
+                    break;
+
                 case 'Z': case 'z':
                     if ($x !== $startX || $y !== $startY) $segments[] = ['type' => 'L', 'x' => $startX, 'y' => $startY];
                     $segments[] = ['type' => 'Z'];
@@ -168,6 +202,20 @@ final class PathDataParser
         $x = $this->number();
         $y = $this->number();
         return $x === null || $y === null ? null : [$x, $y];
+    }
+
+    private function flag(): ?int
+    {
+        $this->skipSeparators();
+        if ($this->done()) return null;
+        $char = $this->source[$this->index];
+        if ($char === '0' || $char === '1') {
+            $this->index++;
+            return $char === '1' ? 1 : 0;
+        }
+        $value = $this->number();
+        if ($value === null) return null;
+        return $value == 0.0 ? 0 : 1;
     }
 
     private function number(): ?float
@@ -208,5 +256,97 @@ final class PathDataParser
             'x' => $x,
             'y' => $y,
         ];
+    }
+
+    /** @return list<array{0:float,1:float,2:float,3:float,4:float,5:float}> */
+    private function arcToCubicCurves(
+        float $x0,
+        float $y0,
+        float $rx,
+        float $ry,
+        float $angle,
+        bool $largeArc,
+        bool $sweep,
+        float $x,
+        float $y,
+    ): array {
+        if ($x0 === $x && $y0 === $y) return [];
+        $rx = abs($rx); $ry = abs($ry);
+        if ($rx === 0.0 || $ry === 0.0) return [];
+
+        $rad = $angle * M_PI / 180.0;
+        $cosAngle = cos($rad); $sinAngle = sin($rad);
+        $dx2 = ($x0 - $x) / 2.0; $dy2 = ($y0 - $y) / 2.0;
+        $x1p = $cosAngle * $dx2 + $sinAngle * $dy2;
+        $y1p = -$sinAngle * $dx2 + $cosAngle * $dy2;
+
+        $rxSq = $rx * $rx; $rySq = $ry * $ry;
+        $x1pSq = $x1p * $x1p; $y1pSq = $y1p * $y1p;
+        $radiiCheck = $x1pSq / $rxSq + $y1pSq / $rySq;
+        if ($radiiCheck > 1.0) {
+            $scale = sqrt($radiiCheck);
+            $rx *= $scale; $ry *= $scale;
+            $rxSq = $rx * $rx; $rySq = $ry * $ry;
+        }
+
+        $sign = $largeArc === $sweep ? -1.0 : 1.0;
+        $denominator = $rxSq * $y1pSq + $rySq * $x1pSq;
+        $sq = $denominator === 0.0 ? 0.0 : ($rxSq * $rySq - $rxSq * $y1pSq - $rySq * $x1pSq) / $denominator;
+        $coef = $sign * sqrt(max(0.0, $sq));
+        $cxp = ($coef * $rx * $y1p) / $ry;
+        $cyp = (-$coef * $ry * $x1p) / $rx;
+        $cx = $cosAngle * $cxp - $sinAngle * $cyp + ($x0 + $x) / 2.0;
+        $cy = $sinAngle * $cxp + $cosAngle * $cyp + ($y0 + $y) / 2.0;
+
+        $startAngle = $this->angleBetween(1.0, 0.0, ($x1p - $cxp) / $rx, ($y1p - $cyp) / $ry);
+        $deltaAngle = $this->angleBetween(
+            ($x1p - $cxp) / $rx,
+            ($y1p - $cyp) / $ry,
+            (-$x1p - $cxp) / $rx,
+            (-$y1p - $cyp) / $ry,
+        );
+        if (!$sweep && $deltaAngle > 0.0) $deltaAngle -= 2.0 * M_PI;
+        elseif ($sweep && $deltaAngle < 0.0) $deltaAngle += 2.0 * M_PI;
+
+        $segmentCount = (int) ceil(abs($deltaAngle) / (M_PI / 2.0));
+        if ($segmentCount <= 0) return [];
+        $delta = $deltaAngle / $segmentCount;
+        $t = (4.0 / 3.0) * tan($delta / 4.0);
+        $start = $startAngle;
+        $prevX = $x0; $prevY = $y0;
+        $curves = [];
+
+        for ($i = 0; $i < $segmentCount; $i++) {
+            $end = $start + $delta;
+            $sinStart = sin($start); $cosStart = cos($start);
+            $sinEnd = sin($end); $cosEnd = cos($end);
+            $x2 = $cx + $rx * $cosAngle * $cosEnd - $ry * $sinAngle * $sinEnd;
+            $y2 = $cy + $rx * $sinAngle * $cosEnd + $ry * $cosAngle * $sinEnd;
+            $dx1 = -$rx * $cosAngle * $sinStart - $ry * $sinAngle * $cosStart;
+            $dy1 = -$rx * $sinAngle * $sinStart + $ry * $cosAngle * $cosStart;
+            $dxEnd = -$rx * $cosAngle * $sinEnd - $ry * $sinAngle * $cosEnd;
+            $dyEnd = -$rx * $sinAngle * $sinEnd + $ry * $cosAngle * $cosEnd;
+            $curves[] = [
+                $prevX + $t * $dx1,
+                $prevY + $t * $dy1,
+                $x2 - $t * $dxEnd,
+                $y2 - $t * $dyEnd,
+                $x2,
+                $y2,
+            ];
+            $prevX = $x2; $prevY = $y2; $start = $end;
+        }
+
+        return $curves;
+    }
+
+    private function angleBetween(float $ux, float $uy, float $vx, float $vy): float
+    {
+        $dot = $ux * $vx + $uy * $vy;
+        $length = sqrt(($ux * $ux + $uy * $uy) * ($vx * $vx + $vy * $vy));
+        $ratio = $length === 0.0 ? 0.0 : $dot / $length;
+        $clamped = max(-1.0, min(1.0, $ratio));
+        $sign = $ux * $vy - $uy * $vx < 0.0 ? -1.0 : 1.0;
+        return $sign * acos($clamped);
     }
 }
