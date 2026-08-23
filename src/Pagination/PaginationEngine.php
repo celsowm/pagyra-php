@@ -14,36 +14,17 @@ final class PaginationEngine
     public function paginate(LayoutNode $root, float $contentHeight): PaginationResult
     {
         $flow = new PageFlow($contentHeight);
+        $nodeOffsets = (new RecursivePaginationOffsets())->resolve($root, $flow);
         $placements = [];
-        $offset = 0.0;
         $maxEnd = 0.0;
 
         foreach ($root->children as $node) {
+            $offset = $this->offsetFor($node, $nodeOffsets);
             $start = $node->box->marginBox()->y + $offset;
-            $before = $this->breakValue($node, 'before');
-            $beforeOffset = $this->forcedBreakOffset($before, $start, $flow);
-            if ($beforeOffset > self::EPSILON) {
-                $offset += $beforeOffset;
-                $start += $beforeOffset;
-            }
-
-            $lineConstraintOffset = $this->widowOrphanOffset($node, $start, $offset, $flow);
-            if ($lineConstraintOffset > self::EPSILON) {
-                $offset += $lineConstraintOffset;
-                $start += $lineConstraintOffset;
-            }
-
-            $insideOffset = $this->breakInsideAvoidOffset($node, $offset, $flow);
-            if ($insideOffset > self::EPSILON) {
-                $offset += $insideOffset;
-                $start += $insideOffset;
-            }
-
-            $originalEnd = max($node->box->marginBox()->bottom(), $this->subtreeBottom($node));
-            $end = $originalEnd + $offset;
+            $end = $this->absoluteSubtreeBottom($node, $nodeOffsets);
             $pageIndex = $flow->pageIndexAt($start);
             $endPageIndex = $flow->pageIndexAt(max($start, $end - self::EPSILON));
-            $fragments = $this->fragmentsForNode($node, $start, $end, $offset, $flow);
+            $fragments = $this->fragmentsForNode($node, $start, $end, $offset, $flow, $nodeOffsets);
 
             $placements[] = new PagePlacement(
                 node: $node,
@@ -55,12 +36,6 @@ final class PaginationEngine
                 fragments: $fragments,
             );
             $maxEnd = max($maxEnd, $end);
-
-            $after = $this->breakValue($node, 'after');
-            $afterOffset = $this->forcedBreakOffset($after, $end, $flow);
-            if ($afterOffset > self::EPSILON) {
-                $offset += $afterOffset;
-            }
         }
 
         $pageCount = max(1, $flow->pageIndexAt(max(0.0, $maxEnd - self::EPSILON)) + 1);
@@ -90,9 +65,15 @@ final class PaginationEngine
         return $pages;
     }
 
-    /** @return list<PageFragment> */
-    private function fragmentsForNode(LayoutNode $node, float $start, float $end, float $offset, PageFlow $flow): array
-    {
+    /** @param array<int,float> $nodeOffsets @return list<PageFragment> */
+    private function fragmentsForNode(
+        LayoutNode $node,
+        float $start,
+        float $end,
+        float $offset,
+        PageFlow $flow,
+        array $nodeOffsets,
+    ): array {
         $linesByPage = [];
         foreach ($node->lineBoxes as $lineIndex => $line) {
             $lineFragment = $this->lineFragmentForPage($lineIndex, $line->y, $line->baseline, $line, $offset, $flow);
@@ -108,7 +89,7 @@ final class PaginationEngine
                 continuousStartY: $start,
                 continuousEndY: $start,
                 lines: $linesByPage[$pageIndex] ?? [],
-                blocks: $this->blockFragmentsForPage($node, $pageIndex, $offset, $flow),
+                blocks: $this->blockFragmentsForPage($node, $pageIndex, $flow, $nodeOffsets),
             )];
         }
 
@@ -130,7 +111,7 @@ final class PaginationEngine
                 continuousStartY: $fragmentStart,
                 continuousEndY: $fragmentEnd,
                 lines: $linesByPage[$pageIndex] ?? [],
-                blocks: $this->blockFragmentsForPage($node, $pageIndex, $offset, $flow),
+                blocks: $this->blockFragmentsForPage($node, $pageIndex, $flow, $nodeOffsets),
             );
         }
 
@@ -155,19 +136,21 @@ final class PaginationEngine
         );
     }
 
-    /** @return list<BlockFragment> */
-    private function blockFragmentsForPage(LayoutNode $node, int $pageIndex, float $offset, PageFlow $flow): array
+    /** @param array<int,float> $nodeOffsets @return list<BlockFragment> */
+    private function blockFragmentsForPage(LayoutNode $node, int $pageIndex, PageFlow $flow, array $nodeOffsets): array
     {
         $fragments = [];
         foreach ($node->children as $child) {
-            $fragment = $this->blockFragmentForPage($child, $pageIndex, $offset, $flow);
+            $fragment = $this->blockFragmentForPage($child, $pageIndex, $flow, $nodeOffsets);
             if ($fragment !== null) $fragments[] = $fragment;
         }
         return $fragments;
     }
 
-    private function blockFragmentForPage(LayoutNode $node, int $pageIndex, float $offset, PageFlow $flow): ?BlockFragment
+    /** @param array<int,float> $nodeOffsets */
+    private function blockFragmentForPage(LayoutNode $node, int $pageIndex, PageFlow $flow, array $nodeOffsets): ?BlockFragment
     {
+        $offset = $this->offsetFor($node, $nodeOffsets);
         $border = $node->box->borderBox();
         $start = $border->y + $offset;
         $end = $border->bottom() + $offset;
@@ -182,7 +165,7 @@ final class PaginationEngine
         $fragmentEnd = min($end, $pageEnd);
         $children = [];
         foreach ($node->children as $child) {
-            $childFragment = $this->blockFragmentForPage($child, $pageIndex, $offset, $flow);
+            $childFragment = $this->blockFragmentForPage($child, $pageIndex, $flow, $nodeOffsets);
             if ($childFragment !== null) $children[] = $childFragment;
         }
 
@@ -204,83 +187,19 @@ final class PaginationEngine
         );
     }
 
-    private function widowOrphanOffset(LayoutNode $node, float $start, float $offset, PageFlow $flow): float
+    /** @param array<int,float> $nodeOffsets */
+    private function offsetFor(LayoutNode $node, array $nodeOffsets): float
     {
-        if (count($node->lineBoxes) < 2) return 0.0;
+        return $nodeOffsets[spl_object_id($node)] ?? 0.0;
+    }
 
-        $pageCounts = [];
-        foreach ($node->lineBoxes as $line) {
-            $baseline = $line->baseline + $offset;
-            $pageIndex = $flow->pageIndexAt(max(0.0, $baseline - self::EPSILON));
-            $pageCounts[$pageIndex] = ($pageCounts[$pageIndex] ?? 0) + 1;
+    /** @param array<int,float> $nodeOffsets */
+    private function absoluteSubtreeBottom(LayoutNode $node, array $nodeOffsets): float
+    {
+        $bottom = $node->box->marginBox()->bottom() + $this->offsetFor($node, $nodeOffsets);
+        foreach ($node->children as $child) {
+            $bottom = max($bottom, $this->absoluteSubtreeBottom($child, $nodeOffsets));
         }
-        if (count($pageCounts) < 2) return 0.0;
-
-        ksort($pageCounts);
-        $firstPage = (int) array_key_first($pageCounts);
-        $lastPage = (int) array_key_last($pageCounts);
-        $orphans = $this->positiveIntegerStyle($node, 'orphans', 2);
-        $widows = $this->positiveIntegerStyle($node, 'widows', 2);
-        if (($pageCounts[$firstPage] ?? 0) >= $orphans && ($pageCounts[$lastPage] ?? 0) >= $widows) return 0.0;
-
-        $originalStart = $node->box->marginBox()->y;
-        $originalEnd = max($node->box->marginBox()->bottom(), $this->subtreeBottom($node));
-        if (($originalEnd - $originalStart) > $flow->contentHeight + self::EPSILON) return 0.0;
-
-        $currentPage = $flow->pageIndexAt($start);
-        return max(0.0, $flow->contentStartForPage($currentPage + 1) - $start);
-    }
-
-    private function breakInsideAvoidOffset(LayoutNode $node, float $offset, PageFlow $flow): float
-    {
-        $value = strtolower(trim(
-            $node->source->style->get('break-inside')
-            ?? $node->source->style->get('page-break-inside')
-            ?? '',
-        ));
-        if (!in_array($value, ['avoid', 'avoid-page'], true)) return 0.0;
-
-        $border = $node->box->borderBox();
-        $top = $border->y + $offset;
-        $bottom = $border->bottom() + $offset;
-        $startPage = $flow->pageIndexAt($top);
-        $endPage = $flow->pageIndexAt(max($top, $bottom - self::EPSILON));
-        if ($startPage === $endPage) return 0.0;
-
-        return max(0.0, $flow->contentStartForPage($startPage + 1) - $top);
-    }
-
-    private function positiveIntegerStyle(LayoutNode $node, string $property, int $fallback): int
-    {
-        $raw = trim($node->source->style->get($property, (string) $fallback) ?? (string) $fallback);
-        if (!preg_match('/^\d+$/', $raw)) return $fallback;
-        return max(1, (int) $raw);
-    }
-
-    private function breakValue(LayoutNode $node, string $side): ?string
-    {
-        $modern = $node->source->style->get('break-' . $side);
-        $legacy = $node->source->style->get('page-break-' . $side);
-        $value = strtolower(trim($modern ?? $legacy ?? ''));
-        if ($value === 'always') return 'page';
-        return in_array($value, ['page', 'left', 'right'], true) ? $value : null;
-    }
-
-    private function forcedBreakOffset(?string $value, float $coordinate, PageFlow $flow): float
-    {
-        if ($value === null) return 0.0;
-        $currentPage = $flow->pageIndexAt($coordinate);
-        $currentStart = $flow->contentStartForPage($currentPage);
-        $target = abs($coordinate - $currentStart) <= self::EPSILON ? $currentPage : $currentPage + 1;
-        if ($value === 'left' && $target % 2 === 0) $target++;
-        elseif ($value === 'right' && $target % 2 !== 0) $target++;
-        return max(0.0, $flow->contentStartForPage($target) - $coordinate);
-    }
-
-    private function subtreeBottom(LayoutNode $node): float
-    {
-        $bottom = $node->box->marginBox()->bottom();
-        foreach ($node->children as $child) $bottom = max($bottom, $this->subtreeBottom($child));
         return $bottom;
     }
 }
