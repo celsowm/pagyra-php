@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pagyra\Paint;
 
 use Pagyra\Css\Color\ColorParser;
+use Pagyra\Css\Color\Rgba;
 use Pagyra\Geometry\Rect;
 use Pagyra\Image\ImageMetadataReader;
 use Pagyra\Image\ImageSourceBytesResolver;
@@ -19,6 +20,8 @@ use Pagyra\Pagination\PhysicalPageEntry;
 
 final class DisplayListBuilder
 {
+    private const EPSILON = 0.000001;
+
     private readonly ImageMetadataReader $imageMetadata;
 
     public function __construct(
@@ -47,7 +50,7 @@ final class DisplayListBuilder
         return new DisplayList($pages);
     }
 
-    /** @param list<BoxPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendEntry(array &$commands, PhysicalPageEntry $entry, PaginationResult $pagination, array $margins): void
     {
         $node = $entry->placement->node;
@@ -57,7 +60,7 @@ final class DisplayListBuilder
         foreach ($entry->fragment->blocks as $block) $this->appendBlock($commands, $block, $margins);
     }
 
-    /** @param list<BoxPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendTopLevelBox(
         array &$commands,
         LayoutNode $node,
@@ -75,38 +78,164 @@ final class DisplayListBuilder
         $end = min($continuousEnd, $pageEnd);
         if ($end <= $start) return;
 
+        $x = $border->x + $margins['left'];
+        $y = ($start - $pageStart) + $margins['top'];
+        $width = $border->width;
+        $height = $end - $start;
+
         $commands[] = new BoxPaintCommand(
             node: $node,
             pageIndex: $pageIndex,
-            x: $border->x + $margins['left'],
-            y: ($start - $pageStart) + $margins['top'],
-            width: $border->width,
-            height: $end - $start,
+            x: $x,
+            y: $y,
+            width: $width,
+            height: $height,
             backgroundColor: ColorParser::parse($node->source->style->get('background-color')),
+        );
+        $this->appendBorders(
+            $commands,
+            $node,
+            $pageIndex,
+            $x,
+            $y,
+            $width,
+            $height,
+            drawTop: abs($start - $continuousStart) <= self::EPSILON,
+            drawBottom: abs($end - $continuousEnd) <= self::EPSILON,
         );
     }
 
-    /** @param list<BoxPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendBlock(array &$commands, BlockFragment $block, array $margins): void
     {
         $border = $block->node->box->borderBox();
         if ($block->height > 0.0) {
+            $x = $border->x + $margins['left'];
+            $y = $block->pageY + $margins['top'];
             $commands[] = new BoxPaintCommand(
                 node: $block->node,
                 pageIndex: $block->pageIndex,
-                x: $border->x + $margins['left'],
-                y: $block->pageY + $margins['top'],
+                x: $x,
+                y: $y,
                 width: $border->width,
                 height: $block->height,
                 backgroundColor: ColorParser::parse($block->node->source->style->get('background-color')),
+            );
+
+            $wholeBox = $block->height + self::EPSILON >= $border->height;
+            $this->appendBorders(
+                $commands,
+                $block->node,
+                $block->pageIndex,
+                $x,
+                $y,
+                $border->width,
+                $block->height,
+                drawTop: $wholeBox,
+                drawBottom: $wholeBox,
             );
         }
         $this->appendLines($commands, $block->lines, $margins);
         foreach ($block->children as $child) $this->appendBlock($commands, $child, $margins);
     }
 
+    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    private function appendBorders(
+        array &$commands,
+        LayoutNode $node,
+        int $pageIndex,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+        bool $drawTop,
+        bool $drawBottom,
+    ): void {
+        if ($width <= 0.0 || $height <= 0.0) return;
+
+        $edges = $node->box->border;
+        $top = max(0.0, min($edges->top, $height));
+        $right = max(0.0, min($edges->right, $width));
+        $bottom = max(0.0, min($edges->bottom, $height));
+        $left = max(0.0, min($edges->left, $width));
+
+        if ($drawTop && $top > 0.0) {
+            $this->appendBorderSide($commands, $node, $pageIndex, 'top', $x, $y, $width, $top);
+        }
+        if ($drawBottom && $bottom > 0.0) {
+            $this->appendBorderSide($commands, $node, $pageIndex, 'bottom', $x, $y + $height - $bottom, $width, $bottom);
+        }
+
+        $sideY = $y + ($drawTop ? $top : 0.0);
+        $sideHeight = max(0.0, $height - ($drawTop ? $top : 0.0) - ($drawBottom ? $bottom : 0.0));
+        if ($left > 0.0 && $sideHeight > 0.0) {
+            $this->appendBorderSide($commands, $node, $pageIndex, 'left', $x, $sideY, $left, $sideHeight);
+        }
+        if ($right > 0.0 && $sideHeight > 0.0) {
+            $this->appendBorderSide($commands, $node, $pageIndex, 'right', $x + $width - $right, $sideY, $right, $sideHeight);
+        }
+    }
+
+    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    private function appendBorderSide(
+        array &$commands,
+        LayoutNode $node,
+        int $pageIndex,
+        string $side,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+    ): void {
+        if ($this->borderStyle($node, $side) !== 'solid') return;
+        $color = $this->borderColor($node, $side);
+        if (!$color instanceof Rgba || $color->a <= 0.0) return;
+        $commands[] = new BorderPaintCommand($node, $pageIndex, $side, $x, $y, $width, $height, $color);
+    }
+
+    private function borderStyle(LayoutNode $node, string $side): string
+    {
+        $specific = $node->source->style->get('border-' . $side . '-style');
+        if ($specific !== null && trim($specific) !== '') return strtolower(trim($specific));
+        $raw = trim($node->source->style->get('border-style', 'none') ?? 'none');
+        $parts = preg_split('/\s+/', $raw) ?: ['none'];
+        $expanded = $this->expandFourValues($parts);
+        return strtolower($expanded[array_search($side, ['top', 'right', 'bottom', 'left'], true)] ?? 'none');
+    }
+
+    private function borderColor(LayoutNode $node, string $side): ?Rgba
+    {
+        $specific = trim($node->source->style->get('border-' . $side . '-color') ?? '');
+        $raw = $specific !== '' ? $specific : trim($node->source->style->get('border-color') ?? '');
+
+        if ($specific === '' && $raw !== '' && !str_contains($raw, '(')) {
+            $parts = preg_split('/\s+/', $raw) ?: [];
+            if (count($parts) > 1) {
+                $expanded = $this->expandFourValues($parts);
+                $raw = $expanded[array_search($side, ['top', 'right', 'bottom', 'left'], true)] ?? $raw;
+            }
+        }
+
+        if ($raw === '' || strtolower($raw) === 'currentcolor') {
+            $raw = $node->source->style->get('color', 'black') ?? 'black';
+        }
+        return ColorParser::parse($raw);
+    }
+
+    /** @param list<string> $parts @return list<string> */
+    private function expandFourValues(array $parts): array
+    {
+        if ($parts === []) return ['', '', '', ''];
+        return match (count($parts)) {
+            1 => [$parts[0], $parts[0], $parts[0], $parts[0]],
+            2 => [$parts[0], $parts[1], $parts[0], $parts[1]],
+            3 => [$parts[0], $parts[1], $parts[2], $parts[1]],
+            default => [$parts[0], $parts[1], $parts[2], $parts[3]],
+        };
+    }
+
     /**
-     * @param list<BoxPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     * @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
      * @param list<LineFragment> $lines
      */
     private function appendLines(array &$commands, array $lines, array $margins): void
