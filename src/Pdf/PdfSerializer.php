@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Pdf;
 
+use Pagyra\Css\Color\Rgba;
 use Pagyra\Fonts\FontRegistry;
 use Pagyra\Fonts\RegisteredFont;
 use Pagyra\Fonts\Ttf\TtfSubsetter;
@@ -31,6 +32,7 @@ final class PdfSerializer
         $usage = $this->collectFontUsage($displayList, $fontRegistry);
         $fontResources = $this->buildFontResources($usage, $objects, $reserve);
         $imageResources = $this->buildImageResources($displayList, $objects, $reserve);
+        $extGStateResources = $this->buildExtGStateResources($displayList, $objects, $reserve);
 
         $pageIds = [];
         foreach ($displayList->pages as $page) {
@@ -39,11 +41,19 @@ final class PdfSerializer
             $usedImages = [];
             foreach ($page->commands as $command) {
                 if ($command instanceof BoxPaintCommand) {
-                    $content .= $this->serializeBox($command, $page->height);
+                    $content .= $this->serializeBox(
+                        $command,
+                        $page->height,
+                        $this->graphicsStateName($command->backgroundColor, $extGStateResources),
+                    );
                     continue;
                 }
                 if ($command instanceof BorderPaintCommand) {
-                    $content .= $this->serializeBorder($command, $page->height);
+                    $content .= $this->serializeBorder(
+                        $command,
+                        $page->height,
+                        $this->graphicsStateName($command->color, $extGStateResources),
+                    );
                     continue;
                 }
                 if ($command instanceof ImagePaintCommand) {
@@ -60,9 +70,10 @@ final class PdfSerializer
                 [$key] = $this->fontChoice($command, $fontRegistry);
                 $resource = $fontResources[$key];
                 $usedFonts[$resource['name']] = $resource['id'];
+                $graphicsState = $this->graphicsStateName($command->color, $extGStateResources);
                 $content .= $resource['face'] instanceof RegisteredFont
-                    ? $this->serializeEmbeddedText($command, $page->height, $resource['name'], $resource['face'])
-                    : $this->serializeBase14Text($command, $page->height, $resource['name']);
+                    ? $this->serializeEmbeddedText($command, $page->height, $resource['name'], $resource['face'], $graphicsState)
+                    : $this->serializeBase14Text($command, $page->height, $resource['name'], $graphicsState);
             }
 
             $contentId = $reserve();
@@ -74,7 +85,9 @@ final class PdfSerializer
             foreach ($usedFonts as $resourceName => $fontId) $fonts .= '/' . $resourceName . ' ' . $fontId . ' 0 R ';
             $images = '';
             foreach ($usedImages as $resourceName => $imageId) $images .= '/' . $resourceName . ' ' . $imageId . ' 0 R ';
-            $resources = '<< /Font << ' . $fonts . '>> /XObject << ' . $images . '>> >>';
+            $states = '';
+            foreach ($extGStateResources as $state) $states .= '/' . $state['name'] . ' ' . $state['id'] . ' 0 R ';
+            $resources = '<< /Font << ' . $fonts . '>> /XObject << ' . $images . '>> /ExtGState << ' . $states . '>> >>';
             $widthPt = $this->number(Units::pxToPt($page->width));
             $heightPt = $this->number(Units::pxToPt($page->height));
             $objects[$pageId] = '<< /Type /Page /Parent ' . $pagesId . ' 0 R '
@@ -212,6 +225,42 @@ final class PdfSerializer
         return $resources;
     }
 
+    private function buildExtGStateResources(DisplayList $displayList, array &$objects, callable $reserve): array
+    {
+        $resources = [];
+        $index = 1;
+        foreach ($displayList->pages as $page) {
+            foreach ($page->commands as $command) {
+                $color = match (true) {
+                    $command instanceof BoxPaintCommand => $command->backgroundColor,
+                    $command instanceof BorderPaintCommand => $command->color,
+                    $command instanceof TextPaintCommand => $command->color,
+                    default => null,
+                };
+                if (!$color instanceof Rgba || $color->a <= 0.0 || $color->a >= 1.0) continue;
+                $key = $this->alphaKey($color->a);
+                if (isset($resources[$key])) continue;
+                $id = $reserve();
+                $name = 'GS' . $index++;
+                $alpha = $this->number($color->a);
+                $objects[$id] = '<< /Type /ExtGState /ca ' . $alpha . ' /CA ' . $alpha . ' >>';
+                $resources[$key] = ['name' => $name, 'id' => $id];
+            }
+        }
+        return $resources;
+    }
+
+    private function graphicsStateName(?Rgba $color, array $resources): ?string
+    {
+        if (!$color instanceof Rgba || $color->a <= 0.0 || $color->a >= 1.0) return null;
+        return $resources[$this->alphaKey($color->a)]['name'] ?? null;
+    }
+
+    private function alphaKey(float $alpha): string
+    {
+        return number_format(max(0.0, min(1.0, $alpha)), 6, '.', '');
+    }
+
     private function collectFontUsage(DisplayList $displayList, ?FontRegistry $fontRegistry): array
     {
         $usage = [];
@@ -280,7 +329,7 @@ final class PdfSerializer
         return sprintf('%04X%04X', 0xD800 + (($value >> 10) & 0x3FF), 0xDC00 + ($value & 0x3FF));
     }
 
-    private function serializeBox(BoxPaintCommand $command, float $pageHeightPx): string
+    private function serializeBox(BoxPaintCommand $command, float $pageHeightPx, ?string $graphicsState = null): string
     {
         $color = $command->backgroundColor;
         if ($color === null || $color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) return '';
@@ -290,11 +339,12 @@ final class PdfSerializer
             $command->width,
             $command->height,
             $pageHeightPx,
-            ...$color->toPdfRgb(),
+            $color,
+            $graphicsState,
         );
     }
 
-    private function serializeBorder(BorderPaintCommand $command, float $pageHeightPx): string
+    private function serializeBorder(BorderPaintCommand $command, float $pageHeightPx, ?string $graphicsState = null): string
     {
         if ($command->color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) return '';
         return $this->serializeFilledRect(
@@ -303,7 +353,8 @@ final class PdfSerializer
             $command->width,
             $command->height,
             $pageHeightPx,
-            ...$command->color->toPdfRgb(),
+            $command->color,
+            $graphicsState,
         );
     }
 
@@ -313,13 +364,15 @@ final class PdfSerializer
         float $widthPx,
         float $heightPx,
         float $pageHeightPx,
-        float $r,
-        float $g,
-        float $b,
+        Rgba $color,
+        ?string $graphicsState,
     ): string {
         $x = Units::pxToPt($xPx);
         $y = Units::pxToPt($pageHeightPx - $yPx - $heightPx);
-        return "q\n" . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
+        [$r, $g, $b] = $color->toPdfRgb();
+        return "q\n"
+            . ($graphicsState !== null ? '/' . $graphicsState . " gs\n" : '')
+            . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
             . $this->number($x) . ' ' . $this->number($y) . ' ' . $this->number(Units::pxToPt($widthPx)) . ' '
             . $this->number(Units::pxToPt($heightPx)) . " re f\nQ\n";
     }
@@ -345,8 +398,14 @@ final class PdfSerializer
         return $content;
     }
 
-    private function serializeEmbeddedText(TextPaintCommand $command, float $pageHeightPx, string $resourceName, RegisteredFont $face): string
-    {
+    private function serializeEmbeddedText(
+        TextPaintCommand $command,
+        float $pageHeightPx,
+        string $resourceName,
+        RegisteredFont $face,
+        ?string $graphicsState = null,
+    ): string {
+        if ($command->color instanceof Rgba && $command->color->a <= 0.0) return '';
         $codePoints = $this->codePoints($command->text);
         $glyphs = array_map(fn (int $cp): int => $face->metrics->glyphId($cp), $codePoints);
         $wordSpacing = $this->spacingPx($command, 'word-spacing');
@@ -366,14 +425,20 @@ final class PdfSerializer
         $fontSize = Units::pxToPt($command->fontSize);
         $letterSpacingPt = Units::pxToPt($this->spacingPx($command, 'letter-spacing'));
         [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
-        return "BT\n/" . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
+        $text = "BT\n/" . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
             . ($letterSpacingPt !== 0.0 ? $this->number($letterSpacingPt) . " Tc\n" : '')
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n1 0 0 1 "
             . $this->number($x) . ' ' . $this->number($y) . " Tm\n[" . implode(' ', $items) . "] TJ\nET\n";
+        return $graphicsState !== null ? "q\n/" . $graphicsState . " gs\n" . $text . "Q\n" : $text;
     }
 
-    private function serializeBase14Text(TextPaintCommand $command, float $pageHeightPx, string $resourceName): string
-    {
+    private function serializeBase14Text(
+        TextPaintCommand $command,
+        float $pageHeightPx,
+        string $resourceName,
+        ?string $graphicsState = null,
+    ): string {
+        if ($command->color instanceof Rgba && $command->color->a <= 0.0) return '';
         $encoded = $this->encodeWinAnsi($command->text);
         $x = Units::pxToPt($command->x);
         $y = Units::pxToPt($pageHeightPx - $command->baseline);
@@ -381,11 +446,12 @@ final class PdfSerializer
         $letterSpacingPt = Units::pxToPt($this->spacingPx($command, 'letter-spacing'));
         $wordSpacingPt = Units::pxToPt($this->spacingPx($command, 'word-spacing'));
         [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
-        return "BT\n/" . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
+        $text = "BT\n/" . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
             . ($letterSpacingPt !== 0.0 ? $this->number($letterSpacingPt) . " Tc\n" : '')
             . ($wordSpacingPt !== 0.0 ? $this->number($wordSpacingPt) . " Tw\n" : '')
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n1 0 0 1 "
             . $this->number($x) . ' ' . $this->number($y) . " Tm\n(" . $this->escapePdfString($encoded) . ") Tj\nET\n";
+        return $graphicsState !== null ? "q\n/" . $graphicsState . " gs\n" . $text . "Q\n" : $text;
     }
 
     private function spacingPx(TextPaintCommand $command, string $property): float
