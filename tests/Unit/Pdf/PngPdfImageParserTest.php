@@ -45,6 +45,39 @@ final class PngPdfImageParserTest extends TestCase
         self::assertSame("\x80", gzuncompress($data->alphaCompressedData));
     }
 
+    public function testDownsamplesSixteenBitRgbaToJsCompatibleEightBitStreams(): void
+    {
+        $compressed = gzcompress("\x00\x12\x34\x56\x78\x9a\xbc\xde\xf0");
+        self::assertIsString($compressed);
+
+        $data = (new PngPdfImageParser())->parse($this->png(1, 1, 16, 6, $compressed));
+
+        self::assertNotNull($data);
+        self::assertSame('/DeviceRGB', $data->colorSpace);
+        self::assertSame(8, $data->bitsPerComponent);
+        self::assertSame(3, $data->colors);
+        self::assertFalse($data->usesPngPredictor);
+        self::assertNotNull($data->alphaCompressedData);
+        self::assertSame("\x12\x56\x9a", gzuncompress($data->compressedData));
+        self::assertSame("\xde", gzuncompress($data->alphaCompressedData));
+    }
+
+    public function testDownsamplesSixteenBitGrayscaleAlphaLikeJsReference(): void
+    {
+        $compressed = gzcompress("\x00\x44\x55\xaa\xbb");
+        self::assertIsString($compressed);
+
+        $data = (new PngPdfImageParser())->parse($this->png(1, 1, 16, 4, $compressed));
+
+        self::assertNotNull($data);
+        self::assertSame('/DeviceGray', $data->colorSpace);
+        self::assertSame(8, $data->bitsPerComponent);
+        self::assertSame(1, $data->colors);
+        self::assertNotNull($data->alphaCompressedData);
+        self::assertSame("\x44", gzuncompress($data->compressedData));
+        self::assertSame("\xaa", gzuncompress($data->alphaCompressedData));
+    }
+
     public function testPreservesIndexedPaletteAndBuildsSoftMaskFromPackedIndices(): void
     {
         // 4 pixels at 2 bits each: indexes 0, 1, 2, 3 => 00 01 10 11 = 0x1B.
