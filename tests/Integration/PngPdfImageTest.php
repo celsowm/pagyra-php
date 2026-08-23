@@ -52,6 +52,27 @@ final class PngPdfImageTest extends TestCase
         self::assertStringContainsString('/Im1 Do', $pdf);
     }
 
+    public function testSixteenBitRgbaPngUsesJsCompatibleEightBitSoftMask(): void
+    {
+        $compressed = gzcompress("\x00\x12\x34\x56\x78\x9a\xbc\xde\xf0");
+        self::assertIsString($compressed);
+        $png = $this->png(1, 1, 16, 6, $compressed);
+        $src = 'data:image/png;base64,' . base64_encode($png);
+
+        $pdf = Pagyra::renderHtmlToPdf([
+            'html' => '<p style="margin:0"><img src="' . $src . '" style="width:20px;height:20px"></p>',
+            'viewportWidth' => 200,
+            'viewportHeight' => 100,
+        ]);
+
+        self::assertStringContainsString('/ColorSpace /DeviceRGB', $pdf);
+        self::assertStringContainsString('/ColorSpace /DeviceGray', $pdf);
+        self::assertStringContainsString('/BitsPerComponent 8', $pdf);
+        self::assertStringContainsString('/SMask ', $pdf);
+        self::assertSame(2, substr_count($pdf, '/Subtype /Image'));
+        self::assertStringContainsString('/Im1 Do', $pdf);
+    }
+
     public function testIndexedPngUsesPaletteAndTransparencySoftMask(): void
     {
         $compressed = gzcompress("\x00\x1b");
