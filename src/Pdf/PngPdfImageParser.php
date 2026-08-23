@@ -57,11 +57,31 @@ final class PngPdfImageParser
         }
 
         if ($colorType === 0 && in_array($bitDepth, [1, 2, 4, 8, 16], true)) {
-            return new PngPdfImageData($width, $height, $bitDepth, 1, '/DeviceGray', $idat);
+            $mask = $this->grayColorKeyMask($transparency);
+            if ($transparency !== null && $mask === false) return null;
+            return new PngPdfImageData(
+                width: $width,
+                height: $height,
+                bitsPerComponent: $bitDepth,
+                colors: 1,
+                colorSpace: '/DeviceGray',
+                compressedData: $idat,
+                colorKeyMask: is_string($mask) ? $mask : null,
+            );
         }
 
         if ($colorType === 2 && in_array($bitDepth, [8, 16], true)) {
-            return new PngPdfImageData($width, $height, $bitDepth, 3, '/DeviceRGB', $idat);
+            $mask = $this->rgbColorKeyMask($transparency);
+            if ($transparency !== null && $mask === false) return null;
+            return new PngPdfImageData(
+                width: $width,
+                height: $height,
+                bitsPerComponent: $bitDepth,
+                colors: 3,
+                colorSpace: '/DeviceRGB',
+                compressedData: $idat,
+                colorKeyMask: is_string($mask) ? $mask : null,
+            );
         }
 
         if ($colorType === 3 && in_array($bitDepth, [1, 2, 4, 8], true) && $palette !== null) {
@@ -73,6 +93,26 @@ final class PngPdfImageParser
         }
 
         return null;
+    }
+
+    /** @return string|false|null */
+    private function grayColorKeyMask(?string $transparency): string|false|null
+    {
+        if ($transparency === null) return null;
+        if (strlen($transparency) !== 2) return false;
+        $sample = $this->u16($transparency, 0);
+        return $sample . ' ' . $sample;
+    }
+
+    /** @return string|false|null */
+    private function rgbColorKeyMask(?string $transparency): string|false|null
+    {
+        if ($transparency === null) return null;
+        if (strlen($transparency) !== 6) return false;
+        $r = $this->u16($transparency, 0);
+        $g = $this->u16($transparency, 2);
+        $b = $this->u16($transparency, 4);
+        return $r . ' ' . $r . ' ' . $g . ' ' . $g . ' ' . $b . ' ' . $b;
     }
 
     private function indexed(
@@ -249,6 +289,12 @@ final class PngPdfImageParser
         if ($pa <= $pb && $pa <= $pc) return $left;
         if ($pb <= $pc) return $up;
         return $upLeft;
+    }
+
+    private function u16(string $bytes, int $offset): int
+    {
+        $value = unpack('n', substr($bytes, $offset, 2));
+        return (int) ($value[1] ?? 0);
     }
 
     private function u32(string $bytes, int $offset): int
