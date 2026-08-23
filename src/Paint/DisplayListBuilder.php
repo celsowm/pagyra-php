@@ -82,6 +82,13 @@ final class DisplayListBuilder
         $y = ($start - $pageStart) + $margins['top'];
         $width = $border->width;
         $height = $end - $start;
+        $drawTop = abs($start - $continuousStart) <= self::EPSILON;
+        $drawBottom = abs($end - $continuousEnd) <= self::EPSILON;
+        $radius = $this->fragmentRadius(
+            BorderRadiusResolver::resolve($node->source->style, $border->width, $border->height),
+            $drawTop,
+            $drawBottom,
+        );
 
         $commands[] = new BoxPaintCommand(
             node: $node,
@@ -91,6 +98,7 @@ final class DisplayListBuilder
             width: $width,
             height: $height,
             backgroundColor: ColorParser::parse($node->source->style->get('background-color')),
+            borderRadius: BorderRadiusResolver::normalize($radius, $width, $height),
         );
         $this->appendBorders(
             $commands,
@@ -100,8 +108,8 @@ final class DisplayListBuilder
             $y,
             $width,
             $height,
-            drawTop: abs($start - $continuousStart) <= self::EPSILON,
-            drawBottom: abs($end - $continuousEnd) <= self::EPSILON,
+            drawTop: $drawTop,
+            drawBottom: $drawBottom,
         );
     }
 
@@ -112,6 +120,10 @@ final class DisplayListBuilder
         if ($block->height > 0.0) {
             $x = $border->x + $margins['left'];
             $y = $block->pageY + $margins['top'];
+            $wholeBox = $block->height + self::EPSILON >= $border->height;
+            $radius = $wholeBox
+                ? BorderRadiusResolver::resolve($block->node->source->style, $border->width, $border->height)
+                : new BorderRadius();
             $commands[] = new BoxPaintCommand(
                 node: $block->node,
                 pageIndex: $block->pageIndex,
@@ -120,9 +132,9 @@ final class DisplayListBuilder
                 width: $border->width,
                 height: $block->height,
                 backgroundColor: ColorParser::parse($block->node->source->style->get('background-color')),
+                borderRadius: BorderRadiusResolver::normalize($radius, $border->width, $block->height),
             );
 
-            $wholeBox = $block->height + self::EPSILON >= $border->height;
             $this->appendBorders(
                 $commands,
                 $block->node,
@@ -137,6 +149,16 @@ final class DisplayListBuilder
         }
         $this->appendLines($commands, $block->lines, $margins);
         foreach ($block->children as $child) $this->appendBlock($commands, $child, $margins);
+    }
+
+    private function fragmentRadius(BorderRadius $radius, bool $drawTop, bool $drawBottom): BorderRadius
+    {
+        return new BorderRadius(
+            $drawTop ? $radius->topLeft : new CornerRadius(),
+            $drawTop ? $radius->topRight : new CornerRadius(),
+            $drawBottom ? $radius->bottomRight : new CornerRadius(),
+            $drawBottom ? $radius->bottomLeft : new CornerRadius(),
+        );
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
