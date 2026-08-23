@@ -25,6 +25,7 @@ final class PngPdfImageParserTest extends TestCase
         self::assertSame('/DeviceRGB', $data->colorSpace);
         self::assertTrue($data->usesPngPredictor);
         self::assertNull($data->alphaCompressedData);
+        self::assertNull($data->colorKeyMask);
         self::assertSame($compressed, $data->compressedData);
     }
 
@@ -78,6 +79,34 @@ final class PngPdfImageParserTest extends TestCase
 
         self::assertNotNull($data);
         self::assertNull($data->alphaCompressedData);
+    }
+
+    public function testGrayscaleTrnsBecomesPdfColorKeyMask(): void
+    {
+        $compressed = gzcompress("\x00\x7f");
+        self::assertIsString($compressed);
+
+        $data = (new PngPdfImageParser())->parse(
+            $this->png(1, 1, 8, 0, $compressed, 0, null, pack('n', 127)),
+        );
+
+        self::assertNotNull($data);
+        self::assertSame('127 127', $data->colorKeyMask);
+        self::assertNull($data->alphaCompressedData);
+    }
+
+    public function testRgbTrnsPreservesSixteenBitSamplesInPdfColorKeyMask(): void
+    {
+        $compressed = gzcompress("\x00\x00\x0a\x00\x14\x00\x1e");
+        self::assertIsString($compressed);
+
+        $data = (new PngPdfImageParser())->parse(
+            $this->png(1, 1, 16, 2, $compressed, 0, null, pack('nnn', 10, 20, 30)),
+        );
+
+        self::assertNotNull($data);
+        self::assertSame('10 10 20 20 30 30', $data->colorKeyMask);
+        self::assertSame(16, $data->bitsPerComponent);
     }
 
     public function testRejectsInterlacedPngForNow(): void
