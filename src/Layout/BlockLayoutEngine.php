@@ -171,7 +171,32 @@ final class BlockLayoutEngine
         $shorthand = $node->style->get('border-width');
         $parts = $shorthand !== null ? preg_split('/\s+/', trim($shorthand)) ?: [] : [];
         [$top, $right, $bottom, $left] = $this->expandFour($parts);
-        return new Edges($this->resolveLength($node->style->get('border-top-width', $top) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'), $this->resolveLength($node->style->get('border-right-width', $right) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'), $this->resolveLength($node->style->get('border-bottom-width', $bottom) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'), $this->resolveLength($node->style->get('border-left-width', $left) ?? '0', $widthReference, $fontSize, $widthReference, $heightReference, 'zero'));
+        $raw = [
+            'top' => $node->style->get('border-top-width', $top) ?? '0',
+            'right' => $node->style->get('border-right-width', $right) ?? '0',
+            'bottom' => $node->style->get('border-bottom-width', $bottom) ?? '0',
+            'left' => $node->style->get('border-left-width', $left) ?? '0',
+        ];
+        $resolved = [];
+        foreach (['top', 'right', 'bottom', 'left'] as $side) {
+            if (in_array($this->borderStyleForSide($node, $side), ['none', 'hidden'], true)) {
+                $resolved[$side] = 0.0;
+                continue;
+            }
+            $resolved[$side] = $this->resolveLength($raw[$side], $widthReference, $fontSize, $widthReference, $heightReference, 'zero');
+        }
+        return new Edges($resolved['top'], $resolved['right'], $resolved['bottom'], $resolved['left']);
+    }
+
+    private function borderStyleForSide(StyledNode $node, string $side): string
+    {
+        $specific = $node->style->get('border-' . $side . '-style');
+        if ($specific !== null && trim($specific) !== '') return strtolower(trim($specific));
+        $shorthand = trim($node->style->get('border-style', 'none') ?? 'none');
+        $parts = preg_split('/\s+/', $shorthand) ?: ['none'];
+        $expanded = $this->expandFour($parts);
+        $index = array_search($side, ['top', 'right', 'bottom', 'left'], true);
+        return strtolower($expanded[$index === false ? 0 : $index] ?? 'none');
     }
 
     private function expandFour(array $parts): array
