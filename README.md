@@ -6,7 +6,7 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, first-pass pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid borders, CSS alpha and PDF serialization are implemented for the current supported subset.**
+**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, first-pass pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid and rounded borders, CSS alpha and PDF serialization are implemented for the current supported subset.**
 
 Current pipeline:
 
@@ -27,6 +27,9 @@ Current foundation:
 - linked stylesheet `url(...)` rewriting relative to the stylesheet file itself;
 - CSS declaration and stylesheet parsing foundation;
 - declaration splitting that preserves semicolons inside quoted/function values such as data URLs;
+- `border`, `border-top/right/bottom/left`, `border-width`, `border-style` and `border-color` shorthand expansion with declaration-order and `!important` precedence;
+- border width keywords aligned with the reference (`thin=1px`, `medium=3px`, `thick=5px`), including the default medium width when a border style is supplied without an explicit width;
+- `border-style:none|hidden` produces zero border geometry in both block and atomic-inline layout instead of merely suppressing paint;
 - tag/class/ID compound selectors;
 - descendant and child combinators;
 - attribute selectors (`[attr]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`);
@@ -70,6 +73,8 @@ Current foundation:
 - `object-fit: fill|contain|cover|none|scale-down` paint geometry;
 - first-pass `object-position` parsing for keywords and percentages;
 - image clipping against the replaced-element content box when object-fit overflows;
+- object-fit clipping uses the content-box border radius derived exactly through border-radius shrink by border edges and then padding edges, matching the reference path;
+- PDF image clipping uses a rounded Bézier path when the content-box radius is non-zero, otherwise the existing rectangular clip path;
 - `inline-block` with `width:auto` uses internal max-content width as its initial intrinsic width;
 - explicit inline-block width runs the child inline formatter so internal wrapping determines automatic height;
 - nested inline-block line boxes are translated into their real content-box coordinates;
@@ -97,12 +102,16 @@ Current foundation:
 - proportional clamping when page margins exceed the resolved page dimensions;
 - resolved default page size is exposed in `PreparedRender.pageSize` as points while page margins remain CSS pixels;
 - first-pass pagination for `break-before`, `break-after`, legacy `page-break-*`, `left`/`right` page parity, `break-inside: avoid`, `widows` and `orphans`;
+- widow/orphan positive-integer parsing aligned with the reference, so signed forms such as `+2` are rejected and use fallback behavior;
 - physical page model with preserved skipped parity pages;
-- top-level `PagePlacement`, per-page `PageFragment`, per-line `LineFragment` and recursive descendant `BlockFragment` geometry;
+- top-level `PagePlacement`, per-page `PageFragment`, typed per-line `LineFragment` and recursive descendant `BlockFragment` geometry;
 - descendant block and text-line fragmentation while preserving the continuous layout tree unchanged;
 - `PreparedRender.displayList` with physical per-page box/text/image/border paint commands and page-margin-adjusted coordinates;
-- `background-color` fills;
+- `background-color` fills, including rounded backgrounds for normalized elliptical `border-radius` values;
+- CSS `border-radius` shorthand (`1-4` values and `/` elliptical syntax), per-corner longhands, percentages and global CSS radius normalization;
+- fragmented top-level rounded boxes keep only the applicable top or bottom corner radii on their first/last physical page fragments;
 - per-side solid border fills with independent widths/colors and `currentColor` fallback;
+- uniform solid rounded borders are painted as vector outer-minus-inner rounded rings using PDF even-odd fill;
 - text paint commands preserve family, weight, style, font size and color;
 - CSS color alpha for background, solid borders and text through deduplicated PDF `ExtGState` resources;
 - JPEG XObjects embedded directly with `/DCTDecode` and resource deduplication;
@@ -201,9 +210,9 @@ The inline formatter still has deliberate limits: mixed inline/block formatting 
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
-Still pending in pagination/paint: page pseudo-class profiles (`:first`, `:left`, `:right`), variable per-page margins, full descendant forced-break propagation, stacking contexts/z-index, border radius and non-solid border styles, inline atomic-box border paint, WebP/SVG paint, Adam7 PNG, element-level opacity, decorations and richer clipping.
+Still pending in pagination/paint: page pseudo-class profiles (`:first`, `:left`, `:right`), variable per-page margins, full descendant forced-break propagation, stacking contexts/z-index, rounded asymmetric per-side borders, non-solid border paint (`dashed`, `dotted`, `double`, etc.), inline atomic-box border/background paint beyond the current image path, WebP/SVG paint, Adam7 PNG, element-level opacity, decorations and richer clipping/overflow behavior.
 
-Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
+Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, the remaining shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
 
 Remote HTTP resource loading is intentionally not enabled in the current PHP resource layer; local deterministic resources are resolved through explicit paths / `resourceBaseDir`.
 
