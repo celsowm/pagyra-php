@@ -31,7 +31,9 @@ final class DisplayListBuilder
     }
 
     /**
-     * @param array{top:float,right:float,bottom:float,left:float} $margins
+     * Accepts either the legacy flat margin array or a default/first/left/right profile.
+     *
+     * @param array<string,mixed> $margins
      */
     public function build(
         PaginationResult $pagination,
@@ -42,8 +44,9 @@ final class DisplayListBuilder
         $pages = [];
         foreach ($pagination->pages as $page) {
             $commands = [];
+            $pageMargins = $this->marginsForPage($margins, $page->pageIndex);
             foreach ($page->entries as $entry) {
-                $this->appendEntry($commands, $entry, $pagination, $margins);
+                $this->appendEntry($commands, $entry, $pagination, $pageMargins);
             }
             $pages[] = new PageDisplayList($page->pageIndex, $pageWidth, $pageHeight, $commands);
         }
@@ -73,7 +76,7 @@ final class DisplayListBuilder
         $continuousStart = $border->y + $offsetY;
         $continuousEnd = $border->bottom() + $offsetY;
         $pageStart = $pagination->flow->contentStartForPage($pageIndex);
-        $pageEnd = $pageStart + $pagination->flow->contentHeight;
+        $pageEnd = $pageStart + $pagination->flow->usableHeightForPage($pageIndex);
         $start = max($continuousStart, $pageStart);
         $end = min($continuousEnd, $pageEnd);
         if ($end <= $start) return;
@@ -394,5 +397,36 @@ final class DisplayListBuilder
                 );
             }
         }
+    }
+
+    /** @param array<string,mixed> $profile @return array{top:float,right:float,bottom:float,left:float} */
+    private function marginsForPage(array $profile, int $pageIndex): array
+    {
+        if (!isset($profile['default']) || !is_array($profile['default'])) {
+            return [
+                'top' => (float) ($profile['top'] ?? 0.0),
+                'right' => (float) ($profile['right'] ?? 0.0),
+                'bottom' => (float) ($profile['bottom'] ?? 0.0),
+                'left' => (float) ($profile['left'] ?? 0.0),
+            ];
+        }
+
+        $index = max(0, $pageIndex);
+        if ($index === 0 && isset($profile['first']) && is_array($profile['first'])) {
+            $resolved = $profile['first'];
+        } elseif ($index % 2 === 0 && isset($profile['right']) && is_array($profile['right'])) {
+            $resolved = $profile['right'];
+        } elseif ($index % 2 === 1 && isset($profile['left']) && is_array($profile['left'])) {
+            $resolved = $profile['left'];
+        } else {
+            $resolved = $profile['default'];
+        }
+
+        return [
+            'top' => (float) ($resolved['top'] ?? 0.0),
+            'right' => (float) ($resolved['right'] ?? 0.0),
+            'bottom' => (float) ($resolved['bottom'] ?? 0.0),
+            'left' => (float) ($resolved['left'] ?? 0.0),
+        ];
     }
 }
