@@ -17,6 +17,8 @@ use Pagyra\Units\Units;
 
 final class PdfSerializer
 {
+    private const KAPPA = 0.5522847498307936;
+
     public function serialize(DisplayList $displayList, ?FontRegistry $fontRegistry = null): string
     {
         $objects = [];
@@ -333,15 +335,71 @@ final class PdfSerializer
     {
         $color = $command->backgroundColor;
         if ($color === null || $color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) return '';
-        return $this->serializeFilledRect(
+        if ($command->borderRadius->isZero()) {
+            return $this->serializeFilledRect(
+                $command->x,
+                $command->y,
+                $command->width,
+                $command->height,
+                $pageHeightPx,
+                $color,
+                $graphicsState,
+            );
+        }
+
+        [$r, $g, $b] = $color->toPdfRgb();
+        $geometry = RoundedRectPdfPath::build(
             $command->x,
             $command->y,
             $command->width,
             $command->height,
             $pageHeightPx,
-            $color,
-            $graphicsState,
+            $command->borderRadius,
         );
+        return "q\n"
+            . ($graphicsState !== null ? '/' . $graphicsState . " gs\n" : '')
+            . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
+            . $this->roundedRectPath($geometry) . "f\nQ\n";
+    }
+
+    private function roundedRectPath(array $g): string
+    {
+        $x = $g['x'];
+        $bottom = $g['bottom'];
+        $right = $g['right'];
+        $top = $g['top'];
+        $tlx = $g['tlx']; $tly = $g['tly'];
+        $trx = $g['trx']; $try = $g['try'];
+        $brx = $g['brx']; $bry = $g['bry'];
+        $blx = $g['blx']; $bly = $g['bly'];
+        $k = self::KAPPA;
+
+        $out = $this->number($x + $tlx) . ' ' . $this->number($top) . " m\n";
+        $out .= $this->number($right - $trx) . ' ' . $this->number($top) . " l\n";
+        if ($trx > 0.0 || $try > 0.0) {
+            $out .= $this->number($right - $trx + $k * $trx) . ' ' . $this->number($top) . ' '
+                . $this->number($right) . ' ' . $this->number($top - $try + $k * $try) . ' '
+                . $this->number($right) . ' ' . $this->number($top - $try) . " c\n";
+        }
+        $out .= $this->number($right) . ' ' . $this->number($bottom + $bry) . " l\n";
+        if ($brx > 0.0 || $bry > 0.0) {
+            $out .= $this->number($right) . ' ' . $this->number($bottom + $bry - $k * $bry) . ' '
+                . $this->number($right - $brx + $k * $brx) . ' ' . $this->number($bottom) . ' '
+                . $this->number($right - $brx) . ' ' . $this->number($bottom) . " c\n";
+        }
+        $out .= $this->number($x + $blx) . ' ' . $this->number($bottom) . " l\n";
+        if ($blx > 0.0 || $bly > 0.0) {
+            $out .= $this->number($x + $blx - $k * $blx) . ' ' . $this->number($bottom) . ' '
+                . $this->number($x) . ' ' . $this->number($bottom + $bly - $k * $bly) . ' '
+                . $this->number($x) . ' ' . $this->number($bottom + $bly) . " c\n";
+        }
+        $out .= $this->number($x) . ' ' . $this->number($top - $tly) . " l\n";
+        if ($tlx > 0.0 || $tly > 0.0) {
+            $out .= $this->number($x) . ' ' . $this->number($top - $tly + $k * $tly) . ' '
+                . $this->number($x + $tlx - $k * $tlx) . ' ' . $this->number($top) . ' '
+                . $this->number($x + $tlx) . ' ' . $this->number($top) . " c\n";
+        }
+        return $out . "h\n";
     }
 
     private function serializeBorder(BorderPaintCommand $command, float $pageHeightPx, ?string $graphicsState = null): string
@@ -489,7 +547,7 @@ final class PdfSerializer
             if (($b1 & 0xF0) === 0xE0 && $i + 2 < $length) {
                 $b2 = ord($text[$i + 1]); $b3 = ord($text[$i + 2]);
                 if (($b2 & 0xC0) !== 0x80 || ($b3 & 0xC0) !== 0x80) throw new \LogicException('Invalid UTF-8 text cannot be serialized to PDF.');
-                $result[] = (($b1 & 0x0F) << 12) | (($b2 & 0x3F) << 6) | ($b3 & 0x3F); $i += 3; continue;
+                $result[] = (($b1 & 0x0F) << 12) | (($b2 & 0x3F) << 6) | $b3 & 0x3F; $i += 3; continue;
             }
             if (($b1 & 0xF8) === 0xF0 && $i + 3 < $length) {
                 $b2 = ord($text[$i + 1]); $b3 = ord($text[$i + 2]); $b4 = ord($text[$i + 3]);
