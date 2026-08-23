@@ -60,4 +60,18 @@ final class PageStyleProfileResolverTest extends TestCase
         self::assertSame(10.0, $resolved['margins']['left']['left']);
         self::assertSame(33.0, $resolved['margins']['right']['left']);
     }
+
+    public function testCompactPagePseudoSyntaxWithoutWhitespaceIsAccepted(): void
+    {
+        $resolved = (new PageStyleProfileResolver())->resolve(
+            '@page{margin:10px}@page:first{margin-top:22px}@page:left{margin-left:31px}@page:right{margin-right:32px}',
+            200.0,
+            100.0,
+            ['top' => 5.0, 'right' => 5.0, 'bottom' => 5.0, 'left' => 5.0],
+        );
+
+        self::assertSame(22.0, $resolved['margins']['first']['top']);
+        self::assertSame(31.0, $resolved['margins']['left']['left']);
+        self::assertSame(32.0, $resolved['margins']['right']['right']);
+    }
 }
