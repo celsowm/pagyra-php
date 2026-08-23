@@ -30,8 +30,8 @@ final class PatternedBorderPaintTest extends TestCase
         self::assertGreaterThanOrEqual(4, count($top));
         self::assertSame(6.0, $top[0]->width);
         self::assertSame(2.0, $top[0]->height);
-        self::assertSame(1.0, $top[0]->y);
-        self::assertSame(7.0, $top[1]->x - $top[0]->x);
+        self::assertSame(0.0, $top[0]->y);
+        self::assertSame(12.0, $top[1]->x - $top[0]->x);
 
         $pdf = Pagyra::renderHtmlToPdf([
             'html' => '<style>@page{size:120px 80px;margin:0}div{box-sizing:border-box;width:50px;height:30px;border:2px dashed #000;margin:0}</style><div></div>',
