@@ -17,6 +17,8 @@ final class PngPdfImageParser
         $offset = 8;
         $width = $height = $bitDepth = $colorType = null;
         $idat = '';
+        $palette = null;
+        $transparency = null;
         $length = strlen($bytes);
 
         while ($offset + 12 <= $length) {
@@ -36,6 +38,11 @@ final class PngPdfImageParser
                 $filter = ord($bytes[$dataStart + 11]);
                 $interlace = ord($bytes[$dataStart + 12]);
                 if ($compression !== 0 || $filter !== 0 || $interlace !== 0) return null;
+            } elseif ($type === 'PLTE') {
+                if ($chunkLength === 0 || ($chunkLength % 3) !== 0 || $chunkLength > 768) return null;
+                $palette = substr($bytes, $dataStart, $chunkLength);
+            } elseif ($type === 'tRNS') {
+                $transparency = substr($bytes, $dataStart, $chunkLength);
             } elseif ($type === 'IDAT') {
                 $idat .= substr($bytes, $dataStart, $chunkLength);
             } elseif ($type === 'IEND') {
@@ -57,11 +64,96 @@ final class PngPdfImageParser
             return new PngPdfImageData($width, $height, $bitDepth, 3, '/DeviceRGB', $idat);
         }
 
+        if ($colorType === 3 && in_array($bitDepth, [1, 2, 4, 8], true) && $palette !== null) {
+            return $this->indexed($width, $height, $bitDepth, $idat, $palette, $transparency);
+        }
+
         if ($bitDepth === 8 && in_array($colorType, [4, 6], true)) {
             return $this->splitAlpha($width, $height, $colorType, $idat);
         }
 
         return null;
+    }
+
+    private function indexed(
+        int $width,
+        int $height,
+        int $bitDepth,
+        string $idat,
+        string $palette,
+        ?string $transparency,
+    ): ?PngPdfImageData {
+        $entryCount = intdiv(strlen($palette), 3);
+        if ($entryCount <= 0 || $entryCount > 256) return null;
+
+        $alphaCompressed = null;
+        if ($transparency !== null && $transparency !== '') {
+            $alphaCompressed = $this->indexedAlpha($width, $height, $bitDepth, $idat, $transparency);
+            if ($alphaCompressed === false) return null;
+        }
+
+        $colorSpace = '[/Indexed /DeviceRGB ' . ($entryCount - 1) . ' <' . strtoupper(bin2hex($palette)) . '>]';
+
+        return new PngPdfImageData(
+            width: $width,
+            height: $height,
+            bitsPerComponent: $bitDepth,
+            colors: 1,
+            colorSpace: $colorSpace,
+            compressedData: $idat,
+            usesPngPredictor: true,
+            alphaCompressedData: is_string($alphaCompressed) ? $alphaCompressed : null,
+        );
+    }
+
+    /** @return string|false|null */
+    private function indexedAlpha(int $width, int $height, int $bitDepth, string $idat, string $transparency): string|false|null
+    {
+        $hasTransparency = false;
+        for ($i = 0, $length = strlen($transparency); $i < $length; $i++) {
+            if (ord($transparency[$i]) < 255) {
+                $hasTransparency = true;
+                break;
+            }
+        }
+        if (!$hasTransparency) return null;
+
+        $decoded = @gzuncompress($idat);
+        if (!is_string($decoded)) return false;
+
+        $rowBytes = intdiv($width * $bitDepth + 7, 8);
+        if (strlen($decoded) !== $height * ($rowBytes + 1)) return false;
+
+        $previous = array_fill(0, $rowBytes, 0);
+        $alpha = '';
+        $cursor = 0;
+        for ($row = 0; $row < $height; $row++) {
+            $filter = ord($decoded[$cursor++]);
+            if ($filter < 0 || $filter > 4) return false;
+            $raw = substr($decoded, $cursor, $rowBytes);
+            $cursor += $rowBytes;
+            $reconstructed = $this->unfilter($raw, $previous, 1, $filter);
+            if ($reconstructed === null) return false;
+
+            for ($x = 0; $x < $width; $x++) {
+                $index = $this->packedIndex($reconstructed, $x, $bitDepth);
+                $alpha .= chr($index < strlen($transparency) ? ord($transparency[$index]) : 255);
+            }
+            $previous = $reconstructed;
+        }
+
+        $compressed = gzcompress($alpha);
+        return is_string($compressed) ? $compressed : false;
+    }
+
+    /** @param list<int> $row */
+    private function packedIndex(array $row, int $pixel, int $bitDepth): int
+    {
+        if ($bitDepth === 8) return $row[$pixel] ?? 0;
+        $pixelsPerByte = intdiv(8, $bitDepth);
+        $byte = $row[intdiv($pixel, $pixelsPerByte)] ?? 0;
+        $shift = (8 - $bitDepth) - (($pixel % $pixelsPerByte) * $bitDepth);
+        return ($byte >> $shift) & ((1 << $bitDepth) - 1);
     }
 
     private function splitAlpha(int $width, int $height, int $colorType, string $idat): ?PngPdfImageData
