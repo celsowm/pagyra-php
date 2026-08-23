@@ -14,8 +14,9 @@ final class RoundedImageClipGeometryTest extends TestCase
     {
         $jpeg = $this->jpegFixture();
         $src = 'data:image/jpeg;base64,' . base64_encode($jpeg);
+        $html = '<p style="margin:0"><img src="' . $src . '" style="width:100px;height:100px;object-fit:cover;border:4px solid transparent;padding:6px;border-radius:30px"></p>';
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<p style="margin:0"><img src="' . $src . '" style="width:100px;height:100px;object-fit:cover;border:4px solid black;padding:6px;border-radius:30px"></p>',
+            'html' => $html,
             'viewportWidth' => 300,
             'viewportHeight' => 200,
         ]);
@@ -36,6 +37,16 @@ final class RoundedImageClipGeometryTest extends TestCase
         self::assertSame(20.0, $image->clipRadius->bottomRight->y);
         self::assertSame(200.0, $image->width);
         self::assertSame(100.0, $image->height);
+
+        $pdf = Pagyra::renderHtmlToPdf([
+            'html' => $html,
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+        self::assertGreaterThanOrEqual(4, substr_count($pdf, " c\n"));
+        self::assertStringContainsString("h\nW n\n", $pdf);
+        self::assertStringNotContainsString(" re W n\n", $pdf);
+        self::assertStringContainsString('/Im1 Do', $pdf);
     }
 
     private function jpegFixture(): string
