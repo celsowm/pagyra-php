@@ -7,6 +7,7 @@ namespace Pagyra\Pdf;
 use Pagyra\Fonts\FontRegistry;
 use Pagyra\Fonts\RegisteredFont;
 use Pagyra\Fonts\Ttf\TtfSubsetter;
+use Pagyra\Paint\BorderPaintCommand;
 use Pagyra\Paint\BoxPaintCommand;
 use Pagyra\Paint\DisplayList;
 use Pagyra\Paint\ImagePaintCommand;
@@ -39,6 +40,10 @@ final class PdfSerializer
             foreach ($page->commands as $command) {
                 if ($command instanceof BoxPaintCommand) {
                     $content .= $this->serializeBox($command, $page->height);
+                    continue;
+                }
+                if ($command instanceof BorderPaintCommand) {
+                    $content .= $this->serializeBorder($command, $page->height);
                     continue;
                 }
                 if ($command instanceof ImagePaintCommand) {
@@ -279,12 +284,44 @@ final class PdfSerializer
     {
         $color = $command->backgroundColor;
         if ($color === null || $color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) return '';
-        $x = Units::pxToPt($command->x);
-        $y = Units::pxToPt($pageHeightPx - $command->y - $command->height);
-        [$r, $g, $b] = $color->toPdfRgb();
+        return $this->serializeFilledRect(
+            $command->x,
+            $command->y,
+            $command->width,
+            $command->height,
+            $pageHeightPx,
+            ...$color->toPdfRgb(),
+        );
+    }
+
+    private function serializeBorder(BorderPaintCommand $command, float $pageHeightPx): string
+    {
+        if ($command->color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) return '';
+        return $this->serializeFilledRect(
+            $command->x,
+            $command->y,
+            $command->width,
+            $command->height,
+            $pageHeightPx,
+            ...$command->color->toPdfRgb(),
+        );
+    }
+
+    private function serializeFilledRect(
+        float $xPx,
+        float $yPx,
+        float $widthPx,
+        float $heightPx,
+        float $pageHeightPx,
+        float $r,
+        float $g,
+        float $b,
+    ): string {
+        $x = Units::pxToPt($xPx);
+        $y = Units::pxToPt($pageHeightPx - $yPx - $heightPx);
         return "q\n" . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
-            . $this->number($x) . ' ' . $this->number($y) . ' ' . $this->number(Units::pxToPt($command->width)) . ' '
-            . $this->number(Units::pxToPt($command->height)) . " re f\nQ\n";
+            . $this->number($x) . ' ' . $this->number($y) . ' ' . $this->number(Units::pxToPt($widthPx)) . ' '
+            . $this->number(Units::pxToPt($heightPx)) . " re f\nQ\n";
     }
 
     private function serializeImage(ImagePaintCommand $command, float $pageHeightPx, string $resourceName): string
