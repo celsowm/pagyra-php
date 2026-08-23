@@ -18,6 +18,7 @@ use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Pagination\PageFlow;
 use Pagyra\Pagination\PaginationEngine;
+use Pagyra\Paint\BorderPatternExpander;
 use Pagyra\Paint\DisplayListBuilder;
 use Pagyra\Pdf\PdfSerializer;
 use Pagyra\Style\StyleComputer;
@@ -74,6 +75,7 @@ final class Pagyra
             $pageStyle['height'],
             $pageStyle['margins'],
         );
+        $displayList = (new BorderPatternExpander())->expand($displayList, $pagination);
 
         return new PreparedRender(
             domRoot: $document->root,
