@@ -157,9 +157,7 @@ final class PageStyleProfileResolver
         return null;
     }
 
-    /**
-     * @param list<array{selectors:list<string>,body:string,sourceOrder:int}> $rules
-     */
+    /** @param list<array{selectors:list<string>,body:string,sourceOrder:int}> $rules */
     private function collectPageRules(
         string $css,
         array &$rules,
@@ -189,7 +187,7 @@ final class PageStyleProfileResolver
                 continue;
             }
 
-            if (preg_match('/^@page(?:\s+(.+))?$/is', $prelude, $pageMatch) !== 1) continue;
+            if (preg_match('/^@page\s*(.*)$/is', $prelude, $pageMatch) !== 1) continue;
             $selectorText = trim($pageMatch[1] ?? '');
             $selectors = $selectorText === ''
                 ? []
