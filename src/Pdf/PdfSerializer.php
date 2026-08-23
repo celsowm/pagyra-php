@@ -12,6 +12,7 @@ use Pagyra\Paint\BorderPaintCommand;
 use Pagyra\Paint\BoxPaintCommand;
 use Pagyra\Paint\DisplayList;
 use Pagyra\Paint\ImagePaintCommand;
+use Pagyra\Paint\RoundedBorderPaintCommand;
 use Pagyra\Paint\TextPaintCommand;
 use Pagyra\Units\Units;
 
@@ -47,6 +48,14 @@ final class PdfSerializer
                         $command,
                         $page->height,
                         $this->graphicsStateName($command->backgroundColor, $extGStateResources),
+                    );
+                    continue;
+                }
+                if ($command instanceof RoundedBorderPaintCommand) {
+                    $content .= $this->serializeRoundedBorder(
+                        $command,
+                        $page->height,
+                        $this->graphicsStateName($command->color, $extGStateResources),
                     );
                     continue;
                 }
@@ -235,6 +244,7 @@ final class PdfSerializer
             foreach ($page->commands as $command) {
                 $color = match (true) {
                     $command instanceof BoxPaintCommand => $command->backgroundColor,
+                    $command instanceof RoundedBorderPaintCommand => $command->color,
                     $command instanceof BorderPaintCommand => $command->color,
                     $command instanceof TextPaintCommand => $command->color,
                     default => null,
@@ -402,6 +412,38 @@ final class PdfSerializer
         return $out . "h\n";
     }
 
+    private function serializeRoundedBorder(RoundedBorderPaintCommand $command, float $pageHeightPx, ?string $graphicsState = null): string
+    {
+        if ($command->color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0 || $command->borderWidth <= 0.0) return '';
+        [$r, $g, $b] = $command->color->toPdfRgb();
+        $outer = RoundedRectPdfPath::build(
+            $command->x,
+            $command->y,
+            $command->width,
+            $command->height,
+            $pageHeightPx,
+            $command->outerRadius,
+        );
+        $innerWidth = max(0.0, $command->width - 2.0 * $command->borderWidth);
+        $innerHeight = max(0.0, $command->height - 2.0 * $command->borderWidth);
+        $paths = $this->roundedRectPath($outer);
+        if ($innerWidth > 0.0 && $innerHeight > 0.0) {
+            $inner = RoundedRectPdfPath::build(
+                $command->x + $command->borderWidth,
+                $command->y + $command->borderWidth,
+                $innerWidth,
+                $innerHeight,
+                $pageHeightPx,
+                $command->innerRadius,
+            );
+            $paths .= $this->roundedRectPath($inner);
+        }
+        return "q\n"
+            . ($graphicsState !== null ? '/' . $graphicsState . " gs\n" : '')
+            . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
+            . $paths . "f*\nQ\n";
+    }
+
     private function serializeBorder(BorderPaintCommand $command, float $pageHeightPx, ?string $graphicsState = null): string
     {
         if ($command->color->a <= 0.0 || $command->width <= 0.0 || $command->height <= 0.0) return '';
@@ -547,7 +589,7 @@ final class PdfSerializer
             if (($b1 & 0xF0) === 0xE0 && $i + 2 < $length) {
                 $b2 = ord($text[$i + 1]); $b3 = ord($text[$i + 2]);
                 if (($b2 & 0xC0) !== 0x80 || ($b3 & 0xC0) !== 0x80) throw new \LogicException('Invalid UTF-8 text cannot be serialized to PDF.');
-                $result[] = (($b1 & 0x0F) << 12) | (($b2 & 0x3F) << 6) | $b3 & 0x3F; $i += 3; continue;
+                $result[] = (($b1 & 0x0F) << 12) | (($b2 & 0x3F) << 6) | ($b3 & 0x3F); $i += 3; continue;
             }
             if (($b1 & 0xF8) === 0xF0 && $i + 3 < $length) {
                 $b2 = ord($text[$i + 1]); $b3 = ord($text[$i + 2]); $b4 = ord($text[$i + 3]);
