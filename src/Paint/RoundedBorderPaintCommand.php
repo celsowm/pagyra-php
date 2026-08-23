@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Pagyra\Paint;
 
 use Pagyra\Css\Color\Rgba;
+use Pagyra\Layout\AtomicInlineBox;
 use Pagyra\Layout\LayoutNode;
 
 final readonly class RoundedBorderPaintCommand implements \JsonSerializable
 {
     public function __construct(
-        public LayoutNode $node,
+        public LayoutNode|AtomicInlineBox $node,
         public int $pageIndex,
         public float $x,
         public float $y,
