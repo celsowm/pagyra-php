@@ -11,58 +11,82 @@ final class RecursivePaginationOffsets
     private const EPSILON = 0.01;
 
     /** @var array<int,float> */
-    private array $offsets = [];
-    private float $globalOffset = 0.0;
+    private array $forcedOffsets = [];
+    private float $forcedGlobalOffset = 0.0;
 
     /** @return array<int,float> keyed by spl_object_id(LayoutNode) */
     public function resolve(LayoutNode $root, PageFlow $flow): array
     {
-        $this->offsets = [];
-        $this->globalOffset = 0.0;
+        $this->forcedOffsets = [];
+        $this->forcedGlobalOffset = 0.0;
 
         foreach ($root->children as $child) {
-            $this->visit($child, $flow);
+            $this->visitForced($child, $flow);
         }
 
-        return $this->offsets;
+        $finalOffsets = [];
+        $avoidGlobalOffset = 0.0;
+        foreach ($root->children as $child) {
+            $this->visitBreakInside($child, $flow, $avoidGlobalOffset, $finalOffsets);
+        }
+
+        return $finalOffsets;
     }
 
-    private function visit(LayoutNode $node, PageFlow $flow): void
+    private function visitForced(LayoutNode $node, PageFlow $flow): void
     {
         $participates = $this->participatesInPageFlow($node);
 
         if ($participates) {
-            $start = $node->box->marginBox()->y + $this->globalOffset;
+            $start = $node->box->marginBox()->y + $this->forcedGlobalOffset;
             $before = $this->forcedBreakOffset($this->breakValue($node, 'before'), $start, $flow);
             if ($before > self::EPSILON) {
-                $this->globalOffset += $before;
-                $start += $before;
-            }
-
-            $inside = $this->breakInsideAvoidOffset($node, $this->globalOffset, $flow);
-            if ($inside > self::EPSILON) {
-                $this->globalOffset += $inside;
-                $start += $inside;
-            }
-
-            $widowOrphan = $this->widowOrphanOffset($node, $start, $this->globalOffset, $flow);
-            if ($widowOrphan > self::EPSILON) {
-                $this->globalOffset += $widowOrphan;
+                $this->forcedGlobalOffset += $before;
             }
         }
 
-        $this->offsets[spl_object_id($node)] = $this->globalOffset;
+        $this->forcedOffsets[spl_object_id($node)] = $this->forcedGlobalOffset;
 
         foreach ($node->children as $child) {
-            $this->visit($child, $flow);
+            $this->visitForced($child, $flow);
         }
 
-        if ($participates) {
-            $end = $this->absoluteSubtreeBottom($node);
-            $after = $this->forcedBreakOffset($this->breakValue($node, 'after'), $end, $flow);
-            if ($after > self::EPSILON) {
-                $this->globalOffset += $after;
+        if (!$participates) return;
+
+        $nodeOffset = $this->forcedOffsets[spl_object_id($node)] ?? 0.0;
+        $start = $node->box->marginBox()->y + $nodeOffset;
+        $widowOrphan = $this->widowOrphanOffset($node, $start, $nodeOffset, $flow);
+        if ($widowOrphan > self::EPSILON) {
+            $this->addOffsetToVisitedSubtree($node, $widowOrphan);
+            $this->forcedGlobalOffset += $widowOrphan;
+        }
+
+        $end = $this->absoluteForcedSubtreeBottom($node);
+        $after = $this->forcedBreakOffset($this->breakValue($node, 'after'), $end, $flow);
+        if ($after > self::EPSILON) {
+            $this->forcedGlobalOffset += $after;
+        }
+    }
+
+    /**
+     * @param array<int,float> $finalOffsets
+     */
+    private function visitBreakInside(LayoutNode $node, PageFlow $flow, float &$avoidGlobalOffset, array &$finalOffsets): void
+    {
+        $baseOffset = $this->forcedOffsets[spl_object_id($node)] ?? 0.0;
+        $offset = $baseOffset + $avoidGlobalOffset;
+
+        if ($this->participatesInPageFlow($node)) {
+            $pushDown = $this->breakInsideAvoidOffset($node, $offset, $flow);
+            if ($pushDown > self::EPSILON) {
+                $avoidGlobalOffset += $pushDown;
+                $offset += $pushDown;
             }
+        }
+
+        $finalOffsets[spl_object_id($node)] = $offset;
+        foreach ($node->children as $child) {
+            $this->visitBreakInside($child, $flow, $avoidGlobalOffset, $finalOffsets);
         }
     }
 
@@ -160,12 +184,21 @@ final class RecursivePaginationOffsets
         return $bottom;
     }
 
-    private function absoluteSubtreeBottom(LayoutNode $node): float
+    private function addOffsetToVisitedSubtree(LayoutNode $node, float $delta): void
     {
-        $offset = $this->offsets[spl_object_id($node)] ?? $this->globalOffset;
+        $id = spl_object_id($node);
+        $this->forcedOffsets[$id] = ($this->forcedOffsets[$id] ?? 0.0) + $delta;
+        foreach ($node->children as $child) {
+            $this->addOffsetToVisitedSubtree($child, $delta);
+        }
+    }
+
+    private function absoluteForcedSubtreeBottom(LayoutNode $node): float
+    {
+        $offset = $this->forcedOffsets[spl_object_id($node)] ?? 0.0;
         $bottom = $node->box->marginBox()->bottom() + $offset;
         foreach ($node->children as $child) {
-            $bottom = max($bottom, $this->absoluteSubtreeBottom($child));
+            $bottom = max($bottom, $this->absoluteForcedSubtreeBottom($child));
         }
         return $bottom;
     }
