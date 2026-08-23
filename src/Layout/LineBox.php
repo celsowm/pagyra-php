@@ -33,7 +33,8 @@ final readonly class LineBox implements \JsonSerializable
         usort($items, static function (TextRun|AtomicInlineBox $left, TextRun|AtomicInlineBox $right): int {
             $byX = $left->x <=> $right->x;
             if ($byX !== 0) return $byX;
-            return $left instanceof TextRun && $right instanceof AtomicInlineBox ? -1 : 1;
+            if ($left::class === $right::class) return 0;
+            return $left instanceof TextRun ? -1 : 1;
         });
         return $items;
     }
