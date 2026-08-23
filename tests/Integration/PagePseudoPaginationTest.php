@@ -72,9 +72,9 @@ final class PagePseudoPaginationTest extends TestCase
 
         $pdf = Pagyra::renderHtmlToPdf($options);
         self::assertSame(3, substr_count($pdf, '/Type /Page /Parent'));
-        self::assertStringContainsString("30 15 97.5 45 re f\n", $pdf);
-        self::assertStringContainsString("18.75 11.25 97.5 60 re f\n", $pdf);
-        self::assertStringContainsString("22.5 30 97.5 37.5 re f\n", $pdf);
+        self::assertStringContainsString("30 15 112.5 45 re f\n", $pdf);
+        self::assertStringContainsString("18.75 11.25 112.5 60 re f\n", $pdf);
+        self::assertStringContainsString("22.5 30 112.5 37.5 re f\n", $pdf);
     }
 
     public function testPrintViewportUsesMostConstrainedPageVariant(): void
