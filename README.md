@@ -6,7 +6,7 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, first-pass pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid and rounded borders, CSS alpha and PDF serialization are implemented for the current supported subset.**
+**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, recursive pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid and rounded borders, CSS alpha and PDF serialization are implemented for the current supported subset.**
 
 Current pipeline:
 
@@ -62,6 +62,7 @@ Current foundation:
 - atomic inline-box participation for `inline-block`, `inline-flex`, `inline-grid`, `inline-table`, images and inline SVG;
 - atomic inline wrapping uses full outer size: content + padding + border + margins;
 - `AtomicInlineBox` exposes content size plus margin/padding/border edge metrics and nested `contentLines`;
+- recursive atomic-inline paint for backgrounds, solid/rounded borders and nested `contentLines`, including nested inline-block text;
 - intrinsic PNG/JPEG/WebP metadata extraction from data URLs and readable local resources;
 - SVG intrinsic sizing from `width`/`height`/`viewBox` for inline SVG and SVG image sources;
 - relative image/SVG sources resolved against explicit `resourceBaseDir`;
@@ -98,15 +99,18 @@ Current foundation:
 - embedded text uses glyph widths and classic kern adjustments in `TJ` arrays;
 - `letter-spacing` and `word-spacing` are reflected in PDF text output for the current supported length subset;
 - default `@page { ... }` resolution for named/custom page sizes, portrait/landscape orientation, margin shorthand/longhands and `!important` precedence;
-- page style / print viewport stabilization so matching `@media` rules are re-evaluated when `@page` changes the printable area;
+- `@page :first`, `@page :left` and `@page :right` margin profiles with page-specific cascade/specificity and `:first` participation in right-page rules;
+- variable page-flow mapping whose continuous content starts are accumulated from each physical page's actual usable height;
+- page style / print viewport stabilization uses the most constrained page variant and re-evaluates matching `@media` rules;
 - proportional clamping when page margins exceed the resolved page dimensions;
-- resolved default page size is exposed in `PreparedRender.pageSize` as points while page margins remain CSS pixels;
+- resolved default page size is exposed in `PreparedRender.pageSize`; `PreparedRender.margins` remains the default margin set and `PreparedRender.pageMargins` exposes `default/first/left/right` profiles;
 - first-pass pagination for `break-before`, `break-after`, legacy `page-break-*`, `left`/`right` page parity, `break-inside: avoid`, `widows` and `orphans`;
+- forced breaks, `break-inside`, widows and orphans propagate recursively through descendant block flow while the continuous layout tree remains unchanged;
 - widow/orphan positive-integer parsing aligned with the reference, so signed forms such as `+2` are rejected and use fallback behavior;
-- physical page model with preserved skipped parity pages;
+- physical page model with preserved skipped parity pages, including parity skips under variable page heights;
 - top-level `PagePlacement`, per-page `PageFragment`, typed per-line `LineFragment` and recursive descendant `BlockFragment` geometry;
 - descendant block and text-line fragmentation while preserving the continuous layout tree unchanged;
-- `PreparedRender.displayList` with physical per-page box/text/image/border paint commands and page-margin-adjusted coordinates;
+- `PreparedRender.displayList` with physical per-page box/text/image/border paint commands and page-pseudo-specific margin offsets;
 - `background-color` fills, including rounded backgrounds for normalized elliptical `border-radius` values;
 - CSS `border-radius` shorthand (`1-4` values and `/` elliptical syntax), per-corner longhands, percentages and global CSS radius normalization;
 - fragmented top-level rounded boxes keep only the applicable top or bottom corner radii on their first/last physical page fragments;
@@ -161,7 +165,7 @@ p { font-family: "MyFont"; }
 <p>Hello</p>
 ```
 
-Default page descriptors are also reflected by `prepareHtmlRender()`:
+Page descriptors and page pseudo-class margins are reflected by `prepareHtmlRender()`:
 
 ```html
 <style>
@@ -169,6 +173,9 @@ Default page descriptors are also reflected by `prepareHtmlRender()`:
   size: A4 landscape;
   margin: 12mm 18mm;
 }
+@page :first { margin-top: 24mm; }
+@page :left  { margin-left: 24mm; }
+@page :right { margin-right: 24mm; }
 </style>
 <p>Hello</p>
 ```
@@ -193,24 +200,26 @@ Styled inline content is preserved through layout. For example:
 
 produces line boxes containing separate `TextRun` objects for the normal, bold and italic portions, each measured with its own computed style/font selection.
 
-Atomic inline content can participate in the same line and expose an internal layout:
+Atomic inline content can participate in the same line, expose an internal layout and now paint that internal layout recursively:
 
 ```html
 <p>
   antes
-  <span style="display:inline-block;width:60px;padding:4px">hello hello hello</span>
+  <span style="display:inline-block;width:60px;padding:4px;background:#eee;border:1px solid #333">
+    hello hello hello
+  </span>
   <img width="200" height="100" style="width:80px;vertical-align:middle">
   depois
 </p>
 ```
 
-The span carries nested `contentLines` laid out inside its content box. The image resolves to `80 x 40` content pixels because only its width is overridden.
+The span carries nested `contentLines` laid out inside its content box, and its background/border/text participate in the display list. The image resolves to `80 x 40` content pixels because only its width is overridden.
 
 The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
-Still pending in pagination/paint: page pseudo-class profiles (`:first`, `:left`, `:right`), variable per-page margins, full descendant forced-break propagation, stacking contexts/z-index, rounded asymmetric per-side borders, non-solid border paint (`dashed`, `dotted`, `double`, etc.), inline atomic-box border/background paint beyond the current image path, WebP/SVG paint, Adam7 PNG, element-level opacity, decorations and richer clipping/overflow behavior.
+Still pending in pagination/paint: stacking contexts/z-index, exact inline atomic paint ordering relative to surrounding text runs, rounded asymmetric per-side borders, non-solid border paint (`dashed`, `dotted`, `double`, etc.), WebP/SVG paint, Adam7 PNG, element-level opacity, decorations and richer clipping/overflow behavior.
 
 Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, the remaining shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
 
