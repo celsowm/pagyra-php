@@ -14,9 +14,9 @@ final class PagePseudoPaginationTest extends TestCase
     {
         $html = '<style>'
             . '@page { size:200px 100px; margin:10px; }'
-            . '@page :first { margin-top:20px; margin-bottom:20px; margin-left:40px; }'
-            . '@page :left { margin-top:5px; margin-bottom:15px; margin-left:25px; }'
             . '@page :right { margin-top:10px; margin-bottom:20px; margin-left:30px; }'
+            . '@page :left { margin-top:5px; margin-bottom:15px; margin-left:25px; }'
+            . '@page :first { margin-top:20px; margin-bottom:20px; margin-left:40px; }'
             . 'div { margin:0; height:190px; background:#123456; }'
             . '</style><div></div>';
         $options = [
@@ -103,9 +103,9 @@ final class PagePseudoPaginationTest extends TestCase
         $prepared = Pagyra::prepareHtmlRender([
             'html' => '<style>'
                 . '@page { size:200px 100px; margin:10px; }'
-                . '@page :first { margin-top:20px; margin-bottom:20px; }'
-                . '@page :left { margin-top:5px; margin-bottom:15px; }'
                 . '@page :right { margin-top:10px; margin-bottom:20px; }'
+                . '@page :left { margin-top:5px; margin-bottom:15px; }'
+                . '@page :first { margin-top:20px; margin-bottom:20px; }'
                 . 'div { margin:0; height:20px; } #second { break-before:right; }'
                 . '</style><div></div><div id="second"></div>',
             'pageWidth' => 200.0,
