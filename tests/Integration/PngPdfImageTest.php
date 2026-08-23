@@ -76,6 +76,42 @@ final class PngPdfImageTest extends TestCase
         self::assertStringContainsString('/Im1 Do', $pdf);
     }
 
+    public function testGrayscaleTrnsUsesPdfColorKeyMaskWithoutSoftMask(): void
+    {
+        $compressed = gzcompress("\x00\x7f");
+        self::assertIsString($compressed);
+        $png = $this->png(1, 1, 8, 0, $compressed, null, pack('n', 127));
+        $src = 'data:image/png;base64,' . base64_encode($png);
+
+        $pdf = Pagyra::renderHtmlToPdf([
+            'html' => '<p style="margin:0"><img src="' . $src . '" style="width:20px;height:20px"></p>',
+            'viewportWidth' => 200,
+            'viewportHeight' => 100,
+        ]);
+
+        self::assertStringContainsString('/ColorSpace /DeviceGray', $pdf);
+        self::assertStringContainsString('/Mask [127 127]', $pdf);
+        self::assertStringNotContainsString('/SMask ', $pdf);
+        self::assertSame(1, substr_count($pdf, '/Subtype /Image'));
+    }
+
+    public function testRgbTrnsUsesPdfColorKeyMask(): void
+    {
+        $compressed = gzcompress("\x00\x0a\x14\x1e");
+        self::assertIsString($compressed);
+        $png = $this->png(1, 1, 8, 2, $compressed, null, pack('nnn', 10, 20, 30));
+        $src = 'data:image/png;base64,' . base64_encode($png);
+
+        $pdf = Pagyra::renderHtmlToPdf([
+            'html' => '<p style="margin:0"><img src="' . $src . '" style="width:20px;height:20px"></p>',
+            'viewportWidth' => 200,
+            'viewportHeight' => 100,
+        ]);
+
+        self::assertStringContainsString('/ColorSpace /DeviceRGB', $pdf);
+        self::assertStringContainsString('/Mask [10 10 20 20 30 30]', $pdf);
+    }
+
     private function png(
         int $width,
         int $height,
