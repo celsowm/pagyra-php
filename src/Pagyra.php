@@ -72,7 +72,7 @@ final class Pagyra
             $pagination,
             $pageStyle['width'],
             $pageStyle['height'],
-            $pageStyle['margins']['default'],
+            $pageStyle['margins'],
         );
 
         return new PreparedRender(
