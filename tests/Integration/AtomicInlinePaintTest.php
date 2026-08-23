@@ -90,4 +90,34 @@ final class AtomicInlinePaintTest extends TestCase
         self::assertStringContainsString('inner', $painted);
         self::assertStringContainsString(' end', $painted);
     }
+
+    public function testInlinePaintCommandsFollowTextBoxTextOrder(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<style>@page{size:260px 120px;margin:0}p{margin:0}</style>'
+                . '<p>LEFT<span style="display:inline-block;width:40px;background:#00ff00">MID</span>RIGHT</p>',
+            'pageWidth' => 260.0,
+            'pageHeight' => 120.0,
+            'viewportWidth' => 260.0,
+            'viewportHeight' => 120.0,
+            'margins' => ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0],
+        ]);
+
+        $commands = $prepared->displayList?->pages[0]->commands ?? [];
+        $left = $box = $mid = $right = null;
+        foreach ($commands as $index => $command) {
+            if ($command instanceof TextPaintCommand && str_contains($command->text, 'LEFT')) $left = $index;
+            if ($command instanceof BoxPaintCommand && $command->node instanceof AtomicInlineBox && $command->backgroundColor !== null) $box = $index;
+            if ($command instanceof TextPaintCommand && str_contains($command->text, 'MID')) $mid = $index;
+            if ($command instanceof TextPaintCommand && str_contains($command->text, 'RIGHT')) $right = $index;
+        }
+
+        self::assertNotNull($left);
+        self::assertNotNull($box);
+        self::assertNotNull($mid);
+        self::assertNotNull($right);
+        self::assertLessThan($box, $left);
+        self::assertLessThan($mid, $box);
+        self::assertLessThan($right, $mid);
+    }
 }
