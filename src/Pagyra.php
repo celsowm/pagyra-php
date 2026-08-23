@@ -7,7 +7,7 @@ namespace Pagyra;
 use Pagyra\Core\PreparedRender;
 use Pagyra\Core\RenderHtmlOptions;
 use Pagyra\Css\FontFaceRuleParser;
-use Pagyra\Css\PageStyleResolver;
+use Pagyra\Css\PageStyleProfileResolver;
 use Pagyra\Css\StylesheetParser;
 use Pagyra\Css\StylesheetSourceLoader;
 use Pagyra\Fonts\FontRegistry;
@@ -16,6 +16,7 @@ use Pagyra\Html\HtmlParser;
 use Pagyra\Image\ImageSourceBytesResolver;
 use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 use Pagyra\Layout\BlockLayoutEngine;
+use Pagyra\Pagination\PageFlow;
 use Pagyra\Pagination\PaginationEngine;
 use Pagyra\Paint\DisplayListBuilder;
 use Pagyra\Pdf\PdfSerializer;
@@ -64,16 +65,14 @@ final class Pagyra
         );
         $textMetrics = new GlyphTextMetrics($registry);
         $layoutRoot = (new BlockLayoutEngine($viewportWidth, $viewportHeight, $textMetrics))->layout($styledRoot);
-        $pageContentHeight = max(
-            1.0,
-            $pageStyle['height'] - $pageStyle['margins']['top'] - $pageStyle['margins']['bottom'],
-        );
-        $pagination = (new PaginationEngine())->paginate($layoutRoot, $pageContentHeight);
+
+        $pageFlow = PageFlow::fromPageProfile($pageStyle['height'], $pageStyle['margins']);
+        $pagination = (new PaginationEngine())->paginate($layoutRoot, $pageFlow);
         $displayList = (new DisplayListBuilder($sourceBytes))->build(
             $pagination,
             $pageStyle['width'],
             $pageStyle['height'],
-            $pageStyle['margins'],
+            $pageStyle['margins']['default'],
         );
 
         return new PreparedRender(
@@ -86,19 +85,20 @@ final class Pagyra
                 'widthPt' => Units::pxToPt($pageStyle['width']),
                 'heightPt' => Units::pxToPt($pageStyle['height']),
             ],
-            margins: $pageStyle['margins'],
+            margins: $pageStyle['margins']['default'],
             pagination: $pagination,
             displayList: $displayList,
             fontRegistry: $registry,
+            pageMargins: $pageStyle['margins'],
         );
     }
 
     /**
-     * @return array{0:array{width:float,height:float,margins:array{top:float,right:float,bottom:float,left:float}},1:float,2:float}
+     * @return array{0:array{width:float,height:float,margins:array{default:array{top:float,right:float,bottom:float,left:float},first:array{top:float,right:float,bottom:float,left:float},left:array{top:float,right:float,bottom:float,left:float},right:array{top:float,right:float,bottom:float,left:float}}},1:float,2:float}
      */
     private static function stabilizePageConfiguration(string $cssText, RenderHtmlOptions $options): array
     {
-        $resolver = new PageStyleResolver();
+        $resolver = new PageStyleProfileResolver();
         $viewportWidth = $options->viewportWidth;
         $viewportHeight = $options->viewportHeight;
         $pageStyle = $resolver->resolve(
@@ -159,17 +159,27 @@ final class Pagyra
         ] as [$a, $b]) {
             if (abs($a - $b) > 0.01) return false;
         }
-        foreach (['top', 'right', 'bottom', 'left'] as $side) {
-            if (abs($left['margins'][$side] - $right['margins'][$side]) > 0.01) return false;
+        foreach (['default', 'first', 'left', 'right'] as $variant) {
+            foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                if (abs($left['margins'][$variant][$side] - $right['margins'][$variant][$side]) > 0.01) return false;
+            }
         }
         return true;
     }
 
     private static function resolvePrintViewport(RenderHtmlOptions $options, array $pageStyle): array
     {
-        $contentWidth = max(1.0, $pageStyle['width'] - $pageStyle['margins']['left'] - $pageStyle['margins']['right']);
-        $contentHeight = max(1.0, $pageStyle['height'] - $pageStyle['margins']['top'] - $pageStyle['margins']['bottom']);
-        return [min($options->viewportWidth, $contentWidth), min($options->viewportHeight, $contentHeight)];
+        $contentWidths = [];
+        $contentHeights = [];
+        foreach (['default', 'first', 'left', 'right'] as $variant) {
+            $margins = $pageStyle['margins'][$variant];
+            $contentWidths[] = max(1.0, $pageStyle['width'] - $margins['left'] - $margins['right']);
+            $contentHeights[] = max(1.0, $pageStyle['height'] - $margins['top'] - $margins['bottom']);
+        }
+        return [
+            min($options->viewportWidth, min($contentWidths)),
+            min($options->viewportHeight, min($contentHeights)),
+        ];
     }
 
     private static function buildFontRegistry(
