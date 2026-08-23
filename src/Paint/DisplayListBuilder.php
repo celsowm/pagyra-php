@@ -50,7 +50,7 @@ final class DisplayListBuilder
         return new DisplayList($pages);
     }
 
-    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendEntry(array &$commands, PhysicalPageEntry $entry, PaginationResult $pagination, array $margins): void
     {
         $node = $entry->placement->node;
@@ -60,7 +60,7 @@ final class DisplayListBuilder
         foreach ($entry->fragment->blocks as $block) $this->appendBlock($commands, $block, $margins);
     }
 
-    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendTopLevelBox(
         array &$commands,
         LayoutNode $node,
@@ -113,7 +113,7 @@ final class DisplayListBuilder
         );
     }
 
-    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendBlock(array &$commands, BlockFragment $block, array $margins): void
     {
         $border = $block->node->box->borderBox();
@@ -161,7 +161,7 @@ final class DisplayListBuilder
         );
     }
 
-    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendBorders(
         array &$commands,
         LayoutNode $node,
@@ -174,6 +174,10 @@ final class DisplayListBuilder
         bool $drawBottom,
     ): void {
         if ($width <= 0.0 || $height <= 0.0) return;
+
+        if ($drawTop && $drawBottom && $this->appendRoundedUniformBorder($commands, $node, $pageIndex, $x, $y, $width, $height)) {
+            return;
+        }
 
         $edges = $node->box->border;
         $top = max(0.0, min($edges->top, $height));
@@ -198,7 +202,69 @@ final class DisplayListBuilder
         }
     }
 
-    /** @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
+    private function appendRoundedUniformBorder(
+        array &$commands,
+        LayoutNode $node,
+        int $pageIndex,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+    ): bool {
+        $edges = $node->box->border;
+        $borderWidth = $edges->top;
+        if ($borderWidth <= 0.0
+            || abs($edges->right - $borderWidth) > self::EPSILON
+            || abs($edges->bottom - $borderWidth) > self::EPSILON
+            || abs($edges->left - $borderWidth) > self::EPSILON) {
+            return false;
+        }
+
+        foreach (['top', 'right', 'bottom', 'left'] as $side) {
+            if ($this->borderStyle($node, $side) !== 'solid') return false;
+        }
+        $colors = array_map(fn (string $side): ?Rgba => $this->borderColor($node, $side), ['top', 'right', 'bottom', 'left']);
+        if (!$colors[0] instanceof Rgba || $colors[0]->a <= 0.0) return false;
+        foreach (array_slice($colors, 1) as $color) {
+            if (!$color instanceof Rgba || !$this->sameColor($colors[0], $color)) return false;
+        }
+
+        $outer = BorderRadiusResolver::resolve($node->source->style, $width, $height);
+        if ($outer->isZero()) return false;
+        $innerWidth = max(0.0, $width - 2.0 * $borderWidth);
+        $innerHeight = max(0.0, $height - 2.0 * $borderWidth);
+        $inner = BorderRadiusResolver::normalize(new BorderRadius(
+            new CornerRadius(max(0.0, $outer->topLeft->x - $borderWidth), max(0.0, $outer->topLeft->y - $borderWidth)),
+            new CornerRadius(max(0.0, $outer->topRight->x - $borderWidth), max(0.0, $outer->topRight->y - $borderWidth)),
+            new CornerRadius(max(0.0, $outer->bottomRight->x - $borderWidth), max(0.0, $outer->bottomRight->y - $borderWidth)),
+            new CornerRadius(max(0.0, $outer->bottomLeft->x - $borderWidth), max(0.0, $outer->bottomLeft->y - $borderWidth)),
+        ), $innerWidth, $innerHeight);
+
+        $commands[] = new RoundedBorderPaintCommand(
+            node: $node,
+            pageIndex: $pageIndex,
+            x: $x,
+            y: $y,
+            width: $width,
+            height: $height,
+            borderWidth: $borderWidth,
+            color: $colors[0],
+            outerRadius: $outer,
+            innerRadius: $inner,
+        );
+        return true;
+    }
+
+    private function sameColor(Rgba $a, Rgba $b): bool
+    {
+        return abs($a->r - $b->r) <= self::EPSILON
+            && abs($a->g - $b->g) <= self::EPSILON
+            && abs($a->b - $b->b) <= self::EPSILON
+            && abs($a->a - $b->a) <= self::EPSILON;
+    }
+
+    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendBorderSide(
         array &$commands,
         LayoutNode $node,
@@ -257,7 +323,7 @@ final class DisplayListBuilder
     }
 
     /**
-     * @param list<BoxPaintCommand|BorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
      * @param list<LineFragment> $lines
      */
     private function appendLines(array &$commands, array $lines, array $margins): void
