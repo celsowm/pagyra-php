@@ -6,7 +6,7 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**DOM, substantial CSS cascade, block/inline layout, first-pass pagination, physical page fragmentation, display-list paint preparation and a first real pure-PHP PDF serializer are implemented. PDF output currently supports Base14/WinAnsi text and opaque background fills; Unicode Type0/custom-font embedding, images, borders, transparency and richer paint remain pending.**
+**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, first-pass pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid borders, CSS alpha and PDF serialization are implemented for the current supported subset.**
 
 Current pipeline:
 
@@ -18,7 +18,7 @@ Current foundation:
 
 - Composer + PHPUnit structure;
 - `Pagyra::prepareHtmlRender()` public API;
-- `Pagyra::renderHtmlToPdf()` now returns PDF bytes produced by the owned PHP pipeline for the currently supported paint subset;
+- `Pagyra::renderHtmlToPdf()` returns PDF bytes produced by the owned PHP pipeline for the currently supported paint subset;
 - validated `RenderHtmlOptions` defaults, including explicit `resourceBaseDir` for deterministic local resource resolution;
 - Pagyra-owned DOM model backed by `DOMDocument` only at the parsing boundary;
 - fragment/document normalization following the `pagyra-js` model;
@@ -65,7 +65,11 @@ Current foundation:
 - image `width`/`height` attributes remain usable as sizing fallback when source metadata is unavailable;
 - image sizing preserves intrinsic aspect ratio when only CSS width or height is specified;
 - image `min/max-width` and `min/max-height` constraints preserve aspect ratio when the opposite dimension remains automatic;
-- oversized intrinsic images shrink to available content width after accounting for margin, padding and border;
+- oversized intrinsic images shrink to available content width before min/max constraints, matching the `pagyra-js` sizing order;
+- replaced image sizing accounts for margin, padding, border and `box-sizing`;
+- `object-fit: fill|contain|cover|none|scale-down` paint geometry;
+- first-pass `object-position` parsing for keywords and percentages;
+- image clipping against the replaced-element content box when object-fit overflows;
 - `inline-block` with `width:auto` uses internal max-content width as its initial intrinsic width;
 - explicit inline-block width runs the child inline formatter so internal wrapping determines automatic height;
 - nested inline-block line boxes are translated into their real content-box coordinates;
@@ -83,6 +87,11 @@ Current foundation:
 - CSS `@font-face` extraction from embedded and linked stylesheets;
 - CSS font source selection prefers sfnt-compatible TrueType/OpenType sources while WOFF/WOFF2 decoding is still pending;
 - base64 embedded `@font-face` sources can be parsed directly from CSS and participate in text measurement;
+- TrueType PDF embedding through Type0 + Identity-H + CIDFontType2 + `FontFile2`;
+- `ToUnicode` CMaps for Unicode extraction, including non-BMP UTF-16 surrogate pairs;
+- sparse Identity TrueType subsetting with `.notdef` retention, composite-glyph dependency closure and rebuilt sfnt checksums;
+- embedded text uses glyph widths and classic kern adjustments in `TJ` arrays;
+- `letter-spacing` and `word-spacing` are reflected in PDF text output for the current supported length subset;
 - default `@page { ... }` resolution for named/custom page sizes, portrait/landscape orientation, margin shorthand/longhands and `!important` precedence;
 - page style / print viewport stabilization so matching `@media` rules are re-evaluated when `@page` changes the printable area;
 - proportional clamping when page margins exceed the resolved page dimensions;
@@ -91,19 +100,27 @@ Current foundation:
 - physical page model with preserved skipped parity pages;
 - top-level `PagePlacement`, per-page `PageFragment`, per-line `LineFragment` and recursive descendant `BlockFragment` geometry;
 - descendant block and text-line fragmentation while preserving the continuous layout tree unchanged;
-- `PreparedRender.displayList` with physical per-page box/text paint commands and page-margin-adjusted coordinates;
-- opaque `background-color` fills represented in the first paint command model;
+- `PreparedRender.displayList` with physical per-page box/text/image/border paint commands and page-margin-adjusted coordinates;
+- `background-color` fills;
+- per-side solid border fills with independent widths/colors and `currentColor` fallback;
 - text paint commands preserve family, weight, style, font size and color;
+- CSS color alpha for background, solid borders and text through deduplicated PDF `ExtGState` resources;
+- JPEG XObjects embedded directly with `/DCTDecode` and resource deduplication;
+- PNG grayscale/RGB XObjects using original `IDAT` + `/FlateDecode` + PNG predictor when possible;
+- PNG RGBA and grayscale+alpha split into color plus `/SMask` without GD/Imagick;
+- indexed/palette PNG (`PLTE`) support for bit depths 1/2/4/8;
+- indexed PNG `tRNS` transparency converted to a grayscale soft mask, including packed palette indices;
+- grayscale/RGB PNG `tRNS` represented efficiently as PDF color-key `/Mask` arrays;
 - pure-PHP PDF 1.4 object/xref/trailer serialization;
-- Base14 font selection for Times/Helvetica/Courier normal/bold/italic variants;
-- WinAnsi text serialization for ASCII, Latin-1 and common CP1252 punctuation;
-- unsupported characters outside the current WinAnsi repertoire fail explicitly instead of being silently corrupted;
+- Base14 font selection for Times/Helvetica/Courier normal/bold/italic variants when no embeddable TrueType face is available;
+- WinAnsi text serialization for ASCII, Latin-1 and common CP1252 punctuation in the Base14 fallback;
+- unsupported characters outside the Base14 WinAnsi repertoire fail explicitly instead of being silently corrupted;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
 - CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
 - RGBA/hex/rgb/named-color parsing foundation;
 - unit/integration/parity test suites kept separate;
-- GitHub Actions CI for PHP 8.2, 8.3 and 8.4.
+- GitHub Actions CI configuration for PHP 8.2, 8.3 and 8.4.
 
 Example local font configuration:
 
@@ -147,7 +164,7 @@ Default page descriptors are also reflected by `prepareHtmlRender()`:
 <p>Hello</p>
 ```
 
-A first real PDF can now be produced directly:
+A real PDF can be produced directly:
 
 ```php
 $pdf = Pagyra::renderHtmlToPdf([
@@ -157,7 +174,7 @@ $pdf = Pagyra::renderHtmlToPdf([
 file_put_contents('output.pdf', $pdf);
 ```
 
-The current PDF serializer intentionally remains narrow. Custom TTF/OTF files are already used for layout measurement, but the PDF paint stage currently maps text to Base14 fonts rather than embedding those custom programs. Proper Type0/CID font embedding, ToUnicode CMaps, glyph subsetting and full Unicode output remain pending.
+The PDF serializer is still a subset renderer, not yet a full `pagyra-js` replacement. TrueType sfnt fonts can be embedded and subsetted today; OpenType/CFF (`OTTO`) embedding through `FontFile3`, WOFF/WOFF2 decoding, GPOS shaping/kerning, variable-font support and richer fallback-chain behavior remain pending.
 
 Styled inline content is preserved through layout. For example:
 
@@ -167,7 +184,7 @@ Styled inline content is preserved through layout. For example:
 
 produces line boxes containing separate `TextRun` objects for the normal, bold and italic portions, each measured with its own computed style/font selection.
 
-Atomic inline content can now participate in the same line and expose an internal layout:
+Atomic inline content can participate in the same line and expose an internal layout:
 
 ```html
 <p>
@@ -180,13 +197,11 @@ Atomic inline content can now participate in the same line and expose an interna
 
 The span carries nested `contentLines` laid out inside its content box. The image resolves to `80 x 40` content pixels because only its width is overridden.
 
-The parsed-font path currently targets accurate measurement. `glyf`/CFF outline painting, GPOS kerning/class pairs, variable fonts, WOFF/WOFF2 decoding, custom-font PDF embedding/subsetting and full fallback-chain parity remain pending.
-
-The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, replaced-element object-fit/object-position paint, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
+The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
-Still pending in pagination/paint: page pseudo-class profiles (`:first`, `:left`, `:right`), variable per-page margins, full descendant forced-break propagation, stacking contexts/z-index, borders/radii, images/SVG paint, transparency, decorations and richer clipping.
+Still pending in pagination/paint: page pseudo-class profiles (`:first`, `:left`, `:right`), variable per-page margins, full descendant forced-break propagation, stacking contexts/z-index, border radius and non-solid border styles, inline atomic-box border paint, WebP/SVG paint, Adam7 PNG, element-level opacity, decorations and richer clipping.
 
 Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, full shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
 
