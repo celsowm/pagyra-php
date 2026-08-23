@@ -486,12 +486,24 @@ final class PdfSerializer
         $y = Units::pxToPt($pageHeightPx - $command->y - $command->height);
         $content = "q\n";
         if ($command->clipRect !== null) {
-            $clipX = Units::pxToPt($command->clipRect->x);
-            $clipY = Units::pxToPt($pageHeightPx - $command->clipRect->y - $command->clipRect->height);
-            $clipWidth = Units::pxToPt($command->clipRect->width);
-            $clipHeight = Units::pxToPt($command->clipRect->height);
-            $content .= $this->number($clipX) . ' ' . $this->number($clipY) . ' '
-                . $this->number($clipWidth) . ' ' . $this->number($clipHeight) . " re W n\n";
+            if ($command->clipRadius !== null && !$command->clipRadius->isZero()) {
+                $clipGeometry = RoundedRectPdfPath::build(
+                    $command->clipRect->x,
+                    $command->clipRect->y,
+                    $command->clipRect->width,
+                    $command->clipRect->height,
+                    $pageHeightPx,
+                    $command->clipRadius,
+                );
+                $content .= $this->roundedRectPath($clipGeometry) . "W n\n";
+            } else {
+                $clipX = Units::pxToPt($command->clipRect->x);
+                $clipY = Units::pxToPt($pageHeightPx - $command->clipRect->y - $command->clipRect->height);
+                $clipWidth = Units::pxToPt($command->clipRect->width);
+                $clipHeight = Units::pxToPt($command->clipRect->height);
+                $content .= $this->number($clipX) . ' ' . $this->number($clipY) . ' '
+                    . $this->number($clipWidth) . ' ' . $this->number($clipHeight) . " re W n\n";
+            }
         }
         $content .= $this->number($width) . ' 0 0 ' . $this->number($height) . ' '
             . $this->number($x) . ' ' . $this->number($y) . " cm\n/" . $resourceName . " Do\nQ\n";
