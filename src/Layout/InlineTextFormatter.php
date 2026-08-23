@@ -476,12 +476,24 @@ final class InlineTextFormatter
             $specific = $node->style->get('border-' . $side . '-width');
             if ($specific !== null) $parts[$index] = $specific;
         }
-        return [
-            'top' => $this->resolveSimpleLength($parts[0], $referenceWidth, $fontSize, 0.0),
-            'right' => $this->resolveSimpleLength($parts[1], $referenceWidth, $fontSize, 0.0),
-            'bottom' => $this->resolveSimpleLength($parts[2], $referenceWidth, $fontSize, 0.0),
-            'left' => $this->resolveSimpleLength($parts[3], $referenceWidth, $fontSize, 0.0),
-        ];
+        $result = [];
+        foreach (['top' => 0, 'right' => 1, 'bottom' => 2, 'left' => 3] as $side => $index) {
+            if (in_array($this->borderStyleForSide($node, $side), ['none', 'hidden'], true)) {
+                $result[$side] = 0.0;
+            } else {
+                $result[$side] = $this->resolveSimpleLength($parts[$index], $referenceWidth, $fontSize, 0.0);
+            }
+        }
+        return $result;
+    }
+
+    private function borderStyleForSide(StyledNode $node, string $side): string
+    {
+        $specific = $node->style->get('border-' . $side . '-style');
+        if ($specific !== null && trim($specific) !== '') return strtolower(trim($specific));
+        $parts = $this->expandFour($node->style->get('border-style', 'none') ?? 'none');
+        $index = array_search($side, ['top', 'right', 'bottom', 'left'], true);
+        return strtolower($parts[$index === false ? 0 : $index] ?? 'none');
     }
 
     private function expandFour(string $raw): array
