@@ -68,9 +68,7 @@ final class RecursivePaginationOffsets
         }
     }
 
-    /**
-     * @param array<int,float> $finalOffsets
-     */
+    /** @param array<int,float> $finalOffsets */
     private function visitBreakInside(LayoutNode $node, PageFlow $flow, float &$avoidGlobalOffset, array &$finalOffsets): void
     {
         $baseOffset = $this->forcedOffsets[spl_object_id($node)] ?? 0.0;
@@ -123,7 +121,7 @@ final class RecursivePaginationOffsets
         if (($pageCounts[$firstPage] ?? 0) >= $orphans && ($pageCounts[$lastPage] ?? 0) >= $widows) return 0.0;
 
         $height = max($node->box->marginBox()->bottom(), $this->subtreeBottom($node)) - $node->box->marginBox()->y;
-        if ($height > $flow->contentHeight + self::EPSILON) return 0.0;
+        if ($height > $flow->maximumUsableHeight() + self::EPSILON) return 0.0;
 
         $currentPage = $flow->pageIndexAt($start);
         return max(0.0, $flow->contentStartForPage($currentPage + 1) - $start);
