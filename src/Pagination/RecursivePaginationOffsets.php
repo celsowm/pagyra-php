@@ -58,8 +58,7 @@ final class RecursivePaginationOffsets
         }
 
         if ($participates) {
-            $offset = $this->offsets[spl_object_id($node)] ?? $this->globalOffset;
-            $end = max($node->box->marginBox()->bottom(), $this->subtreeBottomWithOffsets($node)) + $offset;
+            $end = $this->absoluteSubtreeBottom($node);
             $after = $this->forcedBreakOffset($this->breakValue($node, 'after'), $end, $flow);
             if ($after > self::EPSILON) {
                 $this->globalOffset += $after;
@@ -118,7 +117,7 @@ final class RecursivePaginationOffsets
         $border = $node->box->borderBox();
         $top = $border->y + $offset;
         $bottom = $border->bottom() + $offset;
-        if (($border->height) > $flow->contentHeight + self::EPSILON) return 0.0;
+        if ($border->height > $flow->contentHeight + self::EPSILON) return 0.0;
 
         $startPage = $flow->pageIndexAt($top);
         $endPage = $flow->pageIndexAt(max($top, $bottom - self::EPSILON));
@@ -161,12 +160,12 @@ final class RecursivePaginationOffsets
         return $bottom;
     }
 
-    private function subtreeBottomWithOffsets(LayoutNode $node): float
+    private function absoluteSubtreeBottom(LayoutNode $node): float
     {
-        $bottom = $node->box->marginBox()->bottom();
+        $offset = $this->offsets[spl_object_id($node)] ?? $this->globalOffset;
+        $bottom = $node->box->marginBox()->bottom() + $offset;
         foreach ($node->children as $child) {
-            $childOffset = $this->offsets[spl_object_id($child)] ?? $this->globalOffset;
-            $bottom = max($bottom, $this->subtreeBottom($child) + $childOffset);
+            $bottom = max($bottom, $this->absoluteSubtreeBottom($child));
         }
         return $bottom;
     }
