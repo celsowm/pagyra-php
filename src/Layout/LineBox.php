@@ -6,7 +6,11 @@ namespace Pagyra\Layout;
 
 final readonly class LineBox implements \JsonSerializable
 {
-    /** @param list<TextRun> $runs @param list<AtomicInlineBox> $atomicBoxes */
+    /**
+     * @param list<TextRun> $runs
+     * @param list<AtomicInlineBox> $atomicBoxes
+     * @param list<TextRun|AtomicInlineBox> $items
+     */
     public function __construct(
         public float $x,
         public float $y,
@@ -16,7 +20,22 @@ final readonly class LineBox implements \JsonSerializable
         public string $text,
         public array $runs = [],
         public array $atomicBoxes = [],
+        public array $items = [],
     ) {
+    }
+
+    /** @return list<TextRun|AtomicInlineBox> */
+    public function orderedItems(): array
+    {
+        if ($this->items !== []) return $this->items;
+
+        $items = [...$this->runs, ...$this->atomicBoxes];
+        usort($items, static function (TextRun|AtomicInlineBox $left, TextRun|AtomicInlineBox $right): int {
+            $byX = $left->x <=> $right->x;
+            if ($byX !== 0) return $byX;
+            return $left instanceof TextRun && $right instanceof AtomicInlineBox ? -1 : 1;
+        });
+        return $items;
     }
 
     public function jsonSerialize(): array
@@ -30,6 +49,7 @@ final readonly class LineBox implements \JsonSerializable
             'text' => $this->text,
             'runs' => $this->runs,
             'atomicBoxes' => $this->atomicBoxes,
+            'items' => $this->orderedItems(),
         ];
     }
 }
