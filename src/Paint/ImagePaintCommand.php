@@ -21,6 +21,7 @@ final readonly class ImagePaintCommand implements \JsonSerializable
         public ImageMetadata $metadata,
         public string $source,
         public ?Rect $clipRect = null,
+        public ?BorderRadius $clipRadius = null,
     ) {
     }
 
@@ -34,6 +35,7 @@ final readonly class ImagePaintCommand implements \JsonSerializable
             'width' => $this->width,
             'height' => $this->height,
             'clipRect' => $this->clipRect,
+            'clipRadius' => $this->clipRadius,
             'format' => $this->metadata->format,
             'intrinsicWidth' => $this->metadata->width,
             'intrinsicHeight' => $this->metadata->height,
