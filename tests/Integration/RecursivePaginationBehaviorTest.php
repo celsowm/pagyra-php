@@ -32,6 +32,25 @@ final class RecursivePaginationBehaviorTest extends TestCase
         self::assertSame(20.0, $page1->blocks[1]->pageY);
     }
 
+    public function testDescendantRightBreakPreservesSkippedParityPage(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<style>@page{size:200px 100px;margin:0} section,div{margin:0}</style>'
+                . '<section><div style="height:20px"></div><div style="height:20px;break-before:right"></div></section>',
+            'viewportWidth' => 200,
+            'viewportHeight' => 100,
+        ]);
+
+        $placement = $prepared->pagination->placements[0];
+        self::assertSame(2, $placement->endPageIndex);
+        self::assertSame(3, $prepared->pagination->pageCount);
+        self::assertCount(0, $prepared->pagination->pages[1]->entries);
+        self::assertCount(1, $placement->fragments[0]->blocks);
+        self::assertCount(0, $placement->fragments[1]->blocks);
+        self::assertCount(1, $placement->fragments[2]->blocks);
+        self::assertSame(0.0, $placement->fragments[2]->blocks[0]->pageY);
+    }
+
     public function testDescendantBreakAfterMovesFollowingSibling(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
