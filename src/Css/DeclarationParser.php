@@ -6,6 +6,11 @@ namespace Pagyra\Css;
 
 final class DeclarationParser
 {
+    public function __construct(
+        private readonly BorderShorthandExpander $borderShorthandExpander = new BorderShorthandExpander(),
+    ) {
+    }
+
     /** @return array<string,string> */
     public function parse(string $css): array
     {
@@ -40,7 +45,16 @@ final class DeclarationParser
                 continue;
             }
 
-            $declarations[strtolower($property)] = ['value' => $value, 'important' => $important];
+            $property = strtolower($property);
+            $expanded = $this->borderShorthandExpander->expand($property, $value);
+            if ($expanded !== null) {
+                foreach ($expanded as $expandedProperty => $expandedValue) {
+                    $declarations[$expandedProperty] = ['value' => $expandedValue, 'important' => $important];
+                }
+                continue;
+            }
+
+            $declarations[$property] = ['value' => $value, 'important' => $important];
         }
 
         ksort($declarations);
