@@ -186,12 +186,13 @@ final class PdfSerializer
                                 . ' /BitsPerComponent ' . $png->bitsPerComponent
                                 . ' /Columns ' . $png->width . ' >>'
                             : '';
+                        $colorKeyMask = $png->colorKeyMask !== null ? ' /Mask [' . $png->colorKeyMask . ']' : '';
                         $dictionary = '<< /Type /XObject /Subtype /Image'
                             . ' /Width ' . $png->width
                             . ' /Height ' . $png->height
                             . ' /ColorSpace ' . $png->colorSpace
                             . ' /BitsPerComponent ' . $png->bitsPerComponent
-                            . ' /Filter /FlateDecode' . $decodeParms . $softMask
+                            . ' /Filter /FlateDecode' . $decodeParms . $softMask . $colorKeyMask
                             . ' /Length ' . strlen($stream) . ' >>';
                     }
                 }
