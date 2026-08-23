@@ -17,6 +17,7 @@ final readonly class BoxPaintCommand implements \JsonSerializable
         public float $width,
         public float $height,
         public ?Rgba $backgroundColor = null,
+        public BorderRadius $borderRadius = new BorderRadius(),
     ) {
     }
 
@@ -30,6 +31,7 @@ final readonly class BoxPaintCommand implements \JsonSerializable
             'width' => $this->width,
             'height' => $this->height,
             'backgroundColor' => $this->backgroundColor,
+            'borderRadius' => $this->borderRadius,
             'node' => $this->node,
         ];
     }
