@@ -88,8 +88,8 @@ final class PngPdfImageParser
             return $this->indexed($width, $height, $bitDepth, $idat, $palette, $transparency);
         }
 
-        if ($bitDepth === 8 && in_array($colorType, [4, 6], true)) {
-            return $this->splitAlpha($width, $height, $colorType, $idat);
+        if (in_array($bitDepth, [8, 16], true) && in_array($colorType, [4, 6], true)) {
+            return $this->splitAlpha($width, $height, $bitDepth, $colorType, $idat);
         }
 
         return null;
@@ -196,14 +196,16 @@ final class PngPdfImageParser
         return ($byte >> $shift) & ((1 << $bitDepth) - 1);
     }
 
-    private function splitAlpha(int $width, int $height, int $colorType, string $idat): ?PngPdfImageData
+    private function splitAlpha(int $width, int $height, int $bitDepth, int $colorType, string $idat): ?PngPdfImageData
     {
         $decoded = @gzuncompress($idat);
         if (!is_string($decoded)) return null;
 
         $channels = $colorType === 6 ? 4 : 2;
         $colorChannels = $colorType === 6 ? 3 : 1;
-        $rowBytes = $width * $channels;
+        $bytesPerSample = $bitDepth === 16 ? 2 : 1;
+        $bytesPerPixel = $channels * $bytesPerSample;
+        $rowBytes = $width * $bytesPerPixel;
         $expected = $height * ($rowBytes + 1);
         if (strlen($decoded) !== $expected) return null;
 
@@ -218,19 +220,19 @@ final class PngPdfImageParser
 
             $raw = substr($decoded, $cursor, $rowBytes);
             $cursor += $rowBytes;
-            $reconstructed = $this->unfilter($raw, $previous, $channels, $filter);
+            $reconstructed = $this->unfilter($raw, $previous, $bytesPerPixel, $filter);
             if ($reconstructed === null) return null;
 
             for ($x = 0; $x < $width; $x++) {
-                $base = $x * $channels;
+                $base = $x * $bytesPerPixel;
                 if ($colorType === 6) {
                     $color .= chr($reconstructed[$base])
-                        . chr($reconstructed[$base + 1])
-                        . chr($reconstructed[$base + 2]);
-                    $alpha .= chr($reconstructed[$base + 3]);
+                        . chr($reconstructed[$base + $bytesPerSample])
+                        . chr($reconstructed[$base + 2 * $bytesPerSample]);
+                    $alpha .= chr($reconstructed[$base + 3 * $bytesPerSample]);
                 } else {
                     $color .= chr($reconstructed[$base]);
-                    $alpha .= chr($reconstructed[$base + 1]);
+                    $alpha .= chr($reconstructed[$base + $bytesPerSample]);
                 }
             }
 
