@@ -11,9 +11,11 @@ final class PaginationEngine
 {
     private const EPSILON = 0.01;
 
-    public function paginate(LayoutNode $root, float $contentHeight): PaginationResult
+    public function paginate(LayoutNode $root, float|PageFlow $contentHeightOrFlow): PaginationResult
     {
-        $flow = new PageFlow($contentHeight);
+        $flow = $contentHeightOrFlow instanceof PageFlow
+            ? $contentHeightOrFlow
+            : new PageFlow($contentHeightOrFlow);
         $nodeOffsets = (new RecursivePaginationOffsets())->resolve($root, $flow);
         $placements = [];
         $maxEnd = 0.0;
@@ -99,7 +101,7 @@ final class PaginationEngine
 
         for ($pageIndex = $firstPage; $pageIndex <= $lastPage; $pageIndex++) {
             $pageStart = $flow->contentStartForPage($pageIndex);
-            $pageEnd = $pageStart + $flow->contentHeight;
+            $pageEnd = $pageStart + $flow->usableHeightForPage($pageIndex);
             $fragmentStart = max($start, $pageStart);
             $fragmentEnd = min($end, $pageEnd);
             if ($fragmentEnd < $fragmentStart) continue;
@@ -155,7 +157,7 @@ final class PaginationEngine
         $start = $border->y + $offset;
         $end = $border->bottom() + $offset;
         $pageStart = $flow->contentStartForPage($pageIndex);
-        $pageEnd = $pageStart + $flow->contentHeight;
+        $pageEnd = $pageStart + $flow->usableHeightForPage($pageIndex);
 
         if ($end <= $pageStart + self::EPSILON || $start >= $pageEnd - self::EPSILON) {
             return null;
