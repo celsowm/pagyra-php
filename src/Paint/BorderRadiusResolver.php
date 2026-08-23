@@ -70,6 +70,16 @@ final class BorderRadiusResolver
         );
     }
 
+    public static function shrink(BorderRadius $radii, float $top, float $right, float $bottom, float $left): BorderRadius
+    {
+        return new BorderRadius(
+            new CornerRadius(max(0.0, $radii->topLeft->x - $top), max(0.0, $radii->topLeft->y - $left)),
+            new CornerRadius(max(0.0, $radii->topRight->x - $top), max(0.0, $radii->topRight->y - $right)),
+            new CornerRadius(max(0.0, $radii->bottomRight->x - $bottom), max(0.0, $radii->bottomRight->y - $right)),
+            new CornerRadius(max(0.0, $radii->bottomLeft->x - $bottom), max(0.0, $radii->bottomLeft->y - $left)),
+        );
+    }
+
     /** @return array{0:string,1:string,2:string,3:string} */
     private static function expand(string $raw): array
     {
