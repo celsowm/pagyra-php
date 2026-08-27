@@ -20,6 +20,7 @@ use Pagyra\Pagination\BlockFragment;
 use Pagyra\Pagination\LineFragment;
 use Pagyra\Pagination\PaginationResult;
 use Pagyra\Pagination\PhysicalPageEntry;
+use Pagyra\Style\ComputedStyle;
 
 final class DisplayListBuilder
 {
@@ -294,6 +295,7 @@ final class DisplayListBuilder
     {
         $weightRaw = strtolower(trim($run->style->get('font-weight', '400') ?? '400'));
         $fontWeight = $weightRaw === 'bold' ? 700 : ($weightRaw === 'normal' ? 400 : (is_numeric($weightRaw) ? (int) $weightRaw : 400));
+        [$underline, $lineThrough] = $this->resolveTextDecorationLines($run->style);
         $commands[] = new TextPaintCommand(
             run: $run,
             pageIndex: $lineFragment->pageIndex,
@@ -306,7 +308,25 @@ final class DisplayListBuilder
             fontWeight: max(100, min(900, $fontWeight)),
             fontStyle: strtolower(trim($run->style->get('font-style', 'normal') ?? 'normal')),
             color: ColorParser::parse($run->style->get('color', 'black')),
+            underline: $underline,
+            lineThrough: $lineThrough,
         );
+    }
+
+    /**
+     * Resolves the `text-decoration` (shorthand) / `text-decoration-line` (longhand) tokens
+     * into [underline, lineThrough], mirroring pagyra-js's parseTextDecorationLine, which keeps
+     * only the recognized line keywords and treats "none" as clearing every line.
+     *
+     * @return array{0:bool,1:bool}
+     */
+    private function resolveTextDecorationLines(ComputedStyle $style): array
+    {
+        $raw = $style->get('text-decoration-line') ?? $style->get('text-decoration');
+        if ($raw === null) return [false, false];
+        $tokens = preg_split('/\s+/', strtolower(trim($raw))) ?: [];
+        if ($tokens === [] || in_array('none', $tokens, true)) return [false, false];
+        return [in_array('underline', $tokens, true), in_array('line-through', $tokens, true)];
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */

@@ -85,6 +85,7 @@ final class PdfSerializer
                 $content .= $resource['face'] instanceof RegisteredFont
                     ? $this->serializeEmbeddedText($command, $page->height, $resource['name'], $resource['face'], $graphicsState)
                     : $this->serializeBase14Text($command, $page->height, $resource['name'], $graphicsState);
+                $content .= $this->serializeTextDecorations($command, $page->height, $graphicsState);
             }
 
             $contentId = $reserve();
@@ -456,6 +457,36 @@ final class PdfSerializer
             $command->color,
             $graphicsState,
         );
+    }
+
+    /**
+     * Paints `text-decoration: underline` / `line-through` as thin filled rectangles.
+     *
+     * Position/thickness ratios (relative to font size) mirror pagyra-js's
+     * TextDecorationRenderer::renderSolid so both implementations produce the same
+     * geometry for the currently supported `solid` style. `overline` and the
+     * `double`/`dashed`/`dotted`/`wavy` styles are deliberately not ported yet.
+     */
+    private function serializeTextDecorations(TextPaintCommand $command, float $pageHeightPx, ?string $graphicsState = null): string
+    {
+        if (!$command->underline && !$command->lineThrough) return '';
+        if ($command->color instanceof Rgba && $command->color->a <= 0.0) return '';
+        $widthPx = max($command->run->width, 0.0);
+        if ($widthPx <= 0.0) return '';
+        $color = $command->color ?? new Rgba(0, 0, 0, 1.0);
+
+        $content = '';
+        if ($command->lineThrough) {
+            $thicknessPx = max($command->fontSize * 0.085, 0.5);
+            $centerYPx = $command->baseline - $command->fontSize * 0.3;
+            $content .= $this->serializeFilledRect($command->x, $centerYPx - $thicknessPx / 2, $widthPx, $thicknessPx, $pageHeightPx, $color, $graphicsState);
+        }
+        if ($command->underline) {
+            $thicknessPx = max($command->fontSize * 0.065, 0.5);
+            $underlineYPx = $command->baseline + $command->fontSize * 0.1;
+            $content .= $this->serializeFilledRect($command->x, $underlineYPx - $thicknessPx / 2, $widthPx, $thicknessPx, $pageHeightPx, $color, $graphicsState);
+        }
+        return $content;
     }
 
     private function serializeFilledRect(
