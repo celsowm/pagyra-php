@@ -43,7 +43,7 @@ final class LinkedStylesheetLoadingTest extends TestCase
                 'viewportHeight' => 300,
             ]);
 
-            self::assertSame('140px', $prepared->styledRoot->children[0]->style->get('width'));
+            self::assertSame('140px', $prepared->styledRoot->children[1]->style->get('width'));
         } finally {
             @unlink($dir . '/site.css');
             @rmdir($dir);
