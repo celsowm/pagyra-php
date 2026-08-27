@@ -72,13 +72,13 @@ final readonly class RenderHtmlOptions
         if ($value === '') return false;
         if (str_starts_with(strtolower($value), 'file://')) {
             $value = rawurldecode(substr($value, 7));
-            if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $value) === 1) {
+            if (preg_match('#^/[a-zA-Z]:[\\\\/]#', $value) === 1) {
                 $value = substr($value, 1);
             }
         }
 
         return str_starts_with($value, '/')
             || str_starts_with($value, '\\\\')
-            || preg_match('/^[a-zA-Z]:[\\\/]/', $value) === 1;
+            || preg_match('#^[a-zA-Z]:[\\\\/]#', $value) === 1;
     }
 }

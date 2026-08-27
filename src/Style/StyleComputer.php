@@ -14,6 +14,7 @@ final class StyleComputer
     private const INHERITED = [
         'color', 'font-family', 'font-size', 'font-style', 'font-weight',
         'line-height', 'text-align', 'visibility', 'white-space',
+        'text-decoration', 'text-decoration-line',
         'x-link-href',
     ];
 

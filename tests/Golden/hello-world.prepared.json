@@ -72,5 +72,658 @@
         "right": 20,
         "bottom": 20,
         "left": 20
+    },
+    "pageMargins": {
+        "default": {
+            "top": 20,
+            "right": 20,
+            "bottom": 20,
+            "left": 20
+        },
+        "first": {
+            "top": 20,
+            "right": 20,
+            "bottom": 20,
+            "left": 20
+        },
+        "left": {
+            "top": 20,
+            "right": 20,
+            "bottom": 20,
+            "left": 20
+        },
+        "right": {
+            "top": 20,
+            "right": 20,
+            "bottom": 20,
+            "left": 20
+        }
+    },
+    "pagination": {
+        "flow": {
+            "contentHeight": 1060,
+            "pageHeight": 1100,
+            "margins": {
+                "default": {
+                    "top": 20,
+                    "right": 20,
+                    "bottom": 20,
+                    "left": 20
+                },
+                "first": {
+                    "top": 20,
+                    "right": 20,
+                    "bottom": 20,
+                    "left": 20
+                },
+                "left": {
+                    "top": 20,
+                    "right": 20,
+                    "bottom": 20,
+                    "left": 20
+                },
+                "right": {
+                    "top": 20,
+                    "right": 20,
+                    "bottom": 20,
+                    "left": 20
+                }
+            }
+        },
+        "placements": [
+            {
+                "pageIndex": 0,
+                "endPageIndex": 0,
+                "offsetY": 0,
+                "startY": 0,
+                "endY": 51.2,
+                "fragments": [
+                    {
+                        "pageIndex": 0,
+                        "pageY": 0,
+                        "height": 51.2,
+                        "continuousStartY": 0,
+                        "continuousEndY": 51.2,
+                        "lines": [
+                            {
+                                "lineIndex": 0,
+                                "pageIndex": 0,
+                                "pageY": 16,
+                                "pageBaseline": 29.6,
+                                "continuousY": 16,
+                                "continuousBaseline": 29.6,
+                                "line": {
+                                    "x": 0,
+                                    "y": 16,
+                                    "width": 78.912,
+                                    "height": 19.2,
+                                    "baseline": 29.6,
+                                    "text": "Hello World",
+                                    "runs": [
+                                        {
+                                            "x": 0,
+                                            "y": 16,
+                                            "width": 78.912,
+                                            "height": 19.2,
+                                            "baseline": 29.6,
+                                            "text": "Hello World",
+                                            "fontSize": 16,
+                                            "style": {
+                                                "display": "block",
+                                                "margin-bottom": "1em",
+                                                "margin-top": "1em"
+                                            }
+                                        }
+                                    ],
+                                    "atomicBoxes": [],
+                                    "items": [
+                                        {
+                                            "x": 0,
+                                            "y": 16,
+                                            "width": 78.912,
+                                            "height": 19.2,
+                                            "baseline": 29.6,
+                                            "text": "Hello World",
+                                            "fontSize": 16,
+                                            "style": {
+                                                "display": "block",
+                                                "margin-bottom": "1em",
+                                                "margin-top": "1em"
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        ],
+                        "blocks": []
+                    }
+                ],
+                "node": {
+                    "node": {
+                        "type": "element",
+                        "tagName": "p",
+                        "children": [
+                            {
+                                "type": "text",
+                                "text": "Hello World"
+                            }
+                        ]
+                    },
+                    "style": {
+                        "display": "block",
+                        "margin-bottom": "1em",
+                        "margin-top": "1em"
+                    },
+                    "box": {
+                        "content": {
+                            "x": 0,
+                            "y": 16,
+                            "width": 760,
+                            "height": 19.200000000000003
+                        },
+                        "paddingBox": {
+                            "x": 0,
+                            "y": 16,
+                            "width": 760,
+                            "height": 19.200000000000003
+                        },
+                        "borderBox": {
+                            "x": 0,
+                            "y": 16,
+                            "width": 760,
+                            "height": 19.200000000000003
+                        },
+                        "marginBox": {
+                            "x": 0,
+                            "y": 0,
+                            "width": 760,
+                            "height": 51.2
+                        },
+                        "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                        },
+                        "border": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                        },
+                        "margin": {
+                            "top": 16,
+                            "right": 0,
+                            "bottom": 16,
+                            "left": 0
+                        }
+                    },
+                    "fontSize": 16,
+                    "lineBoxes": [
+                        {
+                            "x": 0,
+                            "y": 16,
+                            "width": 78.912,
+                            "height": 19.2,
+                            "baseline": 29.6,
+                            "text": "Hello World",
+                            "runs": [
+                                {
+                                    "x": 0,
+                                    "y": 16,
+                                    "width": 78.912,
+                                    "height": 19.2,
+                                    "baseline": 29.6,
+                                    "text": "Hello World",
+                                    "fontSize": 16,
+                                    "style": {
+                                        "display": "block",
+                                        "margin-bottom": "1em",
+                                        "margin-top": "1em"
+                                    }
+                                }
+                            ],
+                            "atomicBoxes": [],
+                            "items": [
+                                {
+                                    "x": 0,
+                                    "y": 16,
+                                    "width": 78.912,
+                                    "height": 19.2,
+                                    "baseline": 29.6,
+                                    "text": "Hello World",
+                                    "fontSize": 16,
+                                    "style": {
+                                        "display": "block",
+                                        "margin-bottom": "1em",
+                                        "margin-top": "1em"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "children": []
+                }
+            }
+        ],
+        "pageCount": 1,
+        "pages": [
+            {
+                "pageIndex": 0,
+                "entries": [
+                    {
+                        "placement": {
+                            "pageIndex": 0,
+                            "endPageIndex": 0,
+                            "offsetY": 0,
+                            "startY": 0,
+                            "endY": 51.2,
+                            "fragments": [
+                                {
+                                    "pageIndex": 0,
+                                    "pageY": 0,
+                                    "height": 51.2,
+                                    "continuousStartY": 0,
+                                    "continuousEndY": 51.2,
+                                    "lines": [
+                                        {
+                                            "lineIndex": 0,
+                                            "pageIndex": 0,
+                                            "pageY": 16,
+                                            "pageBaseline": 29.6,
+                                            "continuousY": 16,
+                                            "continuousBaseline": 29.6,
+                                            "line": {
+                                                "x": 0,
+                                                "y": 16,
+                                                "width": 78.912,
+                                                "height": 19.2,
+                                                "baseline": 29.6,
+                                                "text": "Hello World",
+                                                "runs": [
+                                                    {
+                                                        "x": 0,
+                                                        "y": 16,
+                                                        "width": 78.912,
+                                                        "height": 19.2,
+                                                        "baseline": 29.6,
+                                                        "text": "Hello World",
+                                                        "fontSize": 16,
+                                                        "style": {
+                                                            "display": "block",
+                                                            "margin-bottom": "1em",
+                                                            "margin-top": "1em"
+                                                        }
+                                                    }
+                                                ],
+                                                "atomicBoxes": [],
+                                                "items": [
+                                                    {
+                                                        "x": 0,
+                                                        "y": 16,
+                                                        "width": 78.912,
+                                                        "height": 19.2,
+                                                        "baseline": 29.6,
+                                                        "text": "Hello World",
+                                                        "fontSize": 16,
+                                                        "style": {
+                                                            "display": "block",
+                                                            "margin-bottom": "1em",
+                                                            "margin-top": "1em"
+                                                        }
+                                                    }
+                                                ]
+                                            }
+                                        }
+                                    ],
+                                    "blocks": []
+                                }
+                            ],
+                            "node": {
+                                "node": {
+                                    "type": "element",
+                                    "tagName": "p",
+                                    "children": [
+                                        {
+                                            "type": "text",
+                                            "text": "Hello World"
+                                        }
+                                    ]
+                                },
+                                "style": {
+                                    "display": "block",
+                                    "margin-bottom": "1em",
+                                    "margin-top": "1em"
+                                },
+                                "box": {
+                                    "content": {
+                                        "x": 0,
+                                        "y": 16,
+                                        "width": 760,
+                                        "height": 19.200000000000003
+                                    },
+                                    "paddingBox": {
+                                        "x": 0,
+                                        "y": 16,
+                                        "width": 760,
+                                        "height": 19.200000000000003
+                                    },
+                                    "borderBox": {
+                                        "x": 0,
+                                        "y": 16,
+                                        "width": 760,
+                                        "height": 19.200000000000003
+                                    },
+                                    "marginBox": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "width": 760,
+                                        "height": 51.2
+                                    },
+                                    "padding": {
+                                        "top": 0,
+                                        "right": 0,
+                                        "bottom": 0,
+                                        "left": 0
+                                    },
+                                    "border": {
+                                        "top": 0,
+                                        "right": 0,
+                                        "bottom": 0,
+                                        "left": 0
+                                    },
+                                    "margin": {
+                                        "top": 16,
+                                        "right": 0,
+                                        "bottom": 16,
+                                        "left": 0
+                                    }
+                                },
+                                "fontSize": 16,
+                                "lineBoxes": [
+                                    {
+                                        "x": 0,
+                                        "y": 16,
+                                        "width": 78.912,
+                                        "height": 19.2,
+                                        "baseline": 29.6,
+                                        "text": "Hello World",
+                                        "runs": [
+                                            {
+                                                "x": 0,
+                                                "y": 16,
+                                                "width": 78.912,
+                                                "height": 19.2,
+                                                "baseline": 29.6,
+                                                "text": "Hello World",
+                                                "fontSize": 16,
+                                                "style": {
+                                                    "display": "block",
+                                                    "margin-bottom": "1em",
+                                                    "margin-top": "1em"
+                                                }
+                                            }
+                                        ],
+                                        "atomicBoxes": [],
+                                        "items": [
+                                            {
+                                                "x": 0,
+                                                "y": 16,
+                                                "width": 78.912,
+                                                "height": 19.2,
+                                                "baseline": 29.6,
+                                                "text": "Hello World",
+                                                "fontSize": 16,
+                                                "style": {
+                                                    "display": "block",
+                                                    "margin-bottom": "1em",
+                                                    "margin-top": "1em"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "children": []
+                            }
+                        },
+                        "fragment": {
+                            "pageIndex": 0,
+                            "pageY": 0,
+                            "height": 51.2,
+                            "continuousStartY": 0,
+                            "continuousEndY": 51.2,
+                            "lines": [
+                                {
+                                    "lineIndex": 0,
+                                    "pageIndex": 0,
+                                    "pageY": 16,
+                                    "pageBaseline": 29.6,
+                                    "continuousY": 16,
+                                    "continuousBaseline": 29.6,
+                                    "line": {
+                                        "x": 0,
+                                        "y": 16,
+                                        "width": 78.912,
+                                        "height": 19.2,
+                                        "baseline": 29.6,
+                                        "text": "Hello World",
+                                        "runs": [
+                                            {
+                                                "x": 0,
+                                                "y": 16,
+                                                "width": 78.912,
+                                                "height": 19.2,
+                                                "baseline": 29.6,
+                                                "text": "Hello World",
+                                                "fontSize": 16,
+                                                "style": {
+                                                    "display": "block",
+                                                    "margin-bottom": "1em",
+                                                    "margin-top": "1em"
+                                                }
+                                            }
+                                        ],
+                                        "atomicBoxes": [],
+                                        "items": [
+                                            {
+                                                "x": 0,
+                                                "y": 16,
+                                                "width": 78.912,
+                                                "height": 19.2,
+                                                "baseline": 29.6,
+                                                "text": "Hello World",
+                                                "fontSize": 16,
+                                                "style": {
+                                                    "display": "block",
+                                                    "margin-bottom": "1em",
+                                                    "margin-top": "1em"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            ],
+                            "blocks": []
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    "displayList": {
+        "pages": [
+            {
+                "pageIndex": 0,
+                "width": 800,
+                "height": 1100,
+                "commands": [
+                    {
+                        "type": "box",
+                        "pageIndex": 0,
+                        "x": 20,
+                        "y": 36,
+                        "width": 760,
+                        "height": 19.200000000000003,
+                        "backgroundColor": null,
+                        "borderRadius": {
+                            "topLeft": {
+                                "x": 0,
+                                "y": 0
+                            },
+                            "topRight": {
+                                "x": 0,
+                                "y": 0
+                            },
+                            "bottomRight": {
+                                "x": 0,
+                                "y": 0
+                            },
+                            "bottomLeft": {
+                                "x": 0,
+                                "y": 0
+                            }
+                        },
+                        "node": {
+                            "node": {
+                                "type": "element",
+                                "tagName": "p",
+                                "children": [
+                                    {
+                                        "type": "text",
+                                        "text": "Hello World"
+                                    }
+                                ]
+                            },
+                            "style": {
+                                "display": "block",
+                                "margin-bottom": "1em",
+                                "margin-top": "1em"
+                            },
+                            "box": {
+                                "content": {
+                                    "x": 0,
+                                    "y": 16,
+                                    "width": 760,
+                                    "height": 19.200000000000003
+                                },
+                                "paddingBox": {
+                                    "x": 0,
+                                    "y": 16,
+                                    "width": 760,
+                                    "height": 19.200000000000003
+                                },
+                                "borderBox": {
+                                    "x": 0,
+                                    "y": 16,
+                                    "width": 760,
+                                    "height": 19.200000000000003
+                                },
+                                "marginBox": {
+                                    "x": 0,
+                                    "y": 0,
+                                    "width": 760,
+                                    "height": 51.2
+                                },
+                                "padding": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 0,
+                                    "left": 0
+                                },
+                                "border": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 0,
+                                    "left": 0
+                                },
+                                "margin": {
+                                    "top": 16,
+                                    "right": 0,
+                                    "bottom": 16,
+                                    "left": 0
+                                }
+                            },
+                            "fontSize": 16,
+                            "lineBoxes": [
+                                {
+                                    "x": 0,
+                                    "y": 16,
+                                    "width": 78.912,
+                                    "height": 19.2,
+                                    "baseline": 29.6,
+                                    "text": "Hello World",
+                                    "runs": [
+                                        {
+                                            "x": 0,
+                                            "y": 16,
+                                            "width": 78.912,
+                                            "height": 19.2,
+                                            "baseline": 29.6,
+                                            "text": "Hello World",
+                                            "fontSize": 16,
+                                            "style": {
+                                                "display": "block",
+                                                "margin-bottom": "1em",
+                                                "margin-top": "1em"
+                                            }
+                                        }
+                                    ],
+                                    "atomicBoxes": [],
+                                    "items": [
+                                        {
+                                            "x": 0,
+                                            "y": 16,
+                                            "width": 78.912,
+                                            "height": 19.2,
+                                            "baseline": 29.6,
+                                            "text": "Hello World",
+                                            "fontSize": 16,
+                                            "style": {
+                                                "display": "block",
+                                                "margin-bottom": "1em",
+                                                "margin-top": "1em"
+                                            }
+                                        }
+                                    ]
+                                }
+                            ],
+                            "children": []
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "pageIndex": 0,
+                        "x": 20,
+                        "y": 36,
+                        "baseline": 49.6,
+                        "text": "Hello World",
+                        "fontSize": 16,
+                        "fontFamily": null,
+                        "fontWeight": 400,
+                        "fontStyle": "normal",
+                        "color": {
+                            "r": 0,
+                            "g": 0,
+                            "b": 0,
+                            "a": 1
+                        },
+                        "run": {
+                            "x": 0,
+                            "y": 16,
+                            "width": 78.912,
+                            "height": 19.2,
+                            "baseline": 29.6,
+                            "text": "Hello World",
+                            "fontSize": 16,
+                            "style": {
+                                "display": "block",
+                                "margin-bottom": "1em",
+                                "margin-top": "1em"
+                            }
+                        }
+                    }
+                ]
+            }
+        ]
     }
 }

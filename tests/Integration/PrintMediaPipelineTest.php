@@ -22,12 +22,15 @@ final class PrintMediaPipelineTest extends TestCase
             ',
             'viewportWidth' => 800,
             'viewportHeight' => 600,
+            'pageWidth' => 800,
+            'pageHeight' => 600,
+            'margins' => ['top' => 0, 'right' => 0, 'bottom' => 0, 'left' => 0],
         ]);
 
-        $p = $prepared->styledRoot->children[0];
+        $p = $prepared->styledRoot->children[3];
         self::assertSame('red', $p->style->get('color'));
         self::assertSame('320px', $p->style->get('width'));
-        self::assertSame(320.0, $prepared->layoutRoot->children[0]->box->contentWidth);
+        self::assertSame(320.0, $prepared->layoutRoot->children[0]->box->content->width);
     }
 
     public function testPortraitMediaUsesRenderViewportHeight(): void
@@ -44,6 +47,6 @@ final class PrintMediaPipelineTest extends TestCase
             'viewportHeight' => 900,
         ]);
 
-        self::assertSame('180px', $prepared->styledRoot->children[0]->style->get('width'));
+        self::assertSame('180px', $prepared->styledRoot->children[3]->style->get('width'));
     }
 }

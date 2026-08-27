@@ -76,7 +76,7 @@ final class VerticalAlignAndAtomicInlineTest extends TestCase
     public function testAtomicInlineBoxUsesMarginPaddingAndBorderInOuterSize(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<p style="margin:0;width:200px;font-size:16px">A<span style="display:inline-block;width:20px;height:10px;margin:2px 3px;padding:4px 5px;border-width:1px 2px">X</span>B</p>',
+            'html' => '<p style="margin:0;width:200px;font-size:16px">A<span style="display:inline-block;width:20px;height:10px;margin:2px 3px;padding:4px 5px;border-width:1px 2px;border-style:solid">X</span>B</p>',
             'viewportWidth' => 400,
             'viewportHeight' => 300,
         ]);

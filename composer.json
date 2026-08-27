@@ -21,7 +21,7 @@
     }
   },
   "scripts": {
-    "test": "phpunit",
+    "test": "phpunit --testsuite unit,integration",
     "test:parity": "phpunit --testsuite parity",
     "playground": "php -S 127.0.0.1:5177 -t playground/public playground/router.php"
   },

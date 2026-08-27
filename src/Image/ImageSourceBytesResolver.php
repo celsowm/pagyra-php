@@ -95,7 +95,7 @@ final class ImageSourceBytesResolver
     private function normalizeFileUrlPath(string $source): string
     {
         $path = rawurldecode(substr($source, 7));
-        if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $path) === 1) {
+        if (preg_match('#^/[a-zA-Z]:[\\\\/]#', $path) === 1) {
             return substr($path, 1);
         }
         return $path;
@@ -110,6 +110,6 @@ final class ImageSourceBytesResolver
     {
         return str_starts_with($path, '/')
             || str_starts_with($path, '\\\\')
-            || preg_match('/^[a-zA-Z]:[\\\/]/', $path) === 1;
+            || preg_match('#^[a-zA-Z]:[\\\\/]#', $path) === 1;
     }
 }

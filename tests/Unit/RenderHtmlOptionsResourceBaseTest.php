@@ -50,4 +50,30 @@ final class RenderHtmlOptionsResourceBaseTest extends TestCase
             'resourceBaseDir' => 123,
         ]);
     }
+
+    /**
+     * isAbsoluteResourceBase()'s Windows-drive-letter regex used to be malformed and raised a
+     * "preg_match(): Unknown modifier ']'" warning on every resourceBaseDir given, regardless
+     * of its shape. See the identical fix/regression test in ImageSourceBytesResolverTest.
+     */
+    public function testValidatingAResourceBaseDirectoryNeverTriggersAMalformedRegexWarning(): void
+    {
+        set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+            throw new \ErrorException($message, 0, $severity, $file, $line);
+        });
+
+        try {
+            self::assertSame('/tmp/assets', RenderHtmlOptions::fromArray([
+                'html' => '<p>x</p>',
+                'resourceBaseDir' => '/tmp/assets',
+            ])->resourceBaseDir);
+
+            self::assertSame('C:\\assets', RenderHtmlOptions::fromArray([
+                'html' => '<p>x</p>',
+                'resourceBaseDir' => 'C:\\assets',
+            ])->resourceBaseDir);
+        } finally {
+            restore_error_handler();
+        }
+    }
 }
