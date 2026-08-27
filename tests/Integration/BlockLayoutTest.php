@@ -20,6 +20,7 @@ final class BlockLayoutTest extends TestCase
     margin: 10px;
     padding: 20px;
     border-width: 5px;
+    border-style: solid;
 }
 .child {
     display: block;
@@ -29,6 +30,7 @@ final class BlockLayoutTest extends TestCase
     margin: 2px 4px;
     padding: 3px;
     border-width: 1px;
+    border-style: solid;
 }
 CSS,
             'viewportWidth' => 500,
