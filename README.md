@@ -218,11 +218,13 @@ Atomic inline content can participate in the same line, expose an internal layou
 
 The span carries nested `contentLines` laid out inside its content box, and its background/border/text participate in the display list. The image resolves to `80 x 40` content pixels because only its width is overridden. Text and atomic boxes are consumed in one ordered inline sequence for paint.
 
-The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, richer Unicode line-breaking rules, hyphenation, decorations and browser-specific vertical-align/justification edge cases remain for later slices.
+The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, richer Unicode line-breaking rules, hyphenation and browser-specific vertical-align/justification edge cases remain for later slices.
+
+`text-decoration: underline` and `line-through` (shorthand or the `text-decoration-line` longhand, inherited like `pagyra-js` treats it) are painted as solid filled rectangles, matching `TextDecorationRenderer::renderSolid`'s thickness/offset ratios from the JS reference. Still pending: `overline`, the `double`/`dashed`/`dotted`/`wavy` decoration styles, and the `text-decoration-color` longhand (the decoration currently always uses the text's own color).
 
 Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
 
-Still pending in pagination/paint: stacking contexts/z-index, rounded asymmetric per-side borders, border styles beyond the current solid/dashed/dotted subset (`double`, `groove`, `ridge`, `inset`, `outset`), WebP/SVG paint, Adam7 PNG, element-level opacity, decorations and richer clipping/overflow behavior.
+Still pending in pagination/paint: stacking contexts/z-index, rounded asymmetric per-side borders, border styles beyond the current solid/dashed/dotted subset (`double`, `groove`, `ridge`, `inset`, `outset`), WebP/SVG paint, Adam7 PNG, element-level opacity and richer clipping/overflow behavior.
 
 Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, the remaining shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
 
