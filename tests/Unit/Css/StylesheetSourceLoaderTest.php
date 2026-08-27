@@ -58,6 +58,25 @@ final class StylesheetSourceLoaderTest extends TestCase
         self::assertSame('', (new StylesheetSourceLoader())->load('styles/site.css'));
     }
 
+    /**
+     * isAbsolutePath()'s and normalizePath()'s Windows-drive-letter regex used to be malformed
+     * and raised a "preg_match(): Unknown modifier ']'" warning on every load(), regardless of
+     * the href. See the identical fix/regression test in ImageSourceBytesResolverTest.
+     */
+    public function testLoadingAStylesheetNeverTriggersAMalformedRegexWarning(): void
+    {
+        set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+            throw new \ErrorException($message, 0, $severity, $file, $line);
+        });
+
+        try {
+            self::assertSame('', (new StylesheetSourceLoader())->load('styles/site.css'));
+            self::assertSame('', (new StylesheetSourceLoader('/tmp'))->load('https://example.com/site.css'));
+        } finally {
+            restore_error_handler();
+        }
+    }
+
     private function temporaryDirectory(): string
     {
         $dir = sys_get_temp_dir() . '/pagyra-css-loader-' . bin2hex(random_bytes(8));

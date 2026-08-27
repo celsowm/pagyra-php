@@ -239,10 +239,10 @@ final class Pagyra
         if ($src === '' || preg_match('/^(?:https?:)?\/\//i', $src) === 1 || str_starts_with(strtolower($src), 'data:')) return null;
         if (str_starts_with(strtolower($src), 'file://')) {
             $path = rawurldecode(substr($src, 7));
-            if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $path) === 1) $path = substr($path, 1);
+            if (preg_match('#^/[a-zA-Z]:[\\\\/]#', $path) === 1) $path = substr($path, 1);
             return $path;
         }
-        if (str_starts_with($src, '/') || str_starts_with($src, '\\\\') || preg_match('/^[a-zA-Z]:[\\\/]/', $src) === 1) return rawurldecode($src);
+        if (str_starts_with($src, '/') || str_starts_with($src, '\\\\') || preg_match('#^[a-zA-Z]:[\\\\/]#', $src) === 1) return rawurldecode($src);
         if ($resourceBaseDir === null) return null;
         $relative = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, rawurldecode($src));
         return rtrim($resourceBaseDir, '/\\') . DIRECTORY_SEPARATOR . ltrim($relative, '/\\');

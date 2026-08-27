@@ -34,7 +34,7 @@ final readonly class StylesheetSourceLoader
 
         if (str_starts_with(strtolower($href), 'file://')) {
             $path = rawurldecode(substr($href, 7));
-            if (preg_match('/^\/[a-zA-Z]:[\\\/]/', $path) === 1) {
+            if (preg_match('#^/[a-zA-Z]:[\\\\/]#', $path) === 1) {
                 $path = substr($path, 1);
             }
             return $path;
@@ -86,7 +86,7 @@ final readonly class StylesheetSourceLoader
         $separator = DIRECTORY_SEPARATOR;
         $prefix = '';
         if ($this->isAbsolutePath($path)) {
-            if (preg_match('/^[a-zA-Z]:[\\\/]/', $path) === 1) {
+            if (preg_match('#^[a-zA-Z]:[\\\\/]#', $path) === 1) {
                 $prefix = substr($path, 0, 2);
                 $path = substr($path, 2);
             } elseif (str_starts_with($path, $separator)) {
@@ -115,6 +115,6 @@ final readonly class StylesheetSourceLoader
     {
         return str_starts_with($path, '/')
             || str_starts_with($path, '\\\\')
-            || preg_match('/^[a-zA-Z]:[\\\/]/', $path) === 1;
+            || preg_match('#^[a-zA-Z]:[\\\\/]#', $path) === 1;
     }
 }
