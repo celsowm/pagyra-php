@@ -19,7 +19,7 @@ final class HiddenBorderLayoutTest extends TestCase
             'viewportHeight' => 200,
         ]);
 
-        $block = $prepared->layout->children[0];
+        $block = $prepared->layoutRoot->children[0];
         self::assertSame(0.0, $block->box->border->top);
         self::assertSame(0.0, $block->box->border->right);
         self::assertSame(0.0, $block->box->border->bottom);
