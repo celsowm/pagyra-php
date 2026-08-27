@@ -39,10 +39,26 @@ final class BlockLayoutEngine
         $cursorY = 0.0;
         $previousBorderBottom = null;
         $previousBottomMargin = 0.0;
+        $float = new FloatRun(0.0, $this->viewportWidth);
 
         foreach ($root->children as $child) {
             if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) continue;
             $childFontSize = $this->resolveFontSize($child, self::ROOT_FONT_SIZE);
+
+            $side = $this->floatSide($child);
+            if ($side !== null) {
+                $runY = $float->active ? $float->startY : ($previousBorderBottom ?? $cursorY);
+                [$layout, $float] = $this->layoutFloatChild($child, $side, $float, $runY, $this->viewportHeight, $childFontSize);
+                $children[] = $layout;
+                continue;
+            }
+            if ($float->active) {
+                $cursorY = max($cursorY, $float->bottom);
+                $previousBorderBottom = null;
+                $previousBottomMargin = 0.0;
+                $float = $float->reset(0.0, $this->viewportWidth);
+            }
+
             $childTopMargin = $this->resolveMarginSide($child, 'top', $this->viewportWidth, $this->viewportHeight, $childFontSize);
             $flowY = $previousBorderBottom === null ? $cursorY : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
             $layout = $this->layoutBlock($child, 0.0, $flowY, $this->viewportWidth, $this->viewportHeight, self::ROOT_FONT_SIZE);
@@ -51,6 +67,7 @@ final class BlockLayoutEngine
             $previousBottomMargin = $layout->box->margin->bottom;
             $cursorY = $previousBorderBottom + $previousBottomMargin;
         }
+        if ($float->active) $cursorY = max($cursorY, $float->bottom);
 
         return new LayoutNode($root, new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY))), $children, self::ROOT_FONT_SIZE);
     }
@@ -85,10 +102,26 @@ final class BlockLayoutEngine
         $children = [];
         $previousBorderBottom = null;
         $previousBottomMargin = 0.0;
+        $float = new FloatRun($contentX, $contentX + $contentWidth);
 
         foreach ($styled->children as $child) {
             if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) continue;
             $childFontSize = $this->resolveFontSize($child, $fontSize);
+
+            $side = $this->floatSide($child);
+            if ($side !== null) {
+                $runY = $float->active ? $float->startY : ($previousBorderBottom ?? $cursorY);
+                [$childLayout, $float] = $this->layoutFloatChild($child, $side, $float, $runY, $containingHeight, $childFontSize);
+                $children[] = $childLayout;
+                continue;
+            }
+            if ($float->active) {
+                $cursorY = max($cursorY, $float->bottom);
+                $previousBorderBottom = null;
+                $previousBottomMargin = 0.0;
+                $float = $float->reset($contentX, $contentX + $contentWidth);
+            }
+
             $childTopMargin = $this->resolveMarginSide($child, 'top', $contentWidth, $containingHeight, $childFontSize);
             $childFlowY = $previousBorderBottom === null ? $cursorY : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
             $childLayout = $this->layoutBlock($child, $contentX, $childFlowY, $contentWidth, $containingHeight, $fontSize);
@@ -97,6 +130,7 @@ final class BlockLayoutEngine
             $previousBottomMargin = $childLayout->box->margin->bottom;
             $cursorY = $previousBorderBottom + $previousBottomMargin;
         }
+        if ($float->active) $cursorY = max($cursorY, $float->bottom);
 
         $inlineLayout = $this->hasInlineContent($styled) ? $this->inlineTextFormatter->layout($styled, $contentX, $contentY, $contentWidth, $fontSize) : new InlineTextLayout([], 0.0);
         $autoContentHeight = max(max(0.0, $cursorY - $contentY), $inlineLayout->height);
@@ -111,6 +145,79 @@ final class BlockLayoutEngine
         $contentHeight = $this->applyVerticalConstraints($styled, $contentHeight, $verticalNonContent, $containingWidth, $containingHeight, $fontSize);
 
         return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $contentHeight), $padding, $border, $margin), $children, $fontSize, $inlineLayout->lines);
+    }
+
+    /**
+     * `float: left` / `float: right` (not `none`/absent), or null for the normal-flow case.
+     */
+    private function floatSide(StyledNode $node): ?string
+    {
+        $value = strtolower(trim($node->style->get('float', 'none') ?? 'none'));
+        return $value === 'left' || $value === 'right' ? $value : null;
+    }
+
+    /**
+     * Lays out a `float: left|right` block child alongside its run instead of stacking it
+     * vertically: left floats grow inward from the run's left edge, right floats grow inward
+     * from the right edge, both sharing the run's starting Y. Reuses layoutBlock() unmodified
+     * by pre-resolving the float's own width and threading it in as $containingWidth, so
+     * layoutBlock()'s existing "auto width fills the available width" behavior reproduces
+     * exactly that width as a side effect.
+     *
+     * Unlike normal children, a floated child does not participate in margin collapsing and
+     * does not advance the flow cursor on its own; the caller folds the run's tallest bottom
+     * back into the flow once a non-floated sibling (or the end of children) clears the run.
+     *
+     * This intentionally only covers the shape every real-world float in the motivating
+     * corpus takes: a handful of block siblings floated side by side with only inline
+     * (text/span) content, no explicit width, and no float wrapping inline text around them.
+     * Floats with block children, explicit widths that do not fit the run, or that need
+     * following inline content to reflow around them are unsupported and keep behaving as
+     * before (i.e. this method is simply not reached for anything wrapping inline text
+     * around a float, since that reflow is not implemented).
+     *
+     * @return array{0:LayoutNode,1:FloatRun}
+     */
+    private function layoutFloatChild(StyledNode $styled, string $side, FloatRun $float, float $runY, float $containingHeight, float $parentFontSize): array
+    {
+        $fontSize = $this->resolveFontSize($styled, $parentFontSize);
+        $available = max(0.0, $float->rightX - $float->leftX);
+        $margin = $this->resolveEdges($styled, 'margin', $available, $containingHeight, $fontSize);
+        $padding = $this->resolveEdges($styled, 'padding', $available, $containingHeight, $fontSize);
+        $border = $this->resolveBorderEdges($styled, $available, $containingHeight, $fontSize);
+        $horizontalNonContent = $margin->horizontal() + $padding->horizontal() + $border->horizontal();
+
+        $widthValue = $styled->style->get('width', 'auto') ?? 'auto';
+        if ($this->isAuto($widthValue)) {
+            $contentWidth = $this->shrinkToFitWidth($styled, max(0.0, $available - $horizontalNonContent), $fontSize);
+        } else {
+            $resolvedWidth = $this->resolveLength($widthValue, $available, $fontSize, $available, $containingHeight, 'zero');
+            $contentWidth = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedWidth - $horizontalNonContent) : max(0.0, $resolvedWidth);
+        }
+        $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $available, $containingHeight, $fontSize);
+        $marginBoxWidth = $contentWidth + $horizontalNonContent;
+
+        $containingX = $side === 'left' ? $float->leftX : $float->rightX - $marginBoxWidth;
+        $layout = $this->layoutBlock($styled, $containingX, $runY, $marginBoxWidth, $containingHeight, $parentFontSize);
+        $bottom = $layout->box->borderBox()->bottom();
+        $nextFloat = $side === 'left' ? $float->withLeft($float->leftX + $marginBoxWidth, $bottom, $runY) : $float->withRight($float->rightX - $marginBoxWidth, $bottom, $runY);
+
+        return [$layout, $nextFloat];
+    }
+
+    /**
+     * Shrink-to-fit width for a float with `width:auto`: the widest measured line of its own
+     * inline content, capped at the available space. Block children inside a float are not
+     * measured this way (they always fill $available, same as normal-flow auto width) since
+     * no float in the motivating corpus has block children.
+     */
+    private function shrinkToFitWidth(StyledNode $styled, float $available, float $fontSize): float
+    {
+        if (!$this->hasInlineContent($styled)) return $available;
+        $probe = $this->inlineTextFormatter->layout($styled, 0.0, 0.0, $available, $fontSize);
+        $natural = 0.0;
+        foreach ($probe->lines as $line) $natural = max($natural, $line->width);
+        return min($natural, $available);
     }
 
     private function hasInlineContent(StyledNode $node): bool
