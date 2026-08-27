@@ -15,6 +15,7 @@ final class StyleComputer
         'color', 'font-family', 'font-size', 'font-style', 'font-weight',
         'line-height', 'text-align', 'visibility', 'white-space',
         'text-decoration', 'text-decoration-line',
+        'x-link-href',
     ];
 
     public function __construct(
@@ -40,6 +41,18 @@ final class StyleComputer
                 if ($value !== null) {
                     $properties[$property] = $value;
                 }
+            }
+        }
+        if ($node->isElement('a')) {
+            $href = trim($node->attribute('href') ?? '');
+            if ($href !== '') {
+                // Not a real CSS property: piggybacks on the inherited-property mechanism so
+                // descendant text runs (e.g. a <span> inside <a>) can still resolve which link,
+                // if any, they belong to, and the node's own href always wins over whatever it
+                // inherited (relevant only for the invalid-HTML case of a nested <a>). See
+                // DisplayListBuilder/PdfSerializer for where this becomes an actual clickable
+                // PDF link annotation.
+                $properties['x-link-href'] = $href;
             }
         }
 

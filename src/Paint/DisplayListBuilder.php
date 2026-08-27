@@ -310,6 +310,7 @@ final class DisplayListBuilder
             color: ColorParser::parse($run->style->get('color', 'black')),
             underline: $underline,
             lineThrough: $lineThrough,
+            linkHref: $run->style->get('x-link-href'),
         );
     }
 
