@@ -128,9 +128,20 @@ final class BlockLayoutEngine
         return strtolower($node->style->get('display', 'inline') ?? 'inline');
     }
 
+    /**
+     * `flex` and `grid` are treated as plain block for layout purposes: neither flexbox nor
+     * grid is implemented yet (see README/PLAN.md), and without this fallback such an element
+     * is excluded here (isBlockLevel() === false) while also matching hasInlineContent()'s
+     * "non-block element" check, so it gets funneled into the inline formatter as if it were
+     * inline content instead. That formatter has no notion of a `display:flex` box either, so
+     * the element and everything inside it silently disappears from the rendered output
+     * rather than falling back to *something* visible. Falling back to block at least
+     * preserves the content and its children's own layout (e.g. their own `float`), even
+     * though the flex/grid distribution itself is not honored.
+     */
     private function isBlockLevel(StyledNode $node): bool
     {
-        return in_array($this->display($node), ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true);
+        return in_array($this->display($node), ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell', 'flex', 'grid'], true);
     }
 
     private function resolveFontSize(StyledNode $node, float $parentFontSize): float
