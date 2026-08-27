@@ -42,6 +42,7 @@ final class PdfSerializer
             $content = '';
             $usedFonts = [];
             $usedImages = [];
+            $linkAnnotations = [];
             foreach ($page->commands as $command) {
                 if ($command instanceof BoxPaintCommand) {
                     $content .= $this->serializeBox(
@@ -85,7 +86,17 @@ final class PdfSerializer
                 $content .= $resource['face'] instanceof RegisteredFont
                     ? $this->serializeEmbeddedText($command, $page->height, $resource['name'], $resource['face'], $graphicsState)
                     : $this->serializeBase14Text($command, $page->height, $resource['name'], $graphicsState);
+
+                if ($command->linkHref !== null && $command->linkHref !== '') {
+                    $linkAnnotations[] = $command;
+                }
             }
+
+            $annotIds = [];
+            foreach ($linkAnnotations as $linkCommand) {
+                $annotIds[] = $this->buildLinkAnnotation($linkCommand, $page->height, $objects, $reserve);
+            }
+            $annots = $annotIds === [] ? '' : ' /Annots [' . implode(' ', array_map(static fn (int $id): string => $id . ' 0 R', $annotIds)) . ']';
 
             $contentId = $reserve();
             $objects[$contentId] = '<< /Length ' . strlen($content) . ">>\nstream\n" . $content . "endstream";
@@ -103,7 +114,7 @@ final class PdfSerializer
             $heightPt = $this->number(Units::pxToPt($page->height));
             $objects[$pageId] = '<< /Type /Page /Parent ' . $pagesId . ' 0 R '
                 . '/MediaBox [0 0 ' . $widthPt . ' ' . $heightPt . '] '
-                . '/Resources ' . $resources . ' /Contents ' . $contentId . ' 0 R >>';
+                . '/Resources ' . $resources . ' /Contents ' . $contentId . ' 0 R' . $annots . ' >>';
         }
 
         $kids = implode(' ', array_map(static fn (int $id): string => $id . ' 0 R', $pageIds));
@@ -260,6 +271,28 @@ final class PdfSerializer
             }
         }
         return $resources;
+    }
+
+    /**
+     * Builds a `/Subtype /Link` annotation over a text run's bounding box, pointing to its
+     * `<a href>` (not implemented in pagyra-js, which has the general Annots plumbing in its
+     * PDF builder but nothing that ever populates it for a link; this is a fresh PDF-standard
+     * implementation rather than a port). Text already renders correctly without this; the gap
+     * this closes is that the rendered text was not clickable.
+     */
+    private function buildLinkAnnotation(TextPaintCommand $command, float $pageHeightPx, array &$objects, callable $reserve): int
+    {
+        $widthPx = max($command->run->width, 0.0);
+        $heightPx = max($command->run->height, $command->fontSize);
+        $x1 = Units::pxToPt($command->x);
+        $x2 = Units::pxToPt($command->x + $widthPx);
+        $y1 = Units::pxToPt($pageHeightPx - ($command->y + $heightPx));
+        $y2 = Units::pxToPt($pageHeightPx - $command->y);
+        $id = $reserve();
+        $objects[$id] = '<< /Type /Annot /Subtype /Link /Rect [' . $this->number($x1) . ' ' . $this->number($y1) . ' '
+            . $this->number($x2) . ' ' . $this->number($y2) . '] /Border [0 0 0] '
+            . '/A << /Type /Action /S /URI /URI (' . $this->escapePdfString((string) $command->linkHref) . ') >> >>';
+        return $id;
     }
 
     private function graphicsStateName(?Rgba $color, array $resources): ?string

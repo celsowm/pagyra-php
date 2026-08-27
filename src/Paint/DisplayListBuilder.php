@@ -306,6 +306,7 @@ final class DisplayListBuilder
             fontWeight: max(100, min(900, $fontWeight)),
             fontStyle: strtolower(trim($run->style->get('font-style', 'normal') ?? 'normal')),
             color: ColorParser::parse($run->style->get('color', 'black')),
+            linkHref: $run->style->get('x-link-href'),
         );
     }
 

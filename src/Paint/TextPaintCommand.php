@@ -21,6 +21,7 @@ final readonly class TextPaintCommand implements \JsonSerializable
         public int $fontWeight,
         public string $fontStyle,
         public ?Rgba $color,
+        public ?string $linkHref = null,
     ) {
     }
 
@@ -38,6 +39,7 @@ final readonly class TextPaintCommand implements \JsonSerializable
             'fontWeight' => $this->fontWeight,
             'fontStyle' => $this->fontStyle,
             'color' => $this->color,
+            'linkHref' => $this->linkHref,
             'run' => $this->run,
         ];
     }
