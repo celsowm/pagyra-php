@@ -76,15 +76,30 @@ final class PdfSerializationTest extends TestCase
         self::assertSame(3, substr_count($pdf, '/Type /Page /Parent'));
     }
 
-    public function testUnsupportedNonWinAnsiCharacterFailsExplicitly(): void
+    public function testUnsupportedNonWinAnsiCharacterFallsBackToAQuestionMarkInsteadOfFailing(): void
     {
-        $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('not supported by the current WinAnsi PDF text serializer');
-
-        Pagyra::renderHtmlToPdf([
+        $pdf = Pagyra::renderHtmlToPdf([
             'html' => '<p>emoji 😀</p>',
             'viewportWidth' => 200,
             'viewportHeight' => 100,
         ]);
+
+        self::assertStringStartsWith('%PDF-1.4', $pdf);
+        self::assertStringContainsString('(emoji ?) Tj', $pdf);
+    }
+
+    public function testWordGeneratedEmSpaceFallsBackToAQuestionMarkInsteadOfFailing(): void
+    {
+        // U+2003 EM SPACE is not part of the WinAnsi/CP1252 codepage but routinely shows up
+        // in Word-exported HTML used for indentation; it must degrade instead of aborting
+        // the whole conversion.
+        $pdf = Pagyra::renderHtmlToPdf([
+            'html' => "<p>antes\u{2003}depois</p>",
+            'viewportWidth' => 200,
+            'viewportHeight' => 100,
+        ]);
+
+        self::assertStringStartsWith('%PDF-1.4', $pdf);
+        self::assertStringContainsString('(antes?depois) Tj', $pdf);
     }
 }
