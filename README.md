@@ -6,7 +6,7 @@ The previous PHP implementation was intentionally removed. From this point forwa
 
 ## Status
 
-**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, recursive pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid/dashed/dotted/rounded borders, CSS alpha and PDF serialization are implemented for the current supported subset.**
+**The owned pure-PHP pipeline now reaches real PDF output: DOM/CSS, block and inline layout, basic float and table layout, recursive pagination, physical page fragmentation, display-list paint preparation, Unicode TrueType embedding/subsetting, JPEG/PNG image XObjects, solid/dashed/dotted/rounded borders, text-decoration underline/line-through, clickable link annotations, CSS alpha and PDF serialization are implemented for the current supported subset.**
 
 Current pipeline:
 
@@ -28,6 +28,8 @@ Current foundation:
 - CSS declaration and stylesheet parsing foundation;
 - declaration splitting that preserves semicolons inside quoted/function values such as data URLs;
 - `border`, `border-top/right/bottom/left`, `border-width`, `border-style` and `border-color` shorthand expansion with declaration-order and `!important` precedence;
+- `background` shorthand expansion into `background-color` when the shorthand carries a recognizable color token (image/gradient/position/repeat/attachment/size/origin/clip components are not part of the paint pipeline yet, so they are not expanded);
+- `margin`/`padding` shorthand expansion into their four `-top/-right/-bottom/-left` longhands at cascade time (1/2/3/4-value box syntax), so shorthand values correctly override the UA-stylesheet longhand defaults on `p`/`h1-h3`/`ul`/`ol` instead of being silently ignored;
 - border width keywords aligned with the reference (`thin=1px`, `medium=3px`, `thick=5px`), including the default medium width when a border style is supplied without an explicit width;
 - `border-style:none|hidden` produces zero border geometry in both block and atomic-inline layout instead of merely suppressing paint;
 - tag/class/ID compound selectors;
@@ -48,6 +50,9 @@ Current foundation:
 - horizontal `auto` margins for fixed-width blocks;
 - adjacent sibling vertical-margin collapsing;
 - block `display:none` filtering;
+- `float: left`/`float: right` block siblings laid out side by side within a shared run (left floats growing inward from the run's left edge, right floats from the right edge), scoped to the motivating corpus's shape: inline-only content, no explicit width that overflows the run, and no following inline text reflowing around the float;
+- basic `<table>` grid layout for uniform `<tr><td>` rows, reading `<thead>`/`<tbody>`/`<tfoot>` row-group wrappers transparently; column widths are distributed from each column's shrink-to-fit measurement, scaled down proportionally when they overflow the table's content width;
+- `display:flex` and `display:grid` fall back to plain block layout so content and its own nested layout (including floats) are preserved, without honoring the flex/grid distribution itself;
 - `visibility:hidden|collapse` suppresses display-list paint while preserving normal layout geometry; descendants can override inherited visibility with `visibility:visible`;
 - centralized `TextMetrics` abstraction;
 - heuristic text-metrics fallback ported from `pagyra-js` coefficients/calibration;
@@ -121,6 +126,7 @@ Current foundation:
 - mixed/non-solid border sets follow the reference side-stroke geometry: centered side paths, `dashed` as `3w on / 3w off`, `dotted` as `w on / w off`, butt caps, and fragment-aware top/bottom suppression;
 - text paint commands preserve family, weight, style, font size and color;
 - CSS color alpha for background, solid/patterned borders and text through deduplicated PDF `ExtGState` resources;
+- clickable PDF link annotations (`/Subtype /Link` with a URI action) for `<a href>` text runs, one annotation rect per text run; `<a>` has no default visual styling (no automatic underline or color) and the clickable rect follows only the text run's own box, not a reflowed multi-line link area;
 - JPEG XObjects embedded directly with `/DCTDecode` and resource deduplication;
 - PNG grayscale/RGB XObjects using original `IDAT` + `/FlateDecode` + PNG predictor when possible;
 - PNG RGBA and grayscale+alpha split into color plus `/SMask` without GD/Imagick;
@@ -130,7 +136,7 @@ Current foundation:
 - pure-PHP PDF 1.4 object/xref/trailer serialization;
 - Base14 font selection for Times/Helvetica/Courier normal/bold/italic variants when no embeddable TrueType face is available;
 - WinAnsi text serialization for ASCII, Latin-1 and common CP1252 punctuation in the Base14 fallback;
-- unsupported characters outside the Base14 WinAnsi repertoire fail explicitly instead of being silently corrupted;
+- unsupported characters outside the Base14 WinAnsi repertoire fall back to `?` instead of throwing or being silently corrupted;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;
 - CSS length parsing and resolution for absolute, viewport, relative, percentage, `calc()` and container-query units;
@@ -222,7 +228,7 @@ The inline formatter still has deliberate limits: mixed inline/block formatting 
 
 `text-decoration: underline` and `line-through` (shorthand or the `text-decoration-line` longhand, inherited like `pagyra-js` treats it) are painted as solid filled rectangles, matching `TextDecorationRenderer::renderSolid`'s thickness/offset ratios from the JS reference. Still pending: `overline`, the `double`/`dashed`/`dotted`/`wavy` decoration styles, and the `text-decoration-color` longhand (the decoration currently always uses the text's own color).
 
-Still pending in block layout: parent/child margin collapsing, full BFC rules, floats, positioning and broader intrinsic sizing.
+Still pending in block layout: parent/child margin collapsing, full BFC rules, positioning and broader intrinsic sizing. Floats cover only the motivating corpus's shape (inline-only content, side by side siblings); inline text does not yet wrap around a float and floats with block children are unsupported. Table layout covers uniform `<tr><td>` grids only: `colspan`, `rowspan`, `border-collapse`, per-column `<col>` width hints and caption/footer semantics are not implemented. `display:flex`/`grid` fall back to plain block, so content survives but the flex/grid distribution itself is not honored.
 
 Still pending in pagination/paint: stacking contexts/z-index, rounded asymmetric per-side borders, border styles beyond the current solid/dashed/dotted subset (`double`, `groove`, `ridge`, `inset`, `outset`), WebP/SVG paint, Adam7 PNG, element-level opacity and richer clipping/overflow behavior.
 
