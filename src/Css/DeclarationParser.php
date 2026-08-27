@@ -8,6 +8,7 @@ final class DeclarationParser
 {
     public function __construct(
         private readonly BorderShorthandExpander $borderShorthandExpander = new BorderShorthandExpander(),
+        private readonly BackgroundShorthandExpander $backgroundShorthandExpander = new BackgroundShorthandExpander(),
     ) {
     }
 
@@ -46,7 +47,8 @@ final class DeclarationParser
             }
 
             $property = strtolower($property);
-            $expanded = $this->borderShorthandExpander->expand($property, $value);
+            $expanded = $this->borderShorthandExpander->expand($property, $value)
+                ?? $this->backgroundShorthandExpander->expand($property, $value);
             if ($expanded !== null) {
                 foreach ($expanded as $expandedProperty => $expandedValue) {
                     $this->assignDeclaration($declarations, $expandedProperty, $expandedValue, $important);
