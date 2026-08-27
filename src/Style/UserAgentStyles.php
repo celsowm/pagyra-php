@@ -17,7 +17,9 @@ final class UserAgentStyles
 
         return match ($node->tagName) {
             'html', 'body', 'div', 'p', 'section', 'article', 'header', 'footer', 'main', 'nav',
-            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'tr' => ['display' => 'block'],
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'tr' => ['display' => 'block'],
+            'table' => ['display' => 'table'],
+            'td', 'th' => ['display' => 'table-cell'],
             'span', 'a', 'strong', 'b', 'em', 'i', 'small', 'label' => ['display' => 'inline'],
             'img', 'svg', 'input', 'button', 'select', 'textarea' => ['display' => 'inline-block'],
             default => [],

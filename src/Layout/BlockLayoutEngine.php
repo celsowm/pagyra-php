@@ -61,7 +61,7 @@ final class BlockLayoutEngine
 
             $childTopMargin = $this->resolveMarginSide($child, 'top', $this->viewportWidth, $this->viewportHeight, $childFontSize);
             $flowY = $previousBorderBottom === null ? $cursorY : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
-            $layout = $this->layoutBlock($child, 0.0, $flowY, $this->viewportWidth, $this->viewportHeight, self::ROOT_FONT_SIZE);
+            $layout = $this->layoutBlockLevelChild($child, 0.0, $flowY, $this->viewportWidth, $this->viewportHeight, self::ROOT_FONT_SIZE);
             $children[] = $layout;
             $previousBorderBottom = $layout->box->borderBox()->bottom();
             $previousBottomMargin = $layout->box->margin->bottom;
@@ -124,7 +124,7 @@ final class BlockLayoutEngine
 
             $childTopMargin = $this->resolveMarginSide($child, 'top', $contentWidth, $containingHeight, $childFontSize);
             $childFlowY = $previousBorderBottom === null ? $cursorY : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
-            $childLayout = $this->layoutBlock($child, $contentX, $childFlowY, $contentWidth, $containingHeight, $fontSize);
+            $childLayout = $this->layoutBlockLevelChild($child, $contentX, $childFlowY, $contentWidth, $containingHeight, $fontSize);
             $children[] = $childLayout;
             $previousBorderBottom = $childLayout->box->borderBox()->bottom();
             $previousBottomMargin = $childLayout->box->margin->bottom;
@@ -145,6 +145,130 @@ final class BlockLayoutEngine
         $contentHeight = $this->applyVerticalConstraints($styled, $contentHeight, $verticalNonContent, $containingWidth, $containingHeight, $fontSize);
 
         return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $contentHeight), $padding, $border, $margin), $children, $fontSize, $inlineLayout->lines);
+    }
+
+    private function layoutBlockLevelChild(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
+    {
+        return $this->display($styled) === 'table'
+            ? $this->layoutTable($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize)
+            : $this->layoutBlock($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize);
+    }
+
+    /**
+     * Lays out a `<table>` as a real grid of columns instead of stacking every row's cells
+     * into one another. Scoped to the shape virtually every real table in the motivating
+     * corpus takes (263 of 265 real-world documents with a `<table>`): a uniform grid of
+     * `<tr><td>` rows with no `colspan`, `rowspan`, or `<thead>`/`<tbody>` grouping. Those are
+     * read transparently (collectTableRows() looks through row-group wrappers) but colspan
+     * and rowspan are not: a spanning cell is treated as occupying exactly one column/row,
+     * which visually compresses the remaining columns rather than reproducing the intended
+     * span. `border-collapse`, per-column `<col>` width hints, and caption/footer semantics
+     * are not implemented either.
+     *
+     * Column widths follow the same overall shape as pagyra-js's real (min/max-content based)
+     * table algorithm for its common "preferred widths fit" case: measure each column's
+     * natural width and distribute any leftover space proportionally. What's ported is
+     * deliberately simpler, because pagyra-js's min-content measurement depends on a
+     * recursive intrinsic-sizing pass (TableLayoutStrategy::calculateColumnWidths, walking
+     * intrinsicInlineSize/minIntrinsicInlineSize across every descendant) that this PHP port
+     * does not have yet for arbitrary content. Each column's "natural width" here is instead
+     * the widest single-line shrink-to-fit measurement (shrinkToFitWidth(), the same helper
+     * float layout uses) of any cell in that column; if the total exceeds the table's content
+     * width, columns are scaled down proportionally rather than the JS reference's min/max
+     * blend. For the real-world table shape above (short label/value pairs) this produces the
+     * same visual result; it is a simplification for anything wider or more content-heavy.
+     */
+    private function layoutTable(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
+    {
+        $fontSize = $this->resolveFontSize($styled, $parentFontSize);
+        $margin = $this->resolveEdges($styled, 'margin', $containingWidth, $containingHeight, $fontSize);
+        $padding = $this->resolveEdges($styled, 'padding', $containingWidth, $containingHeight, $fontSize);
+        $border = $this->resolveBorderEdges($styled, $containingWidth, $containingHeight, $fontSize);
+        $available = max(0.0, $containingWidth - $margin->horizontal());
+        $horizontalNonContent = $padding->horizontal() + $border->horizontal();
+        $widthValue = $styled->style->get('width', 'auto') ?? 'auto';
+        if ($this->isAuto($widthValue)) {
+            $contentWidth = max(0.0, $available - $horizontalNonContent);
+        } else {
+            $resolvedWidth = $this->resolveLength($widthValue, $containingWidth, $fontSize, $containingWidth, $containingHeight, 'zero');
+            $contentWidth = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedWidth - $horizontalNonContent) : max(0.0, $resolvedWidth);
+        }
+        $contentX = $containingX + $margin->left + $border->left + $padding->left;
+        $contentY = $flowY + $margin->top + $border->top + $padding->top;
+
+        $rows = $this->collectTableRows($styled);
+        $cellsPerRow = array_map(fn (StyledNode $tr): array => $this->collectTableCells($tr), $rows);
+        $columnCount = $cellsPerRow === [] ? 0 : max(array_map('count', $cellsPerRow));
+        if ($columnCount === 0) {
+            return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, 0.0), $padding, $border, $margin), [], $fontSize);
+        }
+
+        $naturalColumnWidths = array_fill(0, $columnCount, 0.0);
+        foreach ($cellsPerRow as $cells) {
+            foreach ($cells as $c => $cell) {
+                $cellFontSize = $this->resolveFontSize($cell, $fontSize);
+                $naturalColumnWidths[$c] = max($naturalColumnWidths[$c], $this->shrinkToFitWidth($cell, $contentWidth, $cellFontSize));
+            }
+        }
+        $totalNatural = array_sum($naturalColumnWidths);
+        if ($totalNatural <= 0.0) {
+            $columnWidths = array_fill(0, $columnCount, $contentWidth / $columnCount);
+        } elseif ($totalNatural <= $contentWidth) {
+            $slack = $contentWidth - $totalNatural;
+            $columnWidths = array_map(static fn (float $w): float => $w + $slack * ($w / $totalNatural), $naturalColumnWidths);
+        } else {
+            $scale = $contentWidth / $totalNatural;
+            $columnWidths = array_map(static fn (float $w): float => $w * $scale, $naturalColumnWidths);
+        }
+        $columnX = [];
+        $x = $contentX;
+        foreach ($columnWidths as $w) {
+            $columnX[] = $x;
+            $x += $w;
+        }
+
+        $rowLayouts = [];
+        $rowY = $contentY;
+        foreach ($rows as $r => $tr) {
+            $cellLayouts = [];
+            $rowHeight = 0.0;
+            foreach ($cellsPerRow[$r] as $c => $cell) {
+                $cellLayout = $this->layoutBlock($cell, $columnX[$c], $rowY, $columnWidths[$c], $containingHeight, $fontSize);
+                $cellLayouts[] = $cellLayout;
+                $rowHeight = max($rowHeight, $cellLayout->box->borderBox()->height);
+            }
+            $rowLayouts[] = new LayoutNode($tr, new LayoutBox(new Rect($contentX, $rowY, $contentWidth, $rowHeight)), $cellLayouts, $this->resolveFontSize($tr, $fontSize));
+            $rowY += $rowHeight;
+        }
+
+        return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $rowY - $contentY), $padding, $border, $margin), $rowLayouts, $fontSize);
+    }
+
+    /** @return list<StyledNode> descendant `<tr>` elements, looking through `<thead>`/`<tbody>`/`<tfoot>` wrappers. */
+    private function collectTableRows(StyledNode $table): array
+    {
+        $rows = [];
+        foreach ($table->children as $child) {
+            if ($child->node->type !== 'element') continue;
+            $tag = strtolower($child->node->tagName ?? '');
+            if ($tag === 'tr') {
+                $rows[] = $child;
+            } elseif (in_array($tag, ['tbody', 'thead', 'tfoot'], true)) {
+                array_push($rows, ...$this->collectTableRows($child));
+            }
+        }
+        return $rows;
+    }
+
+    /** @return list<StyledNode> direct `<td>`/`<th>` children of a `<tr>`. */
+    private function collectTableCells(StyledNode $row): array
+    {
+        $cells = [];
+        foreach ($row->children as $child) {
+            if ($child->node->type !== 'element') continue;
+            if (in_array(strtolower($child->node->tagName ?? ''), ['td', 'th'], true)) $cells[] = $child;
+        }
+        return $cells;
     }
 
     /**
