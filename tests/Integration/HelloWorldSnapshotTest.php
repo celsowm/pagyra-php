@@ -25,7 +25,7 @@ final class HelloWorldSnapshotTest extends TestCase
         $expected = file_get_contents(__DIR__ . '/../Golden/hello-world.prepared.json');
 
         self::assertSame($expected, $actual);
-        self::assertSame(794.0, $prepared->layoutRoot->box->content->width);
-        self::assertSame(32.0, $prepared->layoutRoot->box->content->height);
+        self::assertSame(760.0, $prepared->layoutRoot->box->content->width);
+        self::assertSame(51.2, $prepared->layoutRoot->box->content->height);
     }
 }

@@ -51,7 +51,7 @@ final class InlineBlockIntrinsicSizingTest extends TestCase
     public function testImageBorderBoxWidthSubtractsPaddingAndBorderBeforeAspectRatio(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<p style="margin:0"><img width="200" height="100" style="width:100px;padding:0 8px;border-width:2px;box-sizing:border-box"></p>',
+            'html' => '<p style="margin:0"><img width="200" height="100" style="width:100px;padding:0 8px;border-width:2px;border-style:solid;box-sizing:border-box"></p>',
             'viewportWidth' => 400,
             'viewportHeight' => 300,
         ]);
@@ -65,7 +65,7 @@ final class InlineBlockIntrinsicSizingTest extends TestCase
     public function testImageBorderBoxMaxWidthPreservesAutomaticHeightRatio(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<p style="margin:0"><img width="200" height="100" style="padding:0 5px;border-width:1px;box-sizing:border-box;max-width:92px"></p>',
+            'html' => '<p style="margin:0"><img width="200" height="100" style="padding:0 5px;border-width:1px;border-style:solid;box-sizing:border-box;max-width:92px"></p>',
             'viewportWidth' => 400,
             'viewportHeight' => 300,
         ]);
