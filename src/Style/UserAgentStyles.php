@@ -17,7 +17,15 @@ final class UserAgentStyles
 
         return match ($node->tagName) {
             'html', 'body', 'div', 'p', 'section', 'article', 'header', 'footer', 'main', 'nav',
-            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'tr' => ['display' => 'block'],
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'tr',
+            // The reference's element table does not list these, but its global default display
+            // is block (LayoutDefaults.getDisplay()), so that is what they resolve to there. Here
+            // an unlisted element falls back to inline instead, which is not merely a styling
+            // difference: an inline element sitting among block siblings is dropped by the block
+            // engine, so a document built out of <blockquote> loses that content entirely.
+            'blockquote', 'figure', 'figcaption', 'pre', 'address', 'dl', 'dt', 'dd',
+            'fieldset', 'form', 'aside', 'hgroup', 'center', 'details', 'summary',
+            'dir', 'menu', 'legend' => ['display' => 'block'],
             'table' => ['display' => 'table'],
             'td', 'th' => ['display' => 'table-cell'],
             'span', 'a', 'strong', 'b', 'em', 'i', 'small', 'label',
@@ -62,6 +70,18 @@ final class UserAgentStyles
                 'padding-top' => '8px', 'padding-right' => '8px', 'padding-bottom' => '8px', 'padding-left' => '8px',
             ],
             'ul', 'ol' => ['margin-top' => '1em', 'margin-bottom' => '1em', 'padding-left' => '40px'],
+            // CSS 2.1 default stylesheet values, applied only where their absence is visibly
+            // wrong (an unindented blockquote reads as an ordinary paragraph). The reference
+            // defines no styling for these at all, so this is the standards fallback.
+            'blockquote', 'figure' => [
+                'margin-top' => '1em', 'margin-bottom' => '1em',
+                'margin-left' => '40px', 'margin-right' => '40px',
+            ],
+            'pre' => ['margin-top' => '1em', 'margin-bottom' => '1em', 'white-space' => 'pre', 'font-family' => "Monaco, 'Courier New', monospace"],
+            'dl' => ['margin-top' => '1em', 'margin-bottom' => '1em'],
+            'dd' => ['margin-left' => '40px'],
+            'address' => ['font-style' => 'italic'],
+            'center' => ['text-align' => 'center'],
             default => [],
         };
     }

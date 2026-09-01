@@ -41,6 +41,7 @@ Current foundation:
 - CSS custom properties and `var()` fallback resolution;
 - print `@media` evaluation for the currently supported media-query subset;
 - initial UA/default styles for core block/inline elements, headings, paragraphs and lists;
+- block-level UA display for the elements the reference's table omits but its global default covers (`<blockquote>`, `<figure>`, `<figcaption>`, `<pre>`, `<address>`, `<dl>`/`<dt>`/`<dd>`, `<fieldset>`, `<form>`, `<aside>`, `<hgroup>`, `<center>`, `<details>`, `<summary>`, `<dir>`, `<menu>`, `<legend>`), plus the CSS 2.1 default-stylesheet spacing where its absence is visibly wrong (blockquote/figure indentation, `<pre>`'s preserved newlines and monospace family, `<dd>` indentation, italic `<address>`, centered `<center>`);
 - UA defaults ported from the reference's element table for `<hr>` (block box plus the 1px `#a0a0a0` rule and 0.5em vertical margins), `<u>`/`<s>`/`<del>`/`<strike>` decorations, `<h4>`/`<h5>`/`<h6>` sizes/weight/margins, `<code>`'s monospace family, `<a>`'s `#0000EE` link color and `<td>`/`<th>` padding, with `<th>` bold and centered;
 - styled DOM tree exposed by `prepareHtmlRender()`;
 - `LayoutNode`/`LayoutBox` tree exposed by `prepareHtmlRender()`;
