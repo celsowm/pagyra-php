@@ -98,10 +98,14 @@ final class InlineTextFormatter
 
             $isLastLine = $lineIndex === count($lines) - 1;
             $alignment = strtolower($block->style->get('text-align', 'left') ?? 'left');
-            $justify = $alignment === 'justify' && !$isLastLine && $availableWidth > $lineWidth;
+            // `text-align` aligns inline content inside a line box; it never moves a block-level
+            // box, which stays at the content edge (only auto margins would move it). A line
+            // holding just such a box therefore ignores the alignment entirely.
+            $isBlockLevelBoxLine = count($lineTokens) === 1 && ($lineTokens[0]['blockLevel'] ?? false);
+            $justify = !$isBlockLevelBoxLine && $alignment === 'justify' && !$isLastLine && $availableWidth > $lineWidth;
             $spaceCount = $justify ? $this->countSpaceTokens($lineTokens) : 0;
             $extraPerSpace = $spaceCount > 0 ? ($availableWidth - $lineWidth) / $spaceCount : 0.0;
-            $offset = $justify ? 0.0 : $this->alignmentOffset($alignment, $lineWidth, $availableWidth);
+            $offset = ($justify || $isBlockLevelBoxLine) ? 0.0 : $this->alignmentOffset($alignment, $lineWidth, $availableWidth);
 
             $lineBaseline = $this->ownBaseline($fontSize, $nominalHeight);
             $placements = [];
@@ -183,7 +187,8 @@ final class InlineTextFormatter
     private function collectTokens(StyledNode $node, float $nodeFontSize, float $referenceWidth): array
     {
         $tokens = [];
-        foreach ($node->children as $child) {
+        $children = $node->children;
+        foreach ($children as $index => $child) {
             if ($child->node->type === 'text') {
                 $text = $this->applyTextTransform($child->node->text ?? '', $node->style);
                 array_push($tokens, ...$this->tokenizeText($text, $node->style, $nodeFontSize));
@@ -191,11 +196,36 @@ final class InlineTextFormatter
             }
 
             $display = strtolower($child->style->get('display', 'inline') ?? 'inline');
-            if ($display === 'none' || in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true)) {
+            if ($display === 'none') {
+                continue;
+            }
+            $blockLevel = in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true);
+            if ($blockLevel && !($child->node->isImage() || $child->node->isSvg())) {
+                // Block-level, non-replaced children belong to a block formatting context this
+                // formatter does not run (see the mixed inline/block limitation in README.md).
                 continue;
             }
 
             $fontSize = $this->resolveFontSize($child->style, $nodeFontSize);
+            if ($blockLevel) {
+                // A block-level replaced element reached through an inline formatting context,
+                // which is what happens when it sits inside an inline-block: that box's inner
+                // content is laid out by this formatter, not by the block engine, so skipping it
+                // here dropped the image entirely. It becomes an atomic box on a line of its own,
+                // the closest this formatter gets to the block box it should generate.
+                //
+                // The surrounding breaks are only emitted when there is something to break away
+                // from: a leading break with nothing before it, or a trailing break with nothing
+                // after it, would add an empty line and push the image off the box's top.
+                if ($tokens !== [] && ($tokens[array_key_last($tokens)]['kind'] ?? null) !== 'newline') {
+                    $tokens[] = $this->textToken('newline', '', $child->style, $fontSize);
+                }
+                $tokens[] = $this->atomicBoxToken($child, $fontSize, $referenceWidth, true);
+                if ($this->hasFollowingInlineContent($children, $index)) {
+                    $tokens[] = $this->textToken('newline', '', $child->style, $fontSize);
+                }
+                continue;
+            }
             if ($child->node->isElement('br')) {
                 // A forced break, independent of `white-space`. pagyra-js's brHandler builds a
                 // text node holding "\n" with the parent's inline style, but its tokenizer only
@@ -209,28 +239,49 @@ final class InlineTextFormatter
                 continue;
             }
             if ($child->node->isImage() || $child->node->isSvg() || in_array($display, ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'], true)) {
-                $metrics = $this->atomicBoxMetrics($child, $referenceWidth, $fontSize);
-                $tokens[] = [
-                    'kind' => 'box',
-                    'text' => '',
-                    'style' => $child->style,
-                    'fontSize' => $fontSize,
-                    'width' => $metrics['outerWidth'],
-                    'lineHeight' => $metrics['outerHeight'],
-                    'source' => $child,
-                    'contentWidth' => $metrics['contentWidth'],
-                    'contentHeight' => $metrics['contentHeight'],
-                    'margin' => $metrics['margin'],
-                    'padding' => $metrics['padding'],
-                    'border' => $metrics['border'],
-                    'contentLines' => $metrics['contentLines'],
-                ];
+                $tokens[] = $this->atomicBoxToken($child, $fontSize, $referenceWidth);
                 continue;
             }
 
             array_push($tokens, ...$this->collectTokens($child, $fontSize, $referenceWidth));
         }
         return $tokens;
+    }
+
+    /** @param list<StyledNode> $children */
+    private function hasFollowingInlineContent(array $children, int $index): bool
+    {
+        for ($i = $index + 1, $count = count($children); $i < $count; $i++) {
+            $child = $children[$i];
+            if ($child->node->type === 'text') {
+                if (trim($child->node->text ?? '') !== '') return true;
+                continue;
+            }
+            if (strtolower($child->style->get('display', 'inline') ?? 'inline') === 'none') continue;
+            return true;
+        }
+        return false;
+    }
+
+    private function atomicBoxToken(StyledNode $node, float $fontSize, float $referenceWidth, bool $blockLevel = false): array
+    {
+        $metrics = $this->atomicBoxMetrics($node, $referenceWidth, $fontSize);
+        return [
+            'kind' => 'box',
+            'blockLevel' => $blockLevel,
+            'text' => '',
+            'style' => $node->style,
+            'fontSize' => $fontSize,
+            'width' => $metrics['outerWidth'],
+            'lineHeight' => $metrics['outerHeight'],
+            'source' => $node,
+            'contentWidth' => $metrics['contentWidth'],
+            'contentHeight' => $metrics['contentHeight'],
+            'margin' => $metrics['margin'],
+            'padding' => $metrics['padding'],
+            'border' => $metrics['border'],
+            'contentLines' => $metrics['contentLines'],
+        ];
     }
 
     private function tokenizeText(string $text, ComputedStyle $style, float $fontSize): array
@@ -314,6 +365,27 @@ final class InlineTextFormatter
         if (preg_match('/^(-?\d+(?:\.\d+)?)rem$/', $value, $m) === 1) return (float) $m[1] * self::ROOT_FONT_SIZE;
         if (preg_match('/^(-?\d+(?:\.\d+)?)%$/', $value, $m) === 1) return ((float) $m[1] / 100.0) * $lineHeight;
         return 0.0;
+    }
+
+    /**
+     * Content size of a replaced element (image/SVG), for callers outside the inline formatter.
+     * A `display:block` image is not an atomic inline box, but it is sized by exactly the same
+     * replaced-element rules, so BlockLayoutEngine resolves its box through here instead of
+     * falling back to the ordinary "auto width fills the container, auto height is zero" block
+     * behavior, which collapses a block image to a zero-height strip.
+     *
+     * @return array{0:float,1:float} content width and height
+     */
+    public function replacedContentSize(StyledNode $node, float $referenceWidth, float $fontSize): array
+    {
+        return $this->imageContentSize(
+            $node,
+            $referenceWidth,
+            $fontSize,
+            $this->edgeMetrics($node, 'margin', $referenceWidth, $fontSize),
+            $this->edgeMetrics($node, 'padding', $referenceWidth, $fontSize),
+            $this->borderMetrics($node, $referenceWidth, $fontSize),
+        );
     }
 
     private function atomicBoxMetrics(StyledNode $node, float $referenceWidth, float $fontSize): array

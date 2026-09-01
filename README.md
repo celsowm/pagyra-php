@@ -51,6 +51,8 @@ Current foundation:
 - horizontal `auto` margins for fixed-width blocks;
 - adjacent sibling vertical-margin collapsing;
 - block `display:none` filtering;
+- block-level replaced elements (`<img style="display:block">` and inline SVG) are sized by the replaced-element rules and painted, instead of collapsing into a full-width zero-height box that nothing draws; auto margins center them like any fixed-width block, and one reached through an inline formatting context (inside an `inline-block`) takes a line of its own without being moved by `text-align`;
+- inline content is laid out in flow order between block siblings, each run of consecutive inline children forming its own anonymous segment, instead of all of it starting at the block's content top and painting over the block children;
 - `float: left`/`float: right` block siblings laid out side by side within a shared run (left floats growing inward from the run's left edge, right floats from the right edge), scoped to the motivating corpus's shape: inline-only content, no explicit width that overflows the run, and no following inline text reflowing around the float;
 - basic `<table>` grid layout for uniform `<tr><td>` rows, reading `<thead>`/`<tbody>`/`<tfoot>` row-group wrappers transparently; column widths are distributed from each column's shrink-to-fit measurement, scaled down proportionally when they overflow the table's content width;
 - `display:flex` and `display:grid` fall back to plain block layout so content and its own nested layout (including floats) are preserved, without honoring the flex/grid distribution itself;
@@ -228,7 +230,7 @@ Atomic inline content can participate in the same line, expose an internal layou
 
 The span carries nested `contentLines` laid out inside its content box, and its background/border/text participate in the display list. The image resolves to `80 x 40` content pixels because only its width is overridden. Text and atomic boxes are consumed in one ordered inline sequence for paint.
 
-The inline formatter still has deliberate limits: mixed inline/block formatting contexts inside atomic boxes, `aspect-ratio` property parsing, richer Unicode line-breaking rules, hyphenation and browser-specific vertical-align/justification edge cases remain for later slices.
+The inline formatter still has deliberate limits: block-level, non-replaced children inside atomic boxes (a `<div>` inside an `inline-block` is still dropped; only replaced elements are recovered there), inline content directly under the document root, `aspect-ratio` property parsing, richer Unicode line-breaking rules, hyphenation and browser-specific vertical-align/justification edge cases remain for later slices.
 
 `text-decoration: underline` and `line-through` (shorthand or the `text-decoration-line` longhand, inherited like `pagyra-js` treats it) are painted as solid filled rectangles, matching `TextDecorationRenderer::renderSolid`'s thickness/offset ratios from the JS reference. Still pending: `overline`, the `double`/`dashed`/`dotted`/`wavy` decoration styles, and the `text-decoration-color` longhand (the decoration currently always uses the text's own color).
 
