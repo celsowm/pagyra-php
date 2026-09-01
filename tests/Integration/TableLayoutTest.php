@@ -12,7 +12,7 @@ final class TableLayoutTest extends TestCase
     public function testCellsInARowAreLaidOutSideBySideNotConcatenatedTogether(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<table><tr><td>a</td><td>bbbbbbbbbb</td></tr></table>',
+            'html' => '<table style="border-spacing:0"><tr><td style="padding:0">a</td><td style="padding:0">bbbbbbbbbb</td></tr></table>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
         ]);
@@ -33,7 +33,7 @@ final class TableLayoutTest extends TestCase
     public function testMultipleRowsStackVertically(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<table><tr><td>um</td></tr><tr><td>dois</td></tr></table>',
+            'html' => '<table><tr><td style="padding:0">um</td></tr><tr><td style="padding:0">dois</td></tr></table>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
         ]);
@@ -49,7 +49,7 @@ final class TableLayoutTest extends TestCase
     public function testColumnWidthIsProportionalToEachColumnsNaturalContentWidth(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<table style="width:400px"><tr><td>Local: Rio de Janeiro</td><td>Data: 20/08/2026</td></tr></table>',
+            'html' => '<table style="width:400px"><tr><td style="padding:0">Local: Rio de Janeiro</td><td style="padding:0">Data: 20/08/2026</td></tr></table>',
             'viewportWidth' => 400,
             'viewportHeight' => 200,
         ]);
@@ -64,7 +64,7 @@ final class TableLayoutTest extends TestCase
     public function testRowHeightIsTheTallestCellInThatRow(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<table><tr><td style="height:10px">a</td><td style="height:40px">b</td></tr></table>',
+            'html' => '<table><tr><td style="padding:0;height:10px">a</td><td style="padding:0;height:40px">b</td></tr></table>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
         ]);
@@ -99,7 +99,9 @@ final class TableLayoutTest extends TestCase
 
         $row = $prepared->layoutRoot->children[0]->children[0];
         [$first, $second] = $row->children;
-        self::assertEqualsWithDelta(100.0, $first->box->content->width + $second->box->content->width, 0.5);
+        // Border boxes, not content boxes: the columns still fill the table exactly, but each
+        // cell's content is inset by the UA default cell padding.
+        self::assertEqualsWithDelta(100.0, $first->box->borderBox()->width + $second->box->borderBox()->width, 0.5);
     }
 
     public function testRealWorldLocalizacaoDataTablePatternRendersSideBySide(): void
