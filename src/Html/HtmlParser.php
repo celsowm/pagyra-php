@@ -9,7 +9,14 @@ use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 
 final class HtmlParser
 {
-    private const SKIPPED_CONTENT_TAGS = ['head', 'meta', 'title', 'link', 'script'];
+    /**
+     * Elements whose content is never document content. `style` belongs here even though its CSS
+     * is needed: parseDocument() harvests every `<style>` straight off the DOMDocument before the
+     * tree is converted, so keeping the element in the Pagyra DOM only gives the inline formatter
+     * a text node full of CSS to lay out, and a `<style>` sitting inside the body then prints its
+     * own source in the middle of the page.
+     */
+    private const SKIPPED_CONTENT_TAGS = ['head', 'meta', 'title', 'link', 'script', 'style'];
 
     private readonly ImageSourceIntrinsicSizeResolver $imageIntrinsicSizeResolver;
 
