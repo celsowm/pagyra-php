@@ -104,8 +104,31 @@ final class BlockLayoutEngine
         $previousBottomMargin = 0.0;
         $float = new FloatRun($contentX, $contentX + $contentWidth);
 
-        foreach ($styled->children as $child) {
-            if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) continue;
+        $lineBoxes = [];
+
+        foreach ($this->flowSegments($styled) as $segment) {
+            if ($segment[0] === 'inline') {
+                if ($float->active) {
+                    $cursorY = max($cursorY, $float->bottom);
+                    $float = $float->reset($contentX, $contentX + $contentWidth);
+                }
+                $run = $this->inlineTextFormatter->layout(
+                    new StyledNode($styled->node, $styled->style, $segment[1]),
+                    $contentX,
+                    $cursorY,
+                    $contentWidth,
+                    $fontSize,
+                );
+                array_push($lineBoxes, ...$run->lines);
+                $cursorY += $run->height;
+                // An inline run between two blocks separates their margins, so nothing collapses
+                // across it.
+                $previousBorderBottom = null;
+                $previousBottomMargin = 0.0;
+                continue;
+            }
+
+            $child = $segment[1];
             $childFontSize = $this->resolveFontSize($child, $fontSize);
 
             $side = $this->floatSide($child);
@@ -132,8 +155,8 @@ final class BlockLayoutEngine
         }
         if ($float->active) $cursorY = max($cursorY, $float->bottom);
 
-        $inlineLayout = $this->hasInlineContent($styled) ? $this->inlineTextFormatter->layout($styled, $contentX, $contentY, $contentWidth, $fontSize) : new InlineTextLayout([], 0.0);
-        $autoContentHeight = max(max(0.0, $cursorY - $contentY), $inlineLayout->height);
+        $inlineLayout = new InlineTextLayout($lineBoxes, max(0.0, $cursorY - $contentY));
+        $autoContentHeight = max(0.0, $cursorY - $contentY);
         $heightValue = $styled->style->get('height', 'auto') ?? 'auto';
         $verticalNonContent = $padding->vertical() + $border->vertical();
         if ($this->isAuto($heightValue)) {
@@ -149,9 +172,72 @@ final class BlockLayoutEngine
 
     private function layoutBlockLevelChild(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
     {
+        if ($styled->node->isImage() || $styled->node->isSvg()) {
+            return $this->layoutBlockReplaced($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize);
+        }
+
         return $this->display($styled) === 'table'
             ? $this->layoutTable($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize)
             : $this->layoutBlock($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize);
+    }
+
+    /**
+     * A replaced element that is block-level (`<img style="display:block">` and friends) still
+     * has replaced-element sizing and still has to paint its image; only its outer box takes
+     * part in block flow. Running it through layoutBlock() instead gives it the ordinary block
+     * treatment, where `width:auto` stretches to the container and `height:auto` measures the
+     * (nonexistent) child content as zero, so the image ends up as a full-width zero-height
+     * strip that no paint step ever draws.
+     *
+     * The content box therefore comes from the same replaced-sizing resolver the inline path
+     * uses, and the image itself is emitted as a single line holding one atomic box covering
+     * that content box. That reuses the existing atomic-image paint and pagination path
+     * verbatim: the box carries zero margin/padding/border because this LayoutNode's own box
+     * already accounts for them.
+     */
+    private function layoutBlockReplaced(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
+    {
+        $fontSize = $this->resolveFontSize($styled, $parentFontSize);
+        [$marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw] = $this->edgeRawValues($styled, 'margin');
+        $margin = $this->resolveRawEdges($marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw, $containingWidth, $containingHeight, $fontSize);
+        $padding = $this->resolveEdges($styled, 'padding', $containingWidth, $containingHeight, $fontSize);
+        $border = $this->resolveBorderEdges($styled, $containingWidth, $containingHeight, $fontSize);
+
+        [$contentWidth, $contentHeight] = $this->inlineTextFormatter->replacedContentSize($styled, $containingWidth, $fontSize);
+
+        $horizontalNonContent = $padding->horizontal() + $border->horizontal();
+        $usedMargins = BlockMath::resolveAutoMargins(
+            $containingWidth,
+            $contentWidth + $horizontalNonContent,
+            $margin->left,
+            $margin->right,
+            $this->isAuto($marginLeftRaw ?? '0'),
+            $this->isAuto($marginRightRaw ?? '0'),
+        );
+        $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
+
+        $contentX = $containingX + $margin->left + $border->left + $padding->left;
+        $contentY = $flowY + $margin->top + $border->top + $padding->top;
+
+        $box = new AtomicInlineBox(
+            source: $styled,
+            x: $contentX,
+            y: $contentY,
+            width: $contentWidth,
+            height: $contentHeight,
+            style: $styled->style,
+            contentWidth: $contentWidth,
+            contentHeight: $contentHeight,
+        );
+        $line = new LineBox($contentX, $contentY, $contentWidth, $contentHeight, $contentY + $contentHeight, '', [], [$box]);
+
+        return new LayoutNode(
+            $styled,
+            new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $contentHeight), $padding, $border, $margin),
+            [],
+            $fontSize,
+            [$line],
+        );
     }
 
     /**
@@ -342,6 +428,52 @@ final class BlockLayoutEngine
         $natural = 0.0;
         foreach ($probe->lines as $line) $natural = max($natural, $line->width);
         return min($natural, $available);
+    }
+
+    /**
+     * Splits a block's children into flow order: each block-level child on its own, and each run
+     * of consecutive inline-level children grouped into one anonymous inline segment, the way CSS
+     * wraps them in anonymous block boxes.
+     *
+     * Before this, every block child was laid out in flow while ALL inline content was laid out
+     * once starting at the content-box top, so any block that mixed the two painted its inline
+     * content on top of its blocks instead of between them.
+     *
+     * Whitespace-only text is carried along inside a run (it separates inline items) but never
+     * starts one on its own, so the blank text nodes that formatted HTML puts between block tags
+     * do not produce empty lines.
+     *
+     * @return list<array{0:'inline'|'block',1:list<StyledNode>|StyledNode}>
+     */
+    private function flowSegments(StyledNode $node): array
+    {
+        $segments = [];
+        $pending = [];
+        $pendingHasContent = false;
+
+        foreach ($node->children as $child) {
+            if ($child->node->type === 'text') {
+                if ($pending === [] && trim($child->node->text ?? '') === '') continue;
+                $pending[] = $child;
+                $pendingHasContent = $pendingHasContent || trim($child->node->text ?? '') !== '';
+                continue;
+            }
+            if ($this->display($child) === 'none') continue;
+
+            if ($this->isBlockLevel($child)) {
+                if ($pendingHasContent) $segments[] = ['inline', $pending];
+                $pending = [];
+                $pendingHasContent = false;
+                $segments[] = ['block', $child];
+                continue;
+            }
+
+            $pending[] = $child;
+            $pendingHasContent = true;
+        }
+        if ($pendingHasContent) $segments[] = ['inline', $pending];
+
+        return $segments;
     }
 
     private function hasInlineContent(StyledNode $node): bool
