@@ -72,7 +72,15 @@ final class BlockLayoutEngine
         return new LayoutNode($root, new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY))), $children, self::ROOT_FONT_SIZE);
     }
 
-    private function layoutBlock(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
+    /**
+     * @param bool $heightIsMinimum treats a specified `height` as a lower bound instead of a
+     *        fixed value, which is how CSS defines it for table cells: "the height of a cell box
+     *        is the minimum height required by the content". Without it, a `<td height="14pt">`
+     *        holding a paragraph reports a 19px box while its content runs on for hundreds of
+     *        pixels; the table then reports a height that does not cover its own content, and
+     *        pagination drops everything past the first page because no fragment claims it.
+     */
+    private function layoutBlock(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize, bool $heightIsMinimum = false): LayoutNode
     {
         $fontSize = $this->resolveFontSize($styled, $parentFontSize);
         [$marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw] = $this->edgeRawValues($styled, 'margin');
@@ -164,6 +172,7 @@ final class BlockLayoutEngine
         } else {
             $resolvedHeight = $this->resolveLength($heightValue, $containingHeight, $fontSize, $containingWidth, $containingHeight, 'zero');
             $contentHeight = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedHeight - $verticalNonContent) : max(0.0, $resolvedHeight);
+            if ($heightIsMinimum) $contentHeight = max($contentHeight, $autoContentHeight);
         }
         $contentHeight = $this->applyVerticalConstraints($styled, $contentHeight, $verticalNonContent, $containingWidth, $containingHeight, $fontSize);
 
@@ -319,7 +328,7 @@ final class BlockLayoutEngine
             $cellLayouts = [];
             $rowHeight = 0.0;
             foreach ($cellsPerRow[$r] as $c => $cell) {
-                $cellLayout = $this->layoutBlock($cell, $columnX[$c], $rowY, $columnWidths[$c], $containingHeight, $fontSize);
+                $cellLayout = $this->layoutBlock($cell, $columnX[$c], $rowY, $columnWidths[$c], $containingHeight, $fontSize, heightIsMinimum: true);
                 $cellLayouts[] = $cellLayout;
                 $rowHeight = max($rowHeight, $cellLayout->box->borderBox()->height);
             }
