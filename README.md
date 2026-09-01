@@ -55,6 +55,8 @@ Current foundation:
 - `display:flex` and `display:grid` fall back to plain block layout so content and its own nested layout (including floats) are preserved, without honoring the flex/grid distribution itself;
 - `visibility:hidden|collapse` suppresses display-list paint while preserving normal layout geometry; descendants can override inherited visibility with `visibility:visible`;
 - centralized `TextMetrics` abstraction;
+- real Base14 advance widths drive text measurement whenever the family maps to a standard font, so a run is measured with the same glyph widths the viewer advances by; the ported coefficient heuristic stays as the fallback for unmapped families;
+- Base14 width tables are keyed by the WinAnsi byte the serializer writes (the reference's own tables are StandardEncoding above `0x7F`, which mismeasures accented text) and include the italic/oblique faces this port's serializer selects;
 - heuristic text-metrics fallback ported from `pagyra-js` coefficients/calibration;
 - styled inline fragment collection preserving `font-family`, `font-size`, `font-weight`, `font-style`, color and other computed properties;
 - per-fragment token measurement, so style/font changes can affect wrapping;
@@ -135,7 +137,7 @@ Current foundation:
 - grayscale/RGB PNG `tRNS` represented efficiently as PDF color-key `/Mask` arrays;
 - pure-PHP PDF 1.4 object/xref/trailer serialization;
 - Base14 font selection for Times/Helvetica/Courier normal/bold/italic variants when no embeddable TrueType face is available;
-- WinAnsi text serialization for ASCII, Latin-1 and common CP1252 punctuation in the Base14 fallback;
+- WinAnsi text serialization for ASCII, Latin-1 and common CP1252 punctuation in the Base14 fallback, sharing one codepage table with the metrics so measured and drawn text cannot drift apart;
 - unsupported characters outside the Base14 WinAnsi repertoire fall back to `?` instead of throwing or being silently corrupted;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;

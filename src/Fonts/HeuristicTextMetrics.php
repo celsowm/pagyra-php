@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Fonts;
 
+use Pagyra\Fonts\Base14\Base14WidthTable;
 use Pagyra\Style\ComputedStyle;
 
 final class HeuristicTextMetrics implements TextMetrics
@@ -72,6 +73,17 @@ final class HeuristicTextMetrics implements TextMetrics
         $wordSpacing = $this->parseSpacing($style->get('word-spacing'));
 
         $chars = preg_split('//u', $line, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $spaces = substr_count($line, ' ');
+        $spacing = max(count($chars) - 1, 0) * $letterSpacing + $spaces * $wordSpacing;
+
+        // Real advance widths win whenever the text will be drawn with a standard font, so the
+        // measured run matches what the viewer lays down. Only when the family maps to no Base14
+        // font, or the text uses a character outside the table, does the estimate below apply.
+        $base14 = Base14WidthTable::measure($line, $style, $fontSize);
+        if ($base14 !== null) {
+            return $base14 + $spacing;
+        }
+
         $factor = 0.0;
         $spaces = 0;
         foreach ($chars as $char) {
@@ -93,7 +105,6 @@ final class HeuristicTextMetrics implements TextMetrics
             }
         }
 
-        $spacing = max(count($chars) - 1, 0) * $letterSpacing + $spaces * $wordSpacing;
         return $factor * $fontSize * $weightMultiplier * self::WIDTH_CALIBRATION + $spacing;
     }
 
