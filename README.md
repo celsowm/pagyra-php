@@ -60,6 +60,7 @@ Current foundation:
 - per-fragment token measurement, so style/font changes can affect wrapping;
 - `white-space: normal`, `nowrap`, `pre`, `pre-wrap` and `pre-line` handling for the current inline formatter;
 - explicit newline preservation for preformatted modes;
+- `<br>` forces a line break regardless of the active `white-space` mode (and is skipped when hidden with `display:none`), including consecutive `<br>`s producing an empty line at the block's line height;
 - oversized-word splitting for `overflow-wrap: anywhere`, `overflow-wrap: break-word` and `word-break: break-all`;
 - `text-align: left`, `center`, `right`, `end` and first-pass `justify` spacing;
 - `vertical-align: baseline`, `middle`, `top`, `bottom`, `text-top`, `text-bottom`, `super`, `sub` plus px/pt/em/rem/% shifts;
