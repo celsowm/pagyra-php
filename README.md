@@ -41,6 +41,7 @@ Current foundation:
 - CSS custom properties and `var()` fallback resolution;
 - print `@media` evaluation for the currently supported media-query subset;
 - initial UA/default styles for core block/inline elements, headings, paragraphs and lists;
+- UA defaults ported from the reference's element table for `<hr>` (block box plus the 1px `#a0a0a0` rule and 0.5em vertical margins), `<u>`/`<s>`/`<del>`/`<strike>` decorations, `<h4>`/`<h5>`/`<h6>` sizes/weight/margins, `<code>`'s monospace family, `<a>`'s `#0000EE` link color and `<td>`/`<th>` padding, with `<th>` bold and centered;
 - styled DOM tree exposed by `prepareHtmlRender()`;
 - `LayoutNode`/`LayoutBox` tree exposed by `prepareHtmlRender()`;
 - normal-flow block width/height resolution;
@@ -126,7 +127,7 @@ Current foundation:
 - mixed/non-solid border sets follow the reference side-stroke geometry: centered side paths, `dashed` as `3w on / 3w off`, `dotted` as `w on / w off`, butt caps, and fragment-aware top/bottom suppression;
 - text paint commands preserve family, weight, style, font size and color;
 - CSS color alpha for background, solid/patterned borders and text through deduplicated PDF `ExtGState` resources;
-- clickable PDF link annotations (`/Subtype /Link` with a URI action) for `<a href>` text runs, one annotation rect per text run; `<a>` has no default visual styling (no automatic underline or color) and the clickable rect follows only the text run's own box, not a reflowed multi-line link area;
+- clickable PDF link annotations (`/Subtype /Link` with a URI action) for `<a href>` text runs, one annotation rect per text run; `<a>` carries the reference's default link color but no default underline, and the clickable rect follows only the text run's own box, not a reflowed multi-line link area;
 - JPEG XObjects embedded directly with `/DCTDecode` and resource deduplication;
 - PNG grayscale/RGB XObjects using original `IDAT` + `/FlateDecode` + PNG predictor when possible;
 - PNG RGBA and grayscale+alpha split into color plus `/SMask` without GD/Imagick;
