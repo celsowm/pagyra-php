@@ -41,6 +41,7 @@ Current foundation:
 - CSS custom properties and `var()` fallback resolution;
 - print `@media` evaluation for the currently supported media-query subset;
 - initial UA/default styles for core block/inline elements, headings, paragraphs and lists;
+- UA defaults ported from the reference's element table for `<hr>` (block box plus the 1px `#a0a0a0` rule and 0.5em vertical margins), `<u>`/`<s>`/`<del>`/`<strike>` decorations, `<h4>`/`<h5>`/`<h6>` sizes/weight/margins, `<code>`'s monospace family, `<a>`'s `#0000EE` link color and `<td>`/`<th>` padding, with `<th>` bold and centered;
 - styled DOM tree exposed by `prepareHtmlRender()`;
 - `LayoutNode`/`LayoutBox` tree exposed by `prepareHtmlRender()`;
 - normal-flow block width/height resolution;
@@ -57,11 +58,14 @@ Current foundation:
 - `display:flex` and `display:grid` fall back to plain block layout so content and its own nested layout (including floats) are preserved, without honoring the flex/grid distribution itself;
 - `visibility:hidden|collapse` suppresses display-list paint while preserving normal layout geometry; descendants can override inherited visibility with `visibility:visible`;
 - centralized `TextMetrics` abstraction;
+- real Base14 advance widths drive text measurement whenever the family maps to a standard font, so a run is measured with the same glyph widths the viewer advances by; the ported coefficient heuristic stays as the fallback for unmapped families;
+- Base14 width tables are keyed by the WinAnsi byte the serializer writes (the reference's own tables are StandardEncoding above `0x7F`, which mismeasures accented text) and include the italic/oblique faces this port's serializer selects;
 - heuristic text-metrics fallback ported from `pagyra-js` coefficients/calibration;
 - styled inline fragment collection preserving `font-family`, `font-size`, `font-weight`, `font-style`, color and other computed properties;
 - per-fragment token measurement, so style/font changes can affect wrapping;
 - `white-space: normal`, `nowrap`, `pre`, `pre-wrap` and `pre-line` handling for the current inline formatter;
 - explicit newline preservation for preformatted modes;
+- `<br>` forces a line break regardless of the active `white-space` mode (and is skipped when hidden with `display:none`), including consecutive `<br>`s producing an empty line at the block's line height;
 - oversized-word splitting for `overflow-wrap: anywhere`, `overflow-wrap: break-word` and `word-break: break-all`;
 - `text-align: left`, `center`, `right`, `end` and first-pass `justify` spacing;
 - `vertical-align: baseline`, `middle`, `top`, `bottom`, `text-top`, `text-bottom`, `super`, `sub` plus px/pt/em/rem/% shifts;
@@ -128,7 +132,7 @@ Current foundation:
 - mixed/non-solid border sets follow the reference side-stroke geometry: centered side paths, `dashed` as `3w on / 3w off`, `dotted` as `w on / w off`, butt caps, and fragment-aware top/bottom suppression;
 - text paint commands preserve family, weight, style, font size and color;
 - CSS color alpha for background, solid/patterned borders and text through deduplicated PDF `ExtGState` resources;
-- clickable PDF link annotations (`/Subtype /Link` with a URI action) for `<a href>` text runs, one annotation rect per text run; `<a>` has no default visual styling (no automatic underline or color) and the clickable rect follows only the text run's own box, not a reflowed multi-line link area;
+- clickable PDF link annotations (`/Subtype /Link` with a URI action) for `<a href>` text runs, one annotation rect per text run; `<a>` carries the reference's default link color but no default underline, and the clickable rect follows only the text run's own box, not a reflowed multi-line link area;
 - JPEG XObjects embedded directly with `/DCTDecode` and resource deduplication;
 - PNG grayscale/RGB XObjects using original `IDAT` + `/FlateDecode` + PNG predictor when possible;
 - PNG RGBA and grayscale+alpha split into color plus `/SMask` without GD/Imagick;
@@ -137,7 +141,7 @@ Current foundation:
 - grayscale/RGB PNG `tRNS` represented efficiently as PDF color-key `/Mask` arrays;
 - pure-PHP PDF 1.4 object/xref/trailer serialization;
 - Base14 font selection for Times/Helvetica/Courier normal/bold/italic variants when no embeddable TrueType face is available;
-- WinAnsi text serialization for ASCII, Latin-1 and common CP1252 punctuation in the Base14 fallback;
+- WinAnsi text serialization for ASCII, Latin-1 and common CP1252 punctuation in the Base14 fallback, sharing one codepage table with the metrics so measured and drawn text cannot drift apart;
 - unsupported characters outside the Base14 WinAnsi repertoire fall back to `?` instead of throwing or being silently corrupted;
 - geometry primitives (`Rect`, `Edges`, `Box`);
 - 96-DPI CSS unit conversions matching `pagyra-js`;

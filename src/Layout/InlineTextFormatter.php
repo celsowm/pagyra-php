@@ -226,6 +226,18 @@ final class InlineTextFormatter
                 }
                 continue;
             }
+            if ($child->node->isElement('br')) {
+                // A forced break, independent of `white-space`. pagyra-js's brHandler builds a
+                // text node holding "\n" with the parent's inline style, but its tokenizer only
+                // turns "\n" into a break under pre/pre-wrap/pre-line, so under the default
+                // `white-space: normal` that "\n" collapses into a plain space and the break is
+                // lost. Emitting the newline token directly keeps the reference's intent (its
+                // helper is literally named createBreakNode) without depending on a white-space
+                // mode the element does not set. A `<br>` hidden with `display: none` is already
+                // dropped by the check above, matching browsers.
+                $tokens[] = $this->textToken('newline', '', $child->style, $fontSize);
+                continue;
+            }
             if ($child->node->isImage() || $child->node->isSvg() || in_array($display, ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'], true)) {
                 $tokens[] = $this->atomicBoxToken($child, $fontSize, $referenceWidth);
                 continue;
