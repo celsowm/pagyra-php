@@ -57,17 +57,18 @@ final class PaginationEngine
             flow: $flow,
             placements: $placements,
             pageCount: $pageCount,
-            pages: $this->buildPhysicalPages($placements, $pageCount),
+            pages: $this->buildPhysicalPages($placements, $flow, $pageCount),
         );
     }
 
     /** @param list<PagePlacement> $placements @return list<PhysicalPage> */
-    private function buildPhysicalPages(array $placements, int $pageCount): array
+    private function buildPhysicalPages(array $placements, PageFlow $flow, int $pageCount): array
     {
         $entriesByPage = array_fill(0, $pageCount, []);
         foreach ($placements as $placement) {
             foreach ($placement->fragments as $fragment) {
                 if ($fragment->pageIndex < 0 || $fragment->pageIndex >= $pageCount) continue;
+                if (!$this->fragmentOccupiesPage($placement, $fragment, $flow)) continue;
                 $entriesByPage[$fragment->pageIndex][] = new PhysicalPageEntry($placement, $fragment);
             }
         }
@@ -77,6 +78,33 @@ final class PaginationEngine
             $pages[] = new PhysicalPage($pageIndex, $entriesByPage[$pageIndex]);
         }
         return $pages;
+    }
+
+    /**
+     * Whether a page actually holds part of this placement, and so deserves an entry.
+     *
+     * A placement spans every page between its own top and the bottom of its whole subtree, and
+     * the subtree can reach past the element itself when a descendant carries a forced-break or
+     * widow/orphan shift. `break-before: right` is the case that matters: it jumps over a page to
+     * land on the next right-hand one, and that skipped page must come out blank — yet the
+     * placement still produces a fragment for it, because the page sits between the two.
+     *
+     * Two things can earn a page an entry: the element's own box covering it (a block spanning
+     * pages paints its background and borders there, and a leaf `<div>` carrying only a border
+     * has no blocks or lines to show for it), or the fragment actually carrying something. A page
+     * that has neither is one nothing reaches.
+     */
+    private function fragmentOccupiesPage(PagePlacement $placement, PageFragment $fragment, PageFlow $flow): bool
+    {
+        if ($fragment->blocks !== [] || $fragment->lines !== []) return true;
+
+        $box = $placement->node->box->marginBox();
+        $ownStart = $box->y + $placement->offsetY;
+        $ownEnd = $box->bottom() + $placement->offsetY;
+        $pageStart = $flow->contentStartForPage($fragment->pageIndex);
+        $pageEnd = $pageStart + $flow->usableHeightForPage($fragment->pageIndex);
+
+        return $ownEnd > $pageStart + self::EPSILON && $ownStart < $pageEnd - self::EPSILON;
     }
 
     /** @param array<int,float> $nodeOffsets @return list<PageFragment> */

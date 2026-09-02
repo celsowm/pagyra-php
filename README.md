@@ -122,7 +122,7 @@ Current foundation:
 - first-pass pagination for `break-before`, `break-after`, legacy `page-break-*`, `left`/`right` page parity, `break-inside: avoid`, `widows` and `orphans`;
 - forced breaks, `break-inside`, widows and orphans propagate recursively through descendant block flow while the continuous layout tree remains unchanged;
 - widow/orphan positive-integer parsing aligned with the reference, so signed forms such as `+2` are rejected and use fallback behavior;
-- physical page model with preserved skipped parity pages, including parity skips under variable page heights;
+- physical page model with preserved skipped parity pages, including parity skips under variable page heights; a page a placement only spans because a descendant was pushed across it carries no entry, so a page skipped by `break-before: left|right` comes out genuinely blank instead of taking the spanning element's background and borders;
 - top-level `PagePlacement`, per-page `PageFragment`, typed per-line `LineFragment` and recursive descendant `BlockFragment` geometry;
 - descendant block and text-line fragmentation while preserving the continuous layout tree unchanged;
 - a block is fragmented on every page its whole subtree reaches, not only the pages its own box covers, so descendants pushed past their wrapper by a widow/orphan or break-inside shift still reach the page instead of being dropped;
