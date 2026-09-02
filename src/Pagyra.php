@@ -250,8 +250,10 @@ final class Pagyra
 
     public static function renderHtmlToPdf(array|RenderHtmlOptions $options): string
     {
-        $prepared = self::prepareHtmlRender($options);
+        $options = is_array($options) ? RenderHtmlOptions::fromArray($options) : $options;
+        $contentScale = $options->contentScale;
+        $prepared = self::prepareHtmlRender($options->scaledForContentZoom($contentScale));
         if ($prepared->displayList === null) throw new \LogicException('Display list generation failed before PDF serialization.');
-        return (new PdfSerializer())->serialize($prepared->displayList, $prepared->fontRegistry);
+        return (new PdfSerializer())->serialize($prepared->displayList, $prepared->fontRegistry, $contentScale);
     }
 }

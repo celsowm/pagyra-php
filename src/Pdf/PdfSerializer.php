@@ -21,8 +21,9 @@ final class PdfSerializer
 {
     private const KAPPA = 0.5522847498307936;
 
-    public function serialize(DisplayList $displayList, ?FontRegistry $fontRegistry = null): string
+    public function serialize(DisplayList $displayList, ?FontRegistry $fontRegistry = null, float $contentScale = 1.0): string
     {
+        $contentScale = $contentScale > 0 ? $contentScale : 1.0;
         $objects = [];
         $nextId = 1;
         $reserve = static function () use (&$objects, &$nextId): int {
@@ -96,9 +97,11 @@ final class PdfSerializer
 
             $annotIds = [];
             foreach ($linkAnnotations as $linkCommand) {
-                $annotIds[] = $this->buildLinkAnnotation($linkCommand, $page->height, $objects, $reserve);
+                $annotIds[] = $this->buildLinkAnnotation($linkCommand, $page->height, $contentScale, $objects, $reserve);
             }
             $annots = $annotIds === [] ? '' : ' /Annots [' . implode(' ', array_map(static fn (int $id): string => $id . ' 0 R', $annotIds)) . ']';
+
+            $content = $this->applyContentScale($content, $contentScale);
 
             $contentId = $reserve();
             $objects[$contentId] = '<< /Length ' . strlen($content) . ">>\nstream\n" . $content . "endstream";
@@ -112,8 +115,8 @@ final class PdfSerializer
             $states = '';
             foreach ($extGStateResources as $state) $states .= '/' . $state['name'] . ' ' . $state['id'] . ' 0 R ';
             $resources = '<< /Font << ' . $fonts . '>> /XObject << ' . $images . '>> /ExtGState << ' . $states . '>> >>';
-            $widthPt = $this->number(Units::pxToPt($page->width));
-            $heightPt = $this->number(Units::pxToPt($page->height));
+            $widthPt = $this->number(Units::pxToPt($page->width) * $contentScale);
+            $heightPt = $this->number(Units::pxToPt($page->height) * $contentScale);
             $objects[$pageId] = '<< /Type /Page /Parent ' . $pagesId . ' 0 R '
                 . '/MediaBox [0 0 ' . $widthPt . ' ' . $heightPt . '] '
                 . '/Resources ' . $resources . ' /Contents ' . $contentId . ' 0 R' . $annots . ' >>';
@@ -282,14 +285,30 @@ final class PdfSerializer
      * implementation rather than a port). Text already renders correctly without this; the gap
      * this closes is that the rendered text was not clickable.
      */
-    private function buildLinkAnnotation(TextPaintCommand $command, float $pageHeightPx, array &$objects, callable $reserve): int
+    /**
+     * Scales a page's whole drawing about the PDF origin. Pagyra lays the document
+     * out on a page inflated by 1/contentScale (see RenderHtmlOptions::scaledForContentZoom),
+     * so this scale-down brings the page back to its requested physical size while ~1/contentScale
+     * more content sits on each sheet. contentScale 1.0 leaves the stream byte-identical;
+     * 0.8 reproduces the wkhtmltopdf "everything at 0.8x" zoom for side-by-side comparison.
+     */
+    private function applyContentScale(string $content, float $contentScale): string
+    {
+        if (abs($contentScale - 1.0) < 1e-9 || $content === '') {
+            return $content;
+        }
+        $scale = $this->number($contentScale);
+        return "q\n" . $scale . ' 0 0 ' . $scale . " 0 0 cm\n" . $content . "Q\n";
+    }
+
+    private function buildLinkAnnotation(TextPaintCommand $command, float $pageHeightPx, float $contentScale, array &$objects, callable $reserve): int
     {
         $widthPx = max($command->run->width, 0.0);
         $heightPx = max($command->run->height, $command->fontSize);
-        $x1 = Units::pxToPt($command->x);
-        $x2 = Units::pxToPt($command->x + $widthPx);
-        $y1 = Units::pxToPt($pageHeightPx - ($command->y + $heightPx));
-        $y2 = Units::pxToPt($pageHeightPx - $command->y);
+        $x1 = Units::pxToPt($command->x) * $contentScale;
+        $x2 = Units::pxToPt($command->x + $widthPx) * $contentScale;
+        $y1 = Units::pxToPt($pageHeightPx - ($command->y + $heightPx)) * $contentScale;
+        $y2 = Units::pxToPt($pageHeightPx - $command->y) * $contentScale;
         $id = $reserve();
         $objects[$id] = '<< /Type /Annot /Subtype /Link /Rect [' . $this->number($x1) . ' ' . $this->number($y1) . ' '
             . $this->number($x2) . ' ' . $this->number($y2) . '] /Border [0 0 0] '

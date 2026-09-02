@@ -208,6 +208,8 @@ $pdf = Pagyra::renderHtmlToPdf([
 file_put_contents('output.pdf', $pdf);
 ```
 
+The optional `contentScale` option (default `1.0`, `renderHtmlToPdf` only) draws the whole document at a fraction of its natural size while keeping the physical page dimensions unchanged: the layout runs on a page inflated by `1 / contentScale`, so roughly `1 / contentScale` more content flows onto each sheet, and the serializer scales every page back down. `contentScale => 0.8` reproduces the "everything at 0.8x" zoom wkhtmltopdf applies by default, which is useful for comparing the two engines at the same scale.
+
 The PDF serializer is still a subset renderer, not yet a full `pagyra-js` replacement. TrueType sfnt fonts can be embedded and subsetted today; OpenType/CFF (`OTTO`) embedding through `FontFile3`, WOFF/WOFF2 decoding, GPOS shaping/kerning, variable-font support and richer fallback-chain behavior remain pending.
 
 Styled inline content is preserved through layout. For example:
