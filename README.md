@@ -125,6 +125,7 @@ Current foundation:
 - physical page model with preserved skipped parity pages, including parity skips under variable page heights;
 - top-level `PagePlacement`, per-page `PageFragment`, typed per-line `LineFragment` and recursive descendant `BlockFragment` geometry;
 - descendant block and text-line fragmentation while preserving the continuous layout tree unchanged;
+- a block is fragmented on every page its whole subtree reaches, not only the pages its own box covers, so descendants pushed past their wrapper by a widow/orphan or break-inside shift still reach the page instead of being dropped;
 - `PreparedRender.displayList` with physical per-page box/text/image/border paint commands and page-pseudo-specific margin offsets;
 - `background-color` fills, including rounded backgrounds for normalized elliptical `border-radius` values;
 - CSS `border-radius` shorthand (`1-4` values and `/` elliptical syntax), per-corner longhands, percentages and global CSS radius normalization;
