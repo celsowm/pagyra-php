@@ -11,12 +11,24 @@ final class PaginationEngine
 {
     private const EPSILON = 0.01;
 
+    /**
+     * Absolute top/bottom of each node's whole subtree, offsets included, keyed by object id.
+     * A descendant can carry a larger offset than the block it lives in (a widow/orphan or
+     * break-inside shift applies to the descendant, not to its ancestor's box), so a subtree can
+     * reach pages its own box never touches.
+     *
+     * @var array<int,array{0:float,1:float}>
+     */
+    private array $subtreeExtents = [];
+
     public function paginate(LayoutNode $root, float|PageFlow $contentHeightOrFlow): PaginationResult
     {
         $flow = $contentHeightOrFlow instanceof PageFlow
             ? $contentHeightOrFlow
             : new PageFlow($contentHeightOrFlow);
         $nodeOffsets = (new RecursivePaginationOffsets())->resolve($root, $flow);
+        $this->subtreeExtents = [];
+        $this->measureSubtree($root, $nodeOffsets);
         $placements = [];
         $maxEnd = 0.0;
 
@@ -159,12 +171,19 @@ final class PaginationEngine
         $pageStart = $flow->contentStartForPage($pageIndex);
         $pageEnd = $pageStart + $flow->usableHeightForPage($pageIndex);
 
-        if ($end <= $pageStart + self::EPSILON || $start >= $pageEnd - self::EPSILON) {
+        // The whole subtree decides whether this page is worth visiting, not this node's own box.
+        // Otherwise a block whose box ends on page N, but whose last children were pushed onto
+        // page N+1 by a widow/orphan or break-inside shift, returns null for page N+1 and takes
+        // those children down with it: nothing ever claims them and their text never reaches the
+        // PDF. This node's own fragment still spans only its own box, so it paints exactly the
+        // same area as before and simply collapses to zero height on the pages it does not cover.
+        [$subtreeStart, $subtreeEnd] = $this->subtreeExtent($node, $nodeOffsets);
+        if ($subtreeEnd <= $pageStart + self::EPSILON || $subtreeStart >= $pageEnd - self::EPSILON) {
             return null;
         }
 
         $fragmentStart = max($start, $pageStart);
-        $fragmentEnd = min($end, $pageEnd);
+        $fragmentEnd = max($fragmentStart, min($end, $pageEnd));
         $children = [];
         foreach ($node->children as $child) {
             $childFragment = $this->blockFragmentForPage($child, $pageIndex, $flow, $nodeOffsets);
@@ -193,6 +212,38 @@ final class PaginationEngine
     private function offsetFor(LayoutNode $node, array $nodeOffsets): float
     {
         return $nodeOffsets[spl_object_id($node)] ?? 0.0;
+    }
+
+    /**
+     * @param array<int,float> $nodeOffsets
+     * @return array{0:float,1:float} absolute top and bottom of the node's subtree
+     */
+    private function subtreeExtent(LayoutNode $node, array $nodeOffsets): array
+    {
+        return $this->subtreeExtents[spl_object_id($node)] ?? $this->measureSubtree($node, $nodeOffsets);
+    }
+
+    /**
+     * @param array<int,float> $nodeOffsets
+     * @return array{0:float,1:float}
+     */
+    private function measureSubtree(LayoutNode $node, array $nodeOffsets): array
+    {
+        $offset = $this->offsetFor($node, $nodeOffsets);
+        $box = $node->box->marginBox();
+        $top = $box->y + $offset;
+        $bottom = $box->bottom() + $offset;
+        foreach ($node->lineBoxes as $line) {
+            $top = min($top, $line->y + $offset);
+            $bottom = max($bottom, $line->y + $line->height + $offset);
+        }
+        foreach ($node->children as $child) {
+            [$childTop, $childBottom] = $this->measureSubtree($child, $nodeOffsets);
+            $top = min($top, $childTop);
+            $bottom = max($bottom, $childBottom);
+        }
+
+        return $this->subtreeExtents[spl_object_id($node)] = [$top, $bottom];
     }
 
     /** @param array<int,float> $nodeOffsets */
