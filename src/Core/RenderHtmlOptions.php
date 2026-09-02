@@ -17,9 +17,13 @@ final readonly class RenderHtmlOptions
         public array $fontConfig = [],
         public ?string $resourceBaseDir = null,
         public float $contentScale = 1.0,
+        public string $media = 'print',
     ) {
         if ($this->html === '') throw new \InvalidArgumentException('html must not be empty');
         if ($this->contentScale <= 0) throw new \InvalidArgumentException('contentScale must be greater than zero');
+        if (!in_array($this->media, ['print', 'screen', 'all'], true)) {
+            throw new \InvalidArgumentException("media must be 'print', 'screen' or 'all'");
+        }
         if ($this->resourceBaseDir !== null && !self::isAbsoluteResourceBase($this->resourceBaseDir)) {
             throw new \InvalidArgumentException('resourceBaseDir must be an absolute local path or file:// URL');
         }
@@ -44,6 +48,7 @@ final readonly class RenderHtmlOptions
             fontConfig: is_array($options['fontConfig'] ?? null) ? $options['fontConfig'] : [],
             resourceBaseDir: $resourceBaseDir,
             contentScale: self::positiveNumber($options['contentScale'] ?? 1.0, 'contentScale'),
+            media: is_string($options['media'] ?? null) ? strtolower(trim($options['media'])) : 'print',
         );
     }
 
@@ -72,6 +77,7 @@ final readonly class RenderHtmlOptions
             fontConfig: $this->fontConfig,
             resourceBaseDir: $this->resourceBaseDir,
             contentScale: 1.0,
+            media: $this->media,
         );
     }
 

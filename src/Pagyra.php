@@ -52,7 +52,7 @@ final class Pagyra
 
         $rules = (new StylesheetParser())->parse(
             $cssText,
-            mediaType: 'print',
+            mediaType: $options->media,
             viewportWidth: $viewportWidth,
             viewportHeight: $viewportHeight,
         );
@@ -64,6 +64,7 @@ final class Pagyra
             $cssText,
             $viewportWidth,
             $viewportHeight,
+            $options->media,
         );
         $textMetrics = new GlyphTextMetrics($registry);
         $layoutRoot = (new BlockLayoutEngine($viewportWidth, $viewportHeight, $textMetrics))->layout($styledRoot);
@@ -110,7 +111,7 @@ final class Pagyra
             $options->pageWidth,
             $options->pageHeight,
             $options->margins,
-            'print',
+            $options->media,
             $viewportWidth,
             $viewportHeight,
         );
@@ -122,7 +123,7 @@ final class Pagyra
                 $options->pageWidth,
                 $options->pageHeight,
                 $options->margins,
-                'print',
+                $options->media,
                 $nextViewportWidth,
                 $nextViewportHeight,
             );
@@ -192,12 +193,13 @@ final class Pagyra
         string $cssText = '',
         ?float $viewportWidth = null,
         ?float $viewportHeight = null,
+        string $mediaType = 'print',
     ): FontRegistry {
         $registry = new FontRegistry();
         $defs = $config['fontFaceDefs'] ?? [];
         if (!is_array($defs)) $defs = [];
 
-        foreach ((new FontFaceRuleParser())->parse($cssText, 'print', $viewportWidth, $viewportHeight) as $face) $defs[] = $face;
+        foreach ((new FontFaceRuleParser())->parse($cssText, $mediaType, $viewportWidth, $viewportHeight) as $face) $defs[] = $face;
         foreach ($defs as $def) {
             if (!is_array($def)) continue;
             $family = $def['family'] ?? $def['name'] ?? null;
