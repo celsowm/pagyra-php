@@ -622,7 +622,11 @@ final class PdfSerializer
         $letterSpacingPt = Units::pxToPt($this->spacingPx($command, 'letter-spacing'));
         [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
         $text = "BT\n/" . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
-            . ($letterSpacingPt !== 0.0 ? $this->number($letterSpacingPt) . " Tc\n" : '')
+            // Tc/Tw sao estado grafico, nao estado do objeto de texto: BT nao os zera.
+            // Omiti-los quando valem zero deixava o espacamento de uma linha justificada
+            // vazar para todo texto desenhado depois, espalhando linhas que nao deviam
+            // esticar e sobrepondo o run seguinte, que o layout posicionou sem esse avanco.
+            . $this->number($letterSpacingPt) . " Tc\n0 Tw\n"
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n1 0 0 1 "
             . $this->number($x) . ' ' . $this->number($y) . " Tm\n[" . implode(' ', $items) . "] TJ\nET\n";
         return $graphicsState !== null ? "q\n/" . $graphicsState . " gs\n" . $text . "Q\n" : $text;
@@ -643,8 +647,12 @@ final class PdfSerializer
         $wordSpacingPt = Units::pxToPt($this->spacingPx($command, 'word-spacing') + $command->run->justificationWordSpacing);
         [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
         $text = "BT\n/" . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
-            . ($letterSpacingPt !== 0.0 ? $this->number($letterSpacingPt) . " Tc\n" : '')
-            . ($wordSpacingPt !== 0.0 ? $this->number($wordSpacingPt) . " Tw\n" : '')
+            // Tc/Tw sao estado grafico, nao estado do objeto de texto: BT nao os zera.
+            // Omiti-los quando valem zero deixava o espacamento de uma linha justificada
+            // vazar para todo texto desenhado depois, espalhando linhas que nao deviam
+            // esticar e sobrepondo o run seguinte, que o layout posicionou sem esse avanco.
+            . $this->number($letterSpacingPt) . " Tc\n"
+            . $this->number($wordSpacingPt) . " Tw\n"
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n1 0 0 1 "
             . $this->number($x) . ' ' . $this->number($y) . " Tm\n(" . $this->escapePdfString($encoded) . ") Tj\nET\n";
         return $graphicsState !== null ? "q\n/" . $graphicsState . " gs\n" . $text . "Q\n" : $text;
