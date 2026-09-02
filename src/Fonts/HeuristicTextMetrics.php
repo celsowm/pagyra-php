@@ -6,9 +6,11 @@ namespace Pagyra\Fonts;
 
 use Pagyra\Fonts\Base14\Base14WidthTable;
 use Pagyra\Style\ComputedStyle;
+use Pagyra\Units\Units;
 
 final class HeuristicTextMetrics implements TextMetrics
 {
+    private const ROOT_FONT_SIZE = 16.0;
     private const WIDTH_CALIBRATION = 0.9;
     private const SPACE = 0.32;
     private const DIGIT = 0.52;
@@ -41,9 +43,17 @@ final class HeuristicTextMetrics implements TextMetrics
         );
     }
 
+    /**
+     * `line-height` accepts a unitless factor, a percentage or any CSS length. Only the first
+     * three forms were recognised, so every other unit silently fell back to `font-size * 1.2`:
+     * the eproc/TJRJ templates set `line-height: 11pt` (and 8pt, 9pt, 15pt) thousands of times,
+     * and a `font-size: 8pt; line-height: 8pt` block came out 20% too tall, which is most of the
+     * "leading is bigger than wkhtmltopdf's" gap. `em` resolves against the element's own size.
+     */
     public function lineHeight(ComputedStyle $style, float $fontSize): float
     {
         $value = strtolower(trim($style->get('line-height', 'normal') ?? 'normal'));
+        $value = trim(preg_replace('/!\s*important$/', '', $value) ?? $value);
         if ($value === '' || $value === 'normal') {
             return $fontSize * 1.2;
         }
@@ -53,8 +63,19 @@ final class HeuristicTextMetrics implements TextMetrics
         if (preg_match('/^(-?\d+(?:\.\d+)?)%$/', $value, $m) === 1) {
             return max(0.0, ((float) $m[1] / 100.0) * $fontSize);
         }
-        if (preg_match('/^(-?\d+(?:\.\d+)?)px$/', $value, $m) === 1) {
-            return max(0.0, (float) $m[1]);
+        if (preg_match('/^(-?\d+(?:\.\d+)?)(px|pt|em|rem|cm|mm|q|in|pc)$/', $value, $m) === 1) {
+            $n = (float) $m[1];
+            return max(0.0, match ($m[2]) {
+                'px' => $n,
+                'pt' => Units::ptToPx($n),
+                'cm' => Units::cmToPx($n),
+                'mm' => Units::mmToPx($n),
+                'q' => Units::qToPx($n),
+                'in' => Units::inToPx($n),
+                'pc' => Units::pcToPx($n),
+                'em' => $n * $fontSize,
+                'rem' => $n * self::ROOT_FONT_SIZE,
+            });
         }
         return $fontSize * 1.2;
     }
