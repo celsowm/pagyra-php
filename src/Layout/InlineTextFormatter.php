@@ -14,6 +14,7 @@ use Pagyra\Units\Units;
 final class InlineTextFormatter
 {
     private const ROOT_FONT_SIZE = 16.0;
+    private const EPSILON = 0.01;
 
     private readonly ReplacedElementSizingResolver $replacedElementSizing;
 
@@ -91,7 +92,19 @@ final class InlineTextFormatter
         $cursorY = $y;
         foreach ($lines as $lineIndex => $lineTokens) {
             $lineWidth = array_sum(array_column($lineTokens, 'width'));
-            $nominalHeight = $this->metrics->lineHeight($block->style, $fontSize);
+            // A line that carries no text and only collapsed (zero-height) atomic boxes gets no
+            // font strut: `<div style="display:inline-block;height:0"><img style="display:block"></div>`
+            // alone on its line contributes nothing to the flow in browsers, so the following
+            // block must not be pushed down by a phantom line. Any real text, or an atomic box
+            // with height, brings the strut back.
+            $collapsedBoxLineOnly = $lineTokens !== [];
+            foreach ($lineTokens as $token) {
+                if ($token['kind'] !== 'box' || $token['lineHeight'] > self::EPSILON) {
+                    $collapsedBoxLineOnly = false;
+                    break;
+                }
+            }
+            $nominalHeight = $collapsedBoxLineOnly ? 0.0 : $this->metrics->lineHeight($block->style, $fontSize);
             foreach ($lineTokens as $token) {
                 $nominalHeight = max($nominalHeight, $token['lineHeight']);
             }
