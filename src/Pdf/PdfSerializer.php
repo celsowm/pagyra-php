@@ -658,10 +658,21 @@ final class PdfSerializer
 
     private function base14Font(TextPaintCommand $command): string
     {
-        $first = trim(explode(',', strtolower($command->fontFamily ?? 'times new roman'), 2)[0], " \t\n\r\0\x0B\"'");
-        if (str_contains($first, 'courier') || str_contains($first, 'mono')) $base = 'Courier';
-        elseif (str_contains($first, 'helvetica') || str_contains($first, 'arial') || str_contains($first, 'sans')) $base = 'Helvetica';
-        else $base = 'Times';
+        // Walk the whole `font-family` stack, not just the first name: `Calibri, sans-serif`
+        // has no Calibri here, so the generic `sans-serif` at the end is what actually decides
+        // the fallback. Picking a bucket from the first name alone sent every `Calibri, …`
+        // (i.e. every eproc/TJRJ document) to Times while the width table — which does fall
+        // through — measured it as Helvetica, so justified lines never reached the margin.
+        $base = null;
+        foreach (explode(',', strtolower($command->fontFamily ?? '')) as $name) {
+            $name = trim($name, " \t\n\r\0\x0B\"'");
+            if ($name === '') continue;
+            if (str_contains($name, 'courier') || str_contains($name, 'mono')) { $base = 'Courier'; break; }
+            if (str_contains($name, 'helvetica') || str_contains($name, 'arial') || str_contains($name, 'sans')) { $base = 'Helvetica'; break; }
+            if (str_contains($name, 'times') || str_contains($name, 'georgia') || str_contains($name, 'serif')) { $base = 'Times'; break; }
+            // Unknown family name — keep looking at the next fallback in the stack.
+        }
+        $base ??= 'Times';
         $bold = $command->fontWeight >= 600;
         $italic = str_contains($command->fontStyle, 'italic') || str_contains($command->fontStyle, 'oblique');
         return match ($base) {
