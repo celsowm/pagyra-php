@@ -37,7 +37,7 @@ Current foundation:
 - attribute selectors (`[attr]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`);
 - specificity and source-order resolution;
 - `!important`, including interaction with inline styles;
-- inherited properties, including `visibility`;
+- inherited properties, including `visibility`, where inheritance only fills a property the UA stylesheet did not set on the element, so a UA element rule (`a { color: #0000EE }`, `strong { font-weight: bold }`) still wins over the inherited value;
 - CSS custom properties and `var()` fallback resolution;
 - print `@media` evaluation for the currently supported media-query subset;
 - initial UA/default styles for core block/inline elements, headings, paragraphs and lists;
@@ -69,8 +69,10 @@ Current foundation:
 - `white-space: normal`, `nowrap`, `pre`, `pre-wrap` and `pre-line` handling for the current inline formatter;
 - explicit newline preservation for preformatted modes;
 - `<br>` forces a line break regardless of the active `white-space` mode (and is skipped when hidden with `display:none`), including consecutive `<br>`s producing an empty line at the block's line height;
-- oversized-word splitting for `overflow-wrap: anywhere`, `overflow-wrap: break-word` and `word-break: break-all`;
+- oversized-word splitting for `overflow-wrap: anywhere`, `overflow-wrap: break-word` and `word-break: break-all`, with the legacy `word-wrap` name accepted as an alias for `overflow-wrap`;
 - `text-align: left`, `center`, `right`, `end` and first-pass `justify` spacing;
+- `text-indent` first-line indent (positive or negative), inherited by descendant blocks, narrowing only the first line for wrapping, alignment and justification;
+- inline-formatter length values (`text-indent`, atomic-box margin/padding) accept `in`/`cm`/`mm`/`pc` in addition to `px`/`pt`/`em`/`rem`/`%`;
 - `vertical-align: baseline`, `middle`, `top`, `bottom`, `text-top`, `text-bottom`, `super`, `sub` plus px/pt/em/rem/% shifts;
 - two-pass inline vertical placement so raised/lowered runs can expand the effective line box;
 - fallback baseline follows the `pagyra-js` ascent/half-leading model (`0.75 * font-size` ascent when font ascent metrics are unavailable);

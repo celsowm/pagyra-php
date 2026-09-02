@@ -13,7 +13,7 @@ final class StyleComputer
 {
     private const INHERITED = [
         'color', 'font-family', 'font-size', 'font-style', 'font-weight',
-        'line-height', 'text-align', 'visibility', 'white-space',
+        'line-height', 'text-align', 'text-indent', 'visibility', 'white-space',
         'text-decoration', 'text-decoration-line',
         'x-link-href',
     ];
@@ -38,7 +38,10 @@ final class StyleComputer
         if ($parent !== null) {
             foreach (self::INHERITED as $property) {
                 $value = $parent->get($property);
-                if ($value !== null) {
+                // Inheritance only fills properties the UA stylesheet did not set on this
+                // element; a UA element rule (e.g. `a { color: #0000EE }`, `strong { font-weight:
+                // bold }`) still beats the inherited value, as it does in the real cascade.
+                if ($value !== null && !array_key_exists($property, $properties)) {
                     $properties[$property] = $value;
                 }
             }

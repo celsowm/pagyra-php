@@ -31,9 +31,20 @@ final class InlineTextFormatter
         }
 
         $whiteSpace = strtolower($block->style->get('white-space', 'normal') ?? 'normal');
-        $overflowWrap = strtolower($block->style->get('overflow-wrap', 'normal') ?? 'normal');
+        // `word-wrap` is the legacy name for `overflow-wrap`; documents in the wild (the eproc /
+        // TJRJ template among them) still ship `p { word-wrap: break-word }` to wrap long URLs.
+        $overflowWrap = strtolower(
+            $block->style->get('overflow-wrap') ?? $block->style->get('word-wrap', 'normal') ?? 'normal',
+        );
         $wordBreak = strtolower($block->style->get('word-break', 'normal') ?? 'normal');
         $allowSoftWrap = !in_array($whiteSpace, ['nowrap', 'pre'], true);
+        $textIndent = $this->resolveSimpleLength(
+            trim($block->style->get('text-indent', '0') ?? '0'),
+            $availableWidth,
+            $fontSize,
+            0.0,
+            true,
+        );
 
         $lines = [];
         $current = [];
@@ -55,7 +66,10 @@ final class InlineTextFormatter
                 $token['width'] = $this->metrics->measure(' ', $token['style'], $token['fontSize'])->inlineSize;
             }
 
-            if ($allowSoftWrap && $availableWidth > 0.0 && $current !== [] && $currentWidth + $token['width'] > $availableWidth) {
+            // `text-indent` narrows the first line only.
+            $lineRoom = $availableWidth - ($lines === [] ? max(0.0, $textIndent) : 0.0);
+
+            if ($allowSoftWrap && $lineRoom > 0.0 && $current !== [] && $currentWidth + $token['width'] > $lineRoom) {
                 if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
                     $lines[] = $current;
                     $current = [];
@@ -65,10 +79,11 @@ final class InlineTextFormatter
                 $lines[] = $current;
                 $current = [];
                 $currentWidth = 0.0;
+                $lineRoom = $availableWidth;
             }
 
-            if ($allowSoftWrap && $availableWidth > 0.0 && $token['kind'] === 'word' && $token['width'] > $availableWidth && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
-                foreach ($this->splitWordToken($token, $availableWidth) as $index => $chunk) {
+            if ($allowSoftWrap && $lineRoom > 0.0 && $token['kind'] === 'word' && $token['width'] > $lineRoom && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
+                foreach ($this->splitWordToken($token, $lineRoom) as $index => $chunk) {
                     if ($index > 0) {
                         $lines[] = $current;
                         $current = [];
@@ -114,11 +129,13 @@ final class InlineTextFormatter
             // `text-align` aligns inline content inside a line box; it never moves a block-level
             // box, which stays at the content edge (only auto margins would move it). A line
             // holding just such a box therefore ignores the alignment entirely.
+            $indentForLine = $lineIndex === 0 ? $textIndent : 0.0;
+            $roomForLine = $availableWidth - $indentForLine;
             $isBlockLevelBoxLine = count($lineTokens) === 1 && ($lineTokens[0]['blockLevel'] ?? false);
-            $justify = !$isBlockLevelBoxLine && $alignment === 'justify' && !$isLastLine && $availableWidth > $lineWidth;
+            $justify = !$isBlockLevelBoxLine && $alignment === 'justify' && !$isLastLine && $roomForLine > $lineWidth;
             $spaceCount = $justify ? $this->countSpaceTokens($lineTokens) : 0;
-            $extraPerSpace = $spaceCount > 0 ? ($availableWidth - $lineWidth) / $spaceCount : 0.0;
-            $offset = ($justify || $isBlockLevelBoxLine) ? 0.0 : $this->alignmentOffset($alignment, $lineWidth, $availableWidth);
+            $extraPerSpace = $spaceCount > 0 ? ($roomForLine - $lineWidth) / $spaceCount : 0.0;
+            $offset = ($justify || $isBlockLevelBoxLine) ? 0.0 : $this->alignmentOffset($alignment, $lineWidth, $roomForLine);
 
             $lineBaseline = $this->ownBaseline($fontSize, $nominalHeight);
             $placements = [];
@@ -148,7 +165,7 @@ final class InlineTextFormatter
             // where the reference, and browsers, give 36).
             $lineHeight = max($nominalHeight, $maxBottom - $minTop);
             $baseline = $cursorY + ($lineBaseline - $minTop);
-            $runX = $x + $offset;
+            $runX = $x + $offset + $indentForLine;
             $runs = [];
             $boxes = [];
             $usedWidth = 0.0;
@@ -195,7 +212,7 @@ final class InlineTextFormatter
             }
 
             $text = implode('', array_map(static fn(TextRun $run): string => $run->text, $runs));
-            $lineBoxes[] = new LineBox($x + $offset, $cursorY, $usedWidth, $lineHeight, $baseline, $text, $runs, $boxes);
+            $lineBoxes[] = new LineBox($x + $offset + $indentForLine, $cursorY, $usedWidth, $lineHeight, $baseline, $text, $runs, $boxes);
             $cursorY += $lineHeight;
         }
 
@@ -626,6 +643,10 @@ final class InlineTextFormatter
         if ($raw === '' || $raw === 'auto') return $fallback;
         if (preg_match('/^(-?\d+(?:\.\d+)?)px$/', $raw, $m) === 1) return $floor((float) $m[1]);
         if (preg_match('/^(-?\d+(?:\.\d+)?)pt$/', $raw, $m) === 1) return $floor(Units::ptToPx((float) $m[1]));
+        if (preg_match('/^(-?\d+(?:\.\d+)?)in$/', $raw, $m) === 1) return $floor(Units::inToPx((float) $m[1]));
+        if (preg_match('/^(-?\d+(?:\.\d+)?)cm$/', $raw, $m) === 1) return $floor(Units::cmToPx((float) $m[1]));
+        if (preg_match('/^(-?\d+(?:\.\d+)?)mm$/', $raw, $m) === 1) return $floor(Units::mmToPx((float) $m[1]));
+        if (preg_match('/^(-?\d+(?:\.\d+)?)pc$/', $raw, $m) === 1) return $floor(Units::pcToPx((float) $m[1]));
         if (preg_match('/^(-?\d+(?:\.\d+)?)em$/', $raw, $m) === 1) return $floor((float) $m[1] * $fontSize);
         if (preg_match('/^(-?\d+(?:\.\d+)?)rem$/', $raw, $m) === 1) return $floor((float) $m[1] * self::ROOT_FONT_SIZE);
         if (preg_match('/^(-?\d+(?:\.\d+)?)%$/', $raw, $m) === 1) return $floor(((float) $m[1] / 100.0) * $referenceWidth);
