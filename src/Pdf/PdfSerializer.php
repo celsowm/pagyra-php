@@ -604,7 +604,7 @@ final class PdfSerializer
         if ($command->color instanceof Rgba && $command->color->a <= 0.0) return '';
         $codePoints = $this->codePoints($command->text);
         $glyphs = array_map(fn (int $cp): int => $face->metrics->glyphId($cp), $codePoints);
-        $wordSpacing = $this->spacingPx($command, 'word-spacing');
+        $wordSpacing = $this->spacingPx($command, 'word-spacing') + $command->run->justificationWordSpacing;
         $items = [];
         $last = count($glyphs) - 1;
         foreach ($glyphs as $i => $gid) {
@@ -640,7 +640,7 @@ final class PdfSerializer
         $y = Units::pxToPt($pageHeightPx - $command->baseline);
         $fontSize = Units::pxToPt($command->fontSize);
         $letterSpacingPt = Units::pxToPt($this->spacingPx($command, 'letter-spacing'));
-        $wordSpacingPt = Units::pxToPt($this->spacingPx($command, 'word-spacing'));
+        $wordSpacingPt = Units::pxToPt($this->spacingPx($command, 'word-spacing') + $command->run->justificationWordSpacing);
         [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
         $text = "BT\n/" . $resourceName . ' ' . $this->number($fontSize) . " Tf\n"
             . ($letterSpacingPt !== 0.0 ? $this->number($letterSpacingPt) . " Tc\n" : '')

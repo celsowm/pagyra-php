@@ -195,6 +195,9 @@ final class InlineTextFormatter
                     );
                 } else {
                     $runBaseline = $cursorY + (($placement['baseline'] ?? $lineBaseline) - $minTop);
+                    // The stretch a justified line puts on its spaces lives only in this x
+                    // arithmetic; carry it on the run so the serializer can reproduce it, or the
+                    // drawn line keeps the font's own space width and stops short of the margin.
                     $this->appendRun($runs, new TextRun(
                         $runX,
                         $itemY,
@@ -204,6 +207,7 @@ final class InlineTextFormatter
                         $token['text'],
                         $token['fontSize'],
                         $token['style'],
+                        $justify ? $extraPerSpace : 0.0,
                     ));
                 }
 
@@ -685,7 +689,7 @@ final class InlineTextFormatter
         foreach ($lines as $line) {
             $runs = [];
             foreach ($line->runs as $run) {
-                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style);
+                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing);
             }
             $boxes = [];
             foreach ($line->atomicBoxes as $box) {
@@ -729,8 +733,9 @@ final class InlineTextFormatter
             && $last->style === $run->style
             && abs($last->fontSize - $run->fontSize) < 1e-9
             && abs(($last->x + $last->width) - $run->x) < 1e-9
-            && abs($last->baseline - $run->baseline) < 1e-9) {
-            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style);
+            && abs($last->baseline - $run->baseline) < 1e-9
+            && abs($last->justificationWordSpacing - $run->justificationWordSpacing) < 1e-9) {
+            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing);
             return;
         }
         $runs[] = $run;

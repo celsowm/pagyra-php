@@ -172,7 +172,8 @@
                                                 "display": "block",
                                                 "margin-bottom": "1em",
                                                 "margin-top": "1em"
-                                            }
+                                            },
+                                            "justificationWordSpacing": 0
                                         }
                                     ],
                                     "atomicBoxes": [],
@@ -189,7 +190,8 @@
                                                 "display": "block",
                                                 "margin-bottom": "1em",
                                                 "margin-top": "1em"
-                                            }
+                                            },
+                                            "justificationWordSpacing": 0
                                         }
                                     ]
                                 }
@@ -280,7 +282,8 @@
                                         "display": "block",
                                         "margin-bottom": "1em",
                                         "margin-top": "1em"
-                                    }
+                                    },
+                                    "justificationWordSpacing": 0
                                 }
                             ],
                             "atomicBoxes": [],
@@ -297,7 +300,8 @@
                                         "display": "block",
                                         "margin-bottom": "1em",
                                         "margin-top": "1em"
-                                    }
+                                    },
+                                    "justificationWordSpacing": 0
                                 }
                             ]
                         }
@@ -353,7 +357,8 @@
                                                             "display": "block",
                                                             "margin-bottom": "1em",
                                                             "margin-top": "1em"
-                                                        }
+                                                        },
+                                                        "justificationWordSpacing": 0
                                                     }
                                                 ],
                                                 "atomicBoxes": [],
@@ -370,7 +375,8 @@
                                                             "display": "block",
                                                             "margin-bottom": "1em",
                                                             "margin-top": "1em"
-                                                        }
+                                                        },
+                                                        "justificationWordSpacing": 0
                                                     }
                                                 ]
                                             }
@@ -461,7 +467,8 @@
                                                     "display": "block",
                                                     "margin-bottom": "1em",
                                                     "margin-top": "1em"
-                                                }
+                                                },
+                                                "justificationWordSpacing": 0
                                             }
                                         ],
                                         "atomicBoxes": [],
@@ -478,7 +485,8 @@
                                                     "display": "block",
                                                     "margin-bottom": "1em",
                                                     "margin-top": "1em"
-                                                }
+                                                },
+                                                "justificationWordSpacing": 0
                                             }
                                         ]
                                     }
@@ -520,7 +528,8 @@
                                                     "display": "block",
                                                     "margin-bottom": "1em",
                                                     "margin-top": "1em"
-                                                }
+                                                },
+                                                "justificationWordSpacing": 0
                                             }
                                         ],
                                         "atomicBoxes": [],
@@ -537,7 +546,8 @@
                                                     "display": "block",
                                                     "margin-bottom": "1em",
                                                     "margin-top": "1em"
-                                                }
+                                                },
+                                                "justificationWordSpacing": 0
                                             }
                                         ]
                                     }
@@ -665,7 +675,8 @@
                                                 "display": "block",
                                                 "margin-bottom": "1em",
                                                 "margin-top": "1em"
-                                            }
+                                            },
+                                            "justificationWordSpacing": 0
                                         }
                                     ],
                                     "atomicBoxes": [],
@@ -682,7 +693,8 @@
                                                 "display": "block",
                                                 "margin-bottom": "1em",
                                                 "margin-top": "1em"
-                                            }
+                                            },
+                                            "justificationWordSpacing": 0
                                         }
                                     ]
                                 }
@@ -722,7 +734,8 @@
                                 "display": "block",
                                 "margin-bottom": "1em",
                                 "margin-top": "1em"
-                            }
+                            },
+                            "justificationWordSpacing": 0
                         }
                     }
                 ]

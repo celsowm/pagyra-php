@@ -17,6 +17,12 @@ final readonly class TextRun implements \JsonSerializable
         public string $text,
         public float $fontSize,
         public ComputedStyle $style,
+        /**
+         * Extra advance each space in this run carries because the line is justified. It only
+         * exists in the layout's x arithmetic, so the serializer has to reproduce it (as `Tw`,
+         * or as a TJ adjustment for embedded fonts) or the drawn line falls short of the margin.
+         */
+        public float $justificationWordSpacing = 0.0,
     ) {
     }
 
@@ -31,6 +37,7 @@ final readonly class TextRun implements \JsonSerializable
             'text' => $this->text,
             'fontSize' => $this->fontSize,
             'style' => $this->style,
+            'justificationWordSpacing' => $this->justificationWordSpacing,
         ];
     }
 }
