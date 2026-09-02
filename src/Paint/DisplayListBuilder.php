@@ -6,6 +6,7 @@ namespace Pagyra\Paint;
 
 use Pagyra\Css\Color\ColorParser;
 use Pagyra\Css\Color\Rgba;
+use Pagyra\Fonts\TextMetrics;
 use Pagyra\Geometry\Rect;
 use Pagyra\Image\ImageMetadataReader;
 use Pagyra\Image\ImageSourceBytesResolver;
@@ -30,6 +31,7 @@ final class DisplayListBuilder
 
     public function __construct(
         private readonly ?ImageSourceBytesResolver $imageBytes = null,
+        private readonly ?TextMetrics $textMetrics = null,
     ) {
         $this->imageMetadata = new ImageMetadataReader();
     }
@@ -140,8 +142,82 @@ final class DisplayListBuilder
                 $wholeBox,
             );
         }
+        $this->appendListMarker($commands, $block, $margins);
         $this->appendLines($commands, $block->lines, $margins);
         foreach ($block->children as $child) $this->appendBlock($commands, $child, $margins);
+    }
+
+    /**
+     * Paints the list-item marker string computed by StyleComputer (`x-list-marker`)
+     * to the left of the item's first line, inside the list's left padding. This is
+     * `list-style-position: outside` only; the marker is paint-only and adds no box,
+     * mirroring pagyra-js's createListMarkerRun.
+     *
+     * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     */
+    private function appendListMarker(array &$commands, BlockFragment $block, array $margins): void
+    {
+        if ($this->textMetrics === null) return;
+        $style = $block->node->source->style;
+        $marker = $style->get('x-list-marker');
+        if ($marker === null || $marker === '') return;
+
+        $target = $this->firstLineFragmentForMarker($block);
+        if ($target === null || $target->lineIndex !== 0) return;
+        $run = $this->firstTextRunInLine($target->line);
+        if ($run === null) return;
+
+        $fontSize = $run->fontSize;
+        $textStartX = $run->x + $margins['left'];
+        $markerWidth = max($this->textMetrics->measure($marker, $style, $fontSize)->inlineSize, 0.0);
+        $gap = max($fontSize * 0.5, 6.0);
+        $markerX = $textStartX - $gap - $markerWidth;
+
+        $weightRaw = strtolower(trim($style->get('font-weight', '400') ?? '400'));
+        $fontWeight = $weightRaw === 'bold' ? 700 : ($weightRaw === 'normal' ? 400 : (is_numeric($weightRaw) ? (int) $weightRaw : 400));
+
+        $syntheticRun = new TextRun(
+            x: $run->x - $gap - $markerWidth,
+            y: $run->y,
+            width: $markerWidth,
+            height: $run->height,
+            baseline: $run->baseline,
+            text: $marker,
+            fontSize: $fontSize,
+            style: $style,
+        );
+
+        $commands[] = new TextPaintCommand(
+            run: $syntheticRun,
+            pageIndex: $target->pageIndex,
+            x: $markerX,
+            y: $target->pageY + ($run->y - $target->line->y) + $margins['top'],
+            baseline: $target->pageBaseline + ($run->baseline - $target->line->baseline) + $margins['top'],
+            text: $marker,
+            fontSize: $fontSize,
+            fontFamily: $style->get('font-family'),
+            fontWeight: max(100, min(900, $fontWeight)),
+            fontStyle: strtolower(trim($style->get('font-style', 'normal') ?? 'normal')),
+            color: ColorParser::parse($style->get('color', 'black')),
+        );
+    }
+
+    private function firstLineFragmentForMarker(BlockFragment $block): ?LineFragment
+    {
+        if ($block->lines !== []) return $block->lines[0];
+        foreach ($block->children as $child) {
+            $found = $this->firstLineFragmentForMarker($child);
+            if ($found !== null) return $found;
+        }
+        return null;
+    }
+
+    private function firstTextRunInLine(LineBox $line): ?TextRun
+    {
+        foreach ($line->orderedItems() as $item) {
+            if ($item instanceof TextRun) return $item;
+        }
+        return null;
     }
 
     private function fragmentRadius(BorderRadius $radius, bool $drawTop, bool $drawBottom): BorderRadius

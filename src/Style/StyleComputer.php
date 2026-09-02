@@ -100,6 +100,17 @@ final class StyleComputer
             }
         }
 
+        if ($node->isElement('li')) {
+            $parentNode = $ancestors === [] ? null : $ancestors[array_key_last($ancestors)];
+            $marker = $this->computeListMarker($node, $parentNode, $properties, $parent);
+            if ($marker !== null) {
+                // Not a real CSS property: carries the already-formatted marker string to
+                // DisplayListBuilder, which paints it in the list's left padding. pagyra-js
+                // builds the same marker run in pdf/utils/list-utils.ts.
+                $properties['x-list-marker'] = $marker;
+            }
+        }
+
         ksort($properties);
         $style = new ComputedStyle($properties);
         $children = [];
@@ -112,6 +123,59 @@ final class StyleComputer
         }
 
         return new StyledNode($node, $style, $children);
+    }
+
+    /** @param array<string,string> $properties */
+    private function computeListMarker(Node $li, ?Node $parent, array $properties, ?ComputedStyle $parentStyle): ?string
+    {
+        if ($parent === null || $parent->type !== 'element') return null;
+        $parentTag = $parent->tagName ?? '';
+        if ($parentTag !== 'ol' && $parentTag !== 'ul') return null;
+
+        $own = ListMarker::normalizeType(
+            $properties['list-style-type'] ?? $this->listStyleShorthandType($properties['list-style'] ?? null),
+        );
+        $inherited = ListMarker::normalizeType(
+            $parentStyle?->get('list-style-type') ?? $this->listStyleShorthandType($parentStyle?->get('list-style')),
+        );
+        $type = ListMarker::resolveType($own, $inherited, $parentTag);
+        if ($type === null || $type === 'none') return null;
+
+        $index = ListMarker::isOrdered($type) ? $this->computeListItemIndex($li, $parent) : 1;
+        return ListMarker::format($type, $index);
+    }
+
+    private function computeListItemIndex(Node $li, Node $parent): int
+    {
+        $counter = 0;
+        $start = trim((string) $parent->attribute('start'));
+        if ($start !== '' && preg_match('/^-?\d+$/', $start) === 1) {
+            $counter = (int) $start - 1;
+        }
+        foreach ($parent->children as $child) {
+            if ($child->type !== 'element' || $child->tagName !== 'li') continue;
+            $value = trim((string) $child->attribute('value'));
+            if ($value !== '' && preg_match('/^-?\d+$/', $value) === 1) {
+                $counter = (int) $value;
+            } else {
+                $counter++;
+            }
+            if ($child === $li) return $counter;
+        }
+        return max($counter, 1);
+    }
+
+    private function listStyleShorthandType(?string $shorthand): ?string
+    {
+        if ($shorthand === null) return null;
+        $keywords = [
+            'none', 'disc', 'circle', 'square', 'decimal', 'decimal-leading-zero',
+            'lower-alpha', 'lower-latin', 'upper-alpha', 'upper-latin', 'lower-roman', 'upper-roman',
+        ];
+        foreach (preg_split('/\s+/', strtolower(trim($shorthand))) ?: [] as $token) {
+            if (in_array($token, $keywords, true)) return $token;
+        }
+        return null;
     }
 
     /** @param array<string,array{value:string,important:bool,specificity:int,sourceOrder:int,inline:bool}> $winners */
