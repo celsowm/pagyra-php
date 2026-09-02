@@ -104,17 +104,31 @@ final class BlockLayoutEngine
             $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
         }
 
+        // CSS 2.1 8.3.1: a block's top margin collapses with the top margin of its first in-flow
+        // block child when no top border or padding separates them, and the same happens at the
+        // bottom for the last child of an auto-height box. Without this the eproc pattern
+        // `<ol><li class=x><p class=x>` stacked three 5mm margins at each end of every list item
+        // instead of one, adding a page of blank space to a 12-item ementa.
+        $segments = $this->flowSegments($styled);
+        $collapsesTop = $border->top <= 0.0 && $padding->top <= 0.0;
+        $firstChildTopMargin = $collapsesTop ? $this->leadingChildTopMargin($segments, $containingWidth, $containingHeight, $fontSize) : 0.0;
+        $marginTopUsed = max($margin->top, $firstChildTopMargin);
+        $margin = new Edges($marginTopUsed, $margin->right, $margin->bottom, $margin->left);
+
         $contentX = $containingX + $margin->left + $border->left + $padding->left;
         $contentY = $flowY + $margin->top + $border->top + $padding->top;
         $cursorY = $contentY;
         $children = [];
+        $firstInFlowChild = true;
+        $lastChildBorderBottom = null;
+        $lastChildBottomMargin = 0.0;
         $previousBorderBottom = null;
         $previousBottomMargin = 0.0;
         $float = new FloatRun($contentX, $contentX + $contentWidth);
 
         $lineBoxes = [];
 
-        foreach ($this->flowSegments($styled) as $segment) {
+        foreach ($segments as $segment) {
             if ($segment[0] === 'inline') {
                 if ($float->active) {
                     $cursorY = max($cursorY, $float->bottom);
@@ -130,9 +144,13 @@ final class BlockLayoutEngine
                 array_push($lineBoxes, ...$run->lines);
                 $cursorY += $run->height;
                 // An inline run between two blocks separates their margins, so nothing collapses
-                // across it.
+                // across it — and it also ends the run of leading children whose top margin
+                // could still have collapsed into this block's own.
                 $previousBorderBottom = null;
                 $previousBottomMargin = 0.0;
+                $firstInFlowChild = false;
+                $lastChildBorderBottom = null;
+                $lastChildBottomMargin = 0.0;
                 continue;
             }
 
@@ -144,28 +162,57 @@ final class BlockLayoutEngine
                 $runY = $float->active ? $float->startY : ($previousBorderBottom ?? $cursorY);
                 [$childLayout, $float] = $this->layoutFloatChild($child, $side, $float, $runY, $containingHeight, $childFontSize);
                 $children[] = $childLayout;
+                // A float does not collapse margins, but it does mean the next in-flow child is
+                // no longer the one whose top margin may merge into this block's own.
+                $firstInFlowChild = false;
                 continue;
             }
             if ($float->active) {
                 $cursorY = max($cursorY, $float->bottom);
                 $previousBorderBottom = null;
                 $previousBottomMargin = 0.0;
+                $firstInFlowChild = false;
                 $float = $float->reset($contentX, $contentX + $contentWidth);
             }
 
-            $childTopMargin = $this->resolveMarginSide($child, 'top', $contentWidth, $containingHeight, $childFontSize);
-            $childFlowY = $previousBorderBottom === null ? $cursorY : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
+            $childTopMargin = $this->collapsedTopMargin($child, $contentWidth, $containingHeight, $childFontSize);
+            if ($previousBorderBottom !== null) {
+                $childFlowY = $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
+            } elseif ($firstInFlowChild && $collapsesTop) {
+                // Its top margin already went into this block's own, so start the child's border
+                // box exactly at the content edge rather than pushing it down a second time.
+                $childFlowY = $contentY - $childTopMargin;
+            } else {
+                $childFlowY = $cursorY;
+            }
             $childLayout = $this->layoutBlockLevelChild($child, $contentX, $childFlowY, $contentWidth, $containingHeight, $fontSize);
             $children[] = $childLayout;
+            $firstInFlowChild = false;
             $previousBorderBottom = $childLayout->box->borderBox()->bottom();
             $previousBottomMargin = $childLayout->box->margin->bottom;
+            $lastChildBorderBottom = $previousBorderBottom;
+            $lastChildBottomMargin = $previousBottomMargin;
             $cursorY = $previousBorderBottom + $previousBottomMargin;
         }
         if ($float->active) $cursorY = max($cursorY, $float->bottom);
 
+        $heightValue = $styled->style->get('height', 'auto') ?? 'auto';
+        // The mirror of the top rule: the last in-flow child's bottom margin escapes an
+        // auto-height box with no bottom border or padding instead of growing it, and becomes
+        // this block's own bottom margin for the sibling below.
+        if (
+            $lastChildBorderBottom !== null
+            && !$float->active
+            && $border->bottom <= 0.0
+            && $padding->bottom <= 0.0
+            && $this->isAuto($heightValue)
+        ) {
+            $cursorY = $lastChildBorderBottom;
+            $margin = new Edges($margin->top, $margin->right, max($margin->bottom, $lastChildBottomMargin), $margin->left);
+        }
+
         $inlineLayout = new InlineTextLayout($lineBoxes, max(0.0, $cursorY - $contentY));
         $autoContentHeight = max(0.0, $cursorY - $contentY);
-        $heightValue = $styled->style->get('height', 'auto') ?? 'auto';
         $verticalNonContent = $padding->vertical() + $border->vertical();
         if ($this->isAuto($heightValue)) {
             $contentHeight = $autoContentHeight;
@@ -483,6 +530,50 @@ final class BlockLayoutEngine
         if ($pendingHasContent) $segments[] = ['inline', $pending];
 
         return $segments;
+    }
+
+    /**
+     * Top margin the first in-flow child contributes to its parent's own, or 0 when the block
+     * opens with inline content (text between the edge and the first child stops the collapse).
+     *
+     * @param list<array{0:'inline'|'block',1:list<StyledNode>|StyledNode}> $segments
+     */
+    private function leadingChildTopMargin(array $segments, float $containingWidth, float $containingHeight, float $fontSize, int $depth = 0): float
+    {
+        $first = $segments[0] ?? null;
+        if ($first === null || $first[0] !== 'block') return 0.0;
+
+        $child = $first[1];
+        if ($this->floatSide($child) !== null) return 0.0;
+
+        return $this->collapsedTopMargin($child, $containingWidth, $containingHeight, $this->resolveFontSize($child, $fontSize), $depth + 1);
+    }
+
+    /**
+     * A block's used top margin: its own, raised by the top margins of the leading descendants
+     * that collapse into it (CSS 2.1 8.3.1). Walking the chain here — rather than reading it back
+     * off the finished child box — is what lets the caller place that child without adding the
+     * margin a second time. Percentage margins resolve against the parent's width instead of the
+     * descendant's own containing block, which the absolute units in real documents never notice.
+     */
+    private function collapsedTopMargin(StyledNode $node, float $containingWidth, float $containingHeight, float $fontSize, int $depth = 0): float
+    {
+        $own = $this->resolveMarginSide($node, 'top', $containingWidth, $containingHeight, $fontSize);
+        if ($depth >= 32) return $own;
+        if ($node->node->isImage() || $node->node->isSvg()) return $own;
+        if (!in_array($this->display($node), ['block', 'list-item'], true)) return $own;
+
+        $padding = $this->resolveEdges($node, 'padding', $containingWidth, $containingHeight, $fontSize);
+        $border = $this->resolveBorderEdges($node, $containingWidth, $containingHeight, $fontSize);
+        if ($padding->top > 0.0 || $border->top > 0.0) return $own;
+
+        return max($own, $this->leadingChildTopMargin(
+            $this->flowSegments($node),
+            $containingWidth,
+            $containingHeight,
+            $fontSize,
+            $depth,
+        ));
     }
 
     private function hasInlineContent(StyledNode $node): bool
