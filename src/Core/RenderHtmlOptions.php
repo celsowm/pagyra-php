@@ -16,8 +16,10 @@ final readonly class RenderHtmlOptions
         public array $margins = ['top' => 48.0, 'right' => 48.0, 'bottom' => 48.0, 'left' => 48.0],
         public array $fontConfig = [],
         public ?string $resourceBaseDir = null,
+        public float $contentScale = 1.0,
     ) {
         if ($this->html === '') throw new \InvalidArgumentException('html must not be empty');
+        if ($this->contentScale <= 0) throw new \InvalidArgumentException('contentScale must be greater than zero');
         if ($this->resourceBaseDir !== null && !self::isAbsoluteResourceBase($this->resourceBaseDir)) {
             throw new \InvalidArgumentException('resourceBaseDir must be an absolute local path or file:// URL');
         }
@@ -41,6 +43,35 @@ final readonly class RenderHtmlOptions
             margins: self::normalizeMargins($options['margins'] ?? []),
             fontConfig: is_array($options['fontConfig'] ?? null) ? $options['fontConfig'] : [],
             resourceBaseDir: $resourceBaseDir,
+            contentScale: self::positiveNumber($options['contentScale'] ?? 1.0, 'contentScale'),
+        );
+    }
+
+    /**
+     * Returns a copy laid out on a page inflated by 1/contentScale, so that after the
+     * PDF serializer scales the sheet back down by contentScale the physical page size
+     * is unchanged while roughly 1/contentScale more content flows onto each page — the
+     * behaviour wkhtmltopdf gives for free by drawing everything at 0.8x. The returned
+     * options carry contentScale 1.0; the caller keeps the original factor for serialization.
+     */
+    public function scaledForContentZoom(float $contentScale): self
+    {
+        if ($contentScale <= 0) throw new \InvalidArgumentException('contentScale must be greater than zero');
+        if ($contentScale === 1.0) return $this;
+
+        $inflate = static fn (float $value): float => $value / $contentScale;
+
+        return new self(
+            html: $this->html,
+            css: $this->css,
+            viewportWidth: $inflate($this->viewportWidth),
+            viewportHeight: $inflate($this->viewportHeight),
+            pageWidth: $inflate($this->pageWidth),
+            pageHeight: $inflate($this->pageHeight),
+            margins: array_map($inflate, $this->margins),
+            fontConfig: $this->fontConfig,
+            resourceBaseDir: $this->resourceBaseDir,
+            contentScale: 1.0,
         );
     }
 
