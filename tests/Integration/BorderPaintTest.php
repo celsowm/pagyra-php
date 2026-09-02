@@ -56,18 +56,33 @@ final class BorderPaintTest extends TestCase
         self::assertStringContainsString("0.066667 0.133333 0.2 rg\n", $pdf);
     }
 
-    public function testUnsupportedDashedBorderIsNotPaintedAsSolid(): void
+    public function testDashedBorderIsNotPaintedAsOneSolidRun(): void
     {
+        // Written when `dashed` was unpainted, asserting an empty display list was better than a
+        // solid rectangle pretending to be a dash pattern. Dashed is painted now, so what still
+        // has to hold is the same thing: each side comes out as several separated segments, never
+        // as a single run spanning the whole edge.
         $prepared = Pagyra::prepareHtmlRender([
             'html' => '<div style="margin:0;width:40px;height:20px;border:0;border-width:3px;border-style:dashed;border-color:red"></div>',
             'viewportWidth' => 200,
             'viewportHeight' => 120,
         ]);
 
-        $borders = array_values(array_filter(
+        $top = array_values(array_filter(
             $prepared->displayList?->pages[0]->commands ?? [],
-            static fn (object $command): bool => $command instanceof BorderPaintCommand,
+            static fn (object $command): bool => $command instanceof BorderPaintCommand && $command->side === 'top',
         ));
-        self::assertSame([], $borders);
+
+        self::assertGreaterThan(1, count($top), 'a borda tracejada saiu como um traco unico');
+        foreach ($top as $segment) {
+            self::assertLessThan(40.0, $segment->width, 'um segmento cobre a aresta inteira');
+        }
+
+        $gaps = [];
+        for ($i = 1, $count = count($top); $i < $count; $i++) {
+            $gaps[] = $top[$i]->x - ($top[$i - 1]->x + $top[$i - 1]->width);
+        }
+        self::assertNotSame([], $gaps);
+        foreach ($gaps as $gap) self::assertGreaterThan(0.0, $gap, 'segmentos encostados, sem intervalo');
     }
 }

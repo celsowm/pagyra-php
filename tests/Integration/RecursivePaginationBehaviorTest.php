@@ -87,7 +87,7 @@ final class RecursivePaginationBehaviorTest extends TestCase
     {
         $prepared = Pagyra::prepareHtmlRender([
             'html' => '<style>@page{size:300px 80px;margin:0} section,div,p{margin:0} p{white-space:pre;font-size:16px;line-height:20px}</style>'
-                . '<section><div style="height:40px"></div><p>one\ntwo\nthree</p></section>',
+                . '<section><div style="height:40px"></div><p>one' . "\n" . 'two' . "\n" . 'three</p></section>',
             'viewportWidth' => 300,
             'viewportHeight' => 80,
         ]);
