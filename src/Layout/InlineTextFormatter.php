@@ -545,16 +545,20 @@ final class InlineTextFormatter
 
     private function edgeMetrics(StyledNode $node, string $property, float $referenceWidth, float $fontSize): array
     {
+        // Negative margins are valid CSS and common in real headers (an <img> pulled left
+        // with `margin-left:-10px` to hang past its box); negative padding is not, so only
+        // `margin` keeps its sign here.
+        $allowNegative = $property === 'margin';
         $parts = $this->expandFour($node->style->get($property, '0') ?? '0');
         foreach (['top' => 0, 'right' => 1, 'bottom' => 2, 'left' => 3] as $side => $index) {
             $specific = $node->style->get($property . '-' . $side);
             if ($specific !== null) $parts[$index] = $specific;
         }
         return [
-            'top' => $this->resolveSimpleLength($parts[0], $referenceWidth, $fontSize, 0.0),
-            'right' => $this->resolveSimpleLength($parts[1], $referenceWidth, $fontSize, 0.0),
-            'bottom' => $this->resolveSimpleLength($parts[2], $referenceWidth, $fontSize, 0.0),
-            'left' => $this->resolveSimpleLength($parts[3], $referenceWidth, $fontSize, 0.0),
+            'top' => $this->resolveSimpleLength($parts[0], $referenceWidth, $fontSize, 0.0, $allowNegative),
+            'right' => $this->resolveSimpleLength($parts[1], $referenceWidth, $fontSize, 0.0, $allowNegative),
+            'bottom' => $this->resolveSimpleLength($parts[2], $referenceWidth, $fontSize, 0.0, $allowNegative),
+            'left' => $this->resolveSimpleLength($parts[3], $referenceWidth, $fontSize, 0.0, $allowNegative),
         ];
     }
 
@@ -602,16 +606,17 @@ final class InlineTextFormatter
         return $value !== null && is_numeric($value) ? max(0.0, (float) $value) : 0.0;
     }
 
-    private function resolveSimpleLength(string $raw, float $referenceWidth, float $fontSize, float $fallback): float
+    private function resolveSimpleLength(string $raw, float $referenceWidth, float $fontSize, float $fallback, bool $allowNegative = false): float
     {
+        $floor = static fn (float $value): float => $allowNegative ? $value : max(0.0, $value);
         $raw = strtolower(trim($raw));
         if ($raw === '' || $raw === 'auto') return $fallback;
-        if (preg_match('/^(-?\d+(?:\.\d+)?)px$/', $raw, $m) === 1) return max(0.0, (float) $m[1]);
-        if (preg_match('/^(-?\d+(?:\.\d+)?)pt$/', $raw, $m) === 1) return max(0.0, Units::ptToPx((float) $m[1]));
-        if (preg_match('/^(-?\d+(?:\.\d+)?)em$/', $raw, $m) === 1) return max(0.0, (float) $m[1] * $fontSize);
-        if (preg_match('/^(-?\d+(?:\.\d+)?)rem$/', $raw, $m) === 1) return max(0.0, (float) $m[1] * self::ROOT_FONT_SIZE);
-        if (preg_match('/^(-?\d+(?:\.\d+)?)%$/', $raw, $m) === 1) return max(0.0, ((float) $m[1] / 100.0) * $referenceWidth);
-        return is_numeric($raw) ? max(0.0, (float) $raw) : $fallback;
+        if (preg_match('/^(-?\d+(?:\.\d+)?)px$/', $raw, $m) === 1) return $floor((float) $m[1]);
+        if (preg_match('/^(-?\d+(?:\.\d+)?)pt$/', $raw, $m) === 1) return $floor(Units::ptToPx((float) $m[1]));
+        if (preg_match('/^(-?\d+(?:\.\d+)?)em$/', $raw, $m) === 1) return $floor((float) $m[1] * $fontSize);
+        if (preg_match('/^(-?\d+(?:\.\d+)?)rem$/', $raw, $m) === 1) return $floor((float) $m[1] * self::ROOT_FONT_SIZE);
+        if (preg_match('/^(-?\d+(?:\.\d+)?)%$/', $raw, $m) === 1) return $floor(((float) $m[1] / 100.0) * $referenceWidth);
+        return is_numeric($raw) ? $floor((float) $raw) : $fallback;
     }
 
     private function splitWordToken(array $token, float $availableWidth): array
