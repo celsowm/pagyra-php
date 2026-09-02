@@ -70,7 +70,7 @@ final class Pagyra
 
         $pageFlow = PageFlow::fromPageProfile($pageStyle['height'], $pageStyle['margins']);
         $pagination = (new PaginationEngine())->paginate($layoutRoot, $pageFlow);
-        $displayList = (new DisplayListBuilder($sourceBytes))->build(
+        $displayList = (new DisplayListBuilder($sourceBytes, $textMetrics))->build(
             $pagination,
             $pageStyle['width'],
             $pageStyle['height'],
