@@ -110,7 +110,7 @@ final class InlineTextFormatter
             $lineBaseline = $this->ownBaseline($fontSize, $nominalHeight);
             $placements = [];
             $minTop = 0.0;
-            $maxBottom = $nominalHeight;
+            $maxBottom = 0.0;
 
             foreach ($lineTokens as $token) {
                 if ($token['kind'] === 'box') {
@@ -128,7 +128,12 @@ final class InlineTextFormatter
                 $maxBottom = max($maxBottom, $top + $token['lineHeight']);
             }
 
-            $lineHeight = $maxBottom - $minTop;
+            // The nominal height is a floor on the finished line, not a term measured in the
+            // unshifted frame: adding it there and then subtracting $minTop counted the shift
+            // twice, so a line mixing font sizes grew by however far its tallest run reached
+            // above the strut baseline (a 10px paragraph holding a 30px span came out 41px tall
+            // where the reference, and browsers, give 36).
+            $lineHeight = max($nominalHeight, $maxBottom - $minTop);
             $baseline = $cursorY + ($lineBaseline - $minTop);
             $runX = $x + $offset;
             $runs = [];

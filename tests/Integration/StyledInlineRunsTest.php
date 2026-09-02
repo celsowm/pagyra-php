@@ -49,7 +49,9 @@ final class StyledInlineRunsTest extends TestCase
         self::assertSame(30.0, $line->runs[1]->fontSize);
         self::assertSame($line->baseline, $line->runs[0]->baseline);
         self::assertSame($line->baseline, $line->runs[1]->baseline);
-        self::assertGreaterThan($line->runs[0]->y, $line->runs[1]->y);
+        // Baseline-aligned, so the 30px run starts higher on the page than the 10px ones: its
+        // own box is taller and its top sits further above the shared baseline.
+        self::assertLessThan($line->runs[0]->y, $line->runs[1]->y);
     }
 
     public function testWrappingKeepsStyledRunsOnTheirLines(): void
