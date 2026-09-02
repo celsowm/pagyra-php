@@ -22,9 +22,11 @@ final class TtfSubsetterTest extends TestCase
         $metrics = (new TtfParser())->parse($subset);
         self::assertSame(1000, $metrics->unitsPerEm);
         self::assertSame(3, count($metrics->advanceWidths));
+        // fontFixture() builds hmtx as `500 + gid * 10`, so the retained gids 0..2 measure
+        // 500/510/520. The previous 600/610 never matched the fixture this test itself writes.
         self::assertSame(500, $metrics->advanceWidth(0));
-        self::assertSame(600, $metrics->advanceWidth(1));
-        self::assertSame(610, $metrics->advanceWidth(2));
+        self::assertSame(510, $metrics->advanceWidth(1));
+        self::assertSame(520, $metrics->advanceWidth(2));
     }
 
     public function testCompositeGlyphKeepsReferencedComponent(): void

@@ -14,7 +14,7 @@ final class DescendantLineFragmentationTest extends TestCase
         $prepared = Pagyra::prepareHtmlRender([
             'html' => '<style>@page { size:200px 80px; margin:20px; }</style>'
                 . '<section style="margin:0">'
-                . '<p style="margin:0;white-space:pre;font-size:16px;line-height:20px">one\ntwo\nthree</p>'
+                . '<p style="margin:0;white-space:pre;font-size:16px;line-height:20px">one' . "\n" . 'two' . "\n" . 'three</p>'
                 . '</section>',
             'viewportWidth' => 200,
             'viewportHeight' => 80,
