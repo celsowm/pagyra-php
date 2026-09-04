@@ -32,12 +32,14 @@ final class TextLayoutTest extends TestCase
             'viewportHeight' => 600,
         ]);
 
+        // Two lines, not three: with no font-family declared the text is drawn in Times-Roman,
+        // where "hello hello" measures 68px and still fits the 70px width. The third line this
+        // used to expect came from the per-character estimate overstating that same string.
         $paragraph = $prepared->layoutRoot->children[0];
-        self::assertCount(3, $paragraph->lineBoxes);
-        self::assertSame(72.0, $paragraph->box->content->height);
+        self::assertCount(2, $paragraph->lineBoxes);
+        self::assertSame(48.0, $paragraph->box->content->height);
         self::assertSame(0.0, $paragraph->lineBoxes[0]->y);
         self::assertSame(24.0, $paragraph->lineBoxes[1]->y);
-        self::assertSame(48.0, $paragraph->lineBoxes[2]->y);
     }
 
     public function testHeadingAndParagraphOccupyRealVerticalSpace(): void

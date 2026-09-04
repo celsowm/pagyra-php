@@ -45,12 +45,21 @@ final class Base14TextMetricsTest extends TestCase
         self::assertEqualsWithDelta(83.3, $this->width('M', ['font-family' => 'Fonte Inexistente, Arial, serif']), 0.001);
     }
 
-    public function testUnmappedFamilyKeepsTheHeuristicEstimate(): void
+    public function testUnmappedOrAbsentFamilyFallsBackToTimesLikeTheSerializer(): void
     {
-        $heuristic = $this->width('MMMMMMMMMM', ['font-family' => 'Fonte Inexistente']);
+        // PdfSerializer::base14Font() ends in Times when nothing in the stack matches, and draws
+        // the run with it. Measuring these with the per-character estimate instead — which is
+        // what this did before — left every such run measured narrower than it is drawn, so the
+        // next run started on top of it.
+        self::assertEqualsWithDelta(889.0, $this->width('MMMMMMMMMM', ['font-family' => 'Fonte Inexistente']), 0.001);
+        self::assertEqualsWithDelta(889.0, $this->width('MMMMMMMMMM', []), 0.001);
+    }
 
-        self::assertNotSame(889.0, $heuristic);
-        self::assertSame($heuristic, $this->width('MMMMMMMMMM', []));
+    public function testFamilyNameIsMatchedAsASubstringLikeTheSerializer(): void
+    {
+        // "Arial Narrow" is no exact alias, but the serializer matches it on "arial" and draws
+        // Helvetica; the measurement has to reach the same face.
+        self::assertEqualsWithDelta(83.3, $this->width('M', ['font-family' => 'Arial Narrow']), 0.001);
     }
 
     public function testAccentedCharacterUsesItsOwnWinAnsiWidth(): void
