@@ -47,11 +47,19 @@ final class InlineTextFormatter
         );
 
         $lines = [];
+        // Indexes of lines closed by a forced break (`<br>`, or a newline under `white-space: pre`).
+        // CSS Text treats those exactly like the last line of the block for `text-align: justify`:
+        // they are not stretched. Without this, `<strong>Dr(a) FULANO DE TAL</strong><br>cargo` in a
+        // `text-align: justify` cell — the signature block of practically every judicial document in
+        // the corpus — has its first line stretched from margin to margin, spacing four words across
+        // the whole cell where wkhtmltopdf leaves them together at the left.
+        $forcedBreakLines = [];
         $current = [];
         $currentWidth = 0.0;
 
         foreach ($tokens as $token) {
             if ($token['kind'] === 'newline') {
+                $forcedBreakLines[count($lines)] = true;
                 $lines[] = $current;
                 $current = [];
                 $currentWidth = 0.0;
@@ -132,7 +140,8 @@ final class InlineTextFormatter
             $indentForLine = $lineIndex === 0 ? $textIndent : 0.0;
             $roomForLine = $availableWidth - $indentForLine;
             $isBlockLevelBoxLine = count($lineTokens) === 1 && ($lineTokens[0]['blockLevel'] ?? false);
-            $justify = !$isBlockLevelBoxLine && $alignment === 'justify' && !$isLastLine && $roomForLine > $lineWidth;
+            $justify = !$isBlockLevelBoxLine && $alignment === 'justify' && !$isLastLine
+                && !isset($forcedBreakLines[$lineIndex]) && $roomForLine > $lineWidth;
             $spaceCount = $justify ? $this->countSpaceTokens($lineTokens) : 0;
             $extraPerSpace = $spaceCount > 0 ? ($roomForLine - $lineWidth) / $spaceCount : 0.0;
             $offset = ($justify || $isBlockLevelBoxLine) ? 0.0 : $this->alignmentOffset($alignment, $lineWidth, $roomForLine);
