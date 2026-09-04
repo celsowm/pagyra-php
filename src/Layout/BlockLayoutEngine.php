@@ -10,6 +10,7 @@ use Pagyra\Fonts\HeuristicTextMetrics;
 use Pagyra\Fonts\TextMetrics;
 use Pagyra\Geometry\Edges;
 use Pagyra\Geometry\Rect;
+use Pagyra\Style\ComputedStyle;
 use Pagyra\Style\StyledNode;
 
 final class BlockLayoutEngine
@@ -297,15 +298,12 @@ final class BlockLayoutEngine
     }
 
     /**
-     * Lays out a `<table>` as a real grid of columns instead of stacking every row's cells
-     * into one another. Scoped to the shape virtually every real table in the motivating
-     * corpus takes (263 of 265 real-world documents with a `<table>`): a uniform grid of
-     * `<tr><td>` rows with no `colspan`, `rowspan`, or `<thead>`/`<tbody>` grouping. Those are
-     * read transparently (collectTableRows() looks through row-group wrappers) but colspan
-     * and rowspan are not: a spanning cell is treated as occupying exactly one column/row,
-     * which visually compresses the remaining columns rather than reproducing the intended
-     * span. `border-collapse`, per-column `<col>` width hints, and caption/footer semantics
-     * are not implemented either.
+     * Lays out a `<table>` as a real grid of columns and rows, honoring `colspan`, `rowspan`,
+     * and `border-collapse: collapse`. `<thead>`/`<tbody>`/`<tfoot>` wrappers are read through
+     * transparently (collectTableRows()); buildTableGrid() places every cell at its true
+     * (row, col) origin and reserves the extra columns/rows a span covers, so a spanning cell
+     * no longer visually compresses the columns after it. Per-column `<col>` width hints and
+     * caption/footer semantics remain unimplemented.
      *
      * Column widths follow the same overall shape as pagyra-js's real (min/max-content based)
      * table algorithm for its common "preferred widths fit" case: measure each column's
@@ -315,10 +313,17 @@ final class BlockLayoutEngine
      * intrinsicInlineSize/minIntrinsicInlineSize across every descendant) that this PHP port
      * does not have yet for arbitrary content. Each column's "natural width" here is instead
      * the widest single-line shrink-to-fit measurement (shrinkToFitWidth(), the same helper
-     * float layout uses) of any cell in that column; if the total exceeds the table's content
-     * width, columns are scaled down proportionally rather than the JS reference's min/max
-     * blend. For the real-world table shape above (short label/value pairs) this produces the
-     * same visual result; it is a simplification for anything wider or more content-heavy.
+     * float layout uses) of any cell touching that column; a colspanning cell's measured width
+     * is split evenly across the columns it covers, mirroring pagyra-js's own simplification
+     * for that case. If the total exceeds the table's content width, columns are scaled down
+     * proportionally rather than the JS reference's min/max blend.
+     *
+     * Row height for a rowspanning cell is reconciled the same incremental way: rows are laid
+     * out top to bottom, and once a spanning cell's own row range has closed, whatever height
+     * it still needs beyond what the non-spanning cells already gave those rows is added onto
+     * the last row it covers. The spanning cell's own box is then stretched down to that full
+     * span so its border/background covers it; its content stays anchored at the top, since
+     * this port has no vertical-align support for table cells yet.
      */
     private function layoutTable(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
     {
@@ -339,17 +344,21 @@ final class BlockLayoutEngine
         $contentY = $flowY + $margin->top + $border->top + $padding->top;
 
         $rows = $this->collectTableRows($styled);
-        $cellsPerRow = array_map(fn (StyledNode $tr): array => $this->collectTableCells($tr), $rows);
-        $columnCount = $cellsPerRow === [] ? 0 : max(array_map('count', $cellsPerRow));
+        [$placements, $columnCount] = $this->buildTableGrid($rows);
         if ($columnCount === 0) {
             return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, 0.0), $padding, $border, $margin), [], $fontSize);
         }
 
+        if ($this->isBorderCollapse($styled)) {
+            $placements = $this->collapseCellBorders($placements, $contentWidth, $containingHeight, $fontSize);
+        }
+
         $naturalColumnWidths = array_fill(0, $columnCount, 0.0);
-        foreach ($cellsPerRow as $cells) {
-            foreach ($cells as $c => $cell) {
-                $cellFontSize = $this->resolveFontSize($cell, $fontSize);
-                $naturalColumnWidths[$c] = max($naturalColumnWidths[$c], $this->shrinkToFitWidth($cell, $contentWidth, $cellFontSize));
+        foreach ($placements as $p) {
+            $cellFontSize = $this->resolveFontSize($p['cell'], $fontSize);
+            $share = $this->shrinkToFitWidth($p['cell'], $contentWidth, $cellFontSize) / $p['colSpan'];
+            for ($k = 0; $k < $p['colSpan']; $k++) {
+                $naturalColumnWidths[$p['col'] + $k] = max($naturalColumnWidths[$p['col'] + $k], $share);
             }
         }
         $totalNatural = array_sum($naturalColumnWidths);
@@ -369,21 +378,57 @@ final class BlockLayoutEngine
             $x += $w;
         }
 
-        $rowLayouts = [];
-        $rowY = $contentY;
-        foreach ($rows as $r => $tr) {
-            $cellLayouts = [];
-            $rowHeight = 0.0;
-            foreach ($cellsPerRow[$r] as $c => $cell) {
-                $cellLayout = $this->layoutBlock($cell, $columnX[$c], $rowY, $columnWidths[$c], $containingHeight, $fontSize, heightIsMinimum: true);
-                $cellLayouts[] = $cellLayout;
-                $rowHeight = max($rowHeight, $cellLayout->box->borderBox()->height);
+        $rowCount = count($rows);
+        $placementsByRow = array_fill(0, $rowCount, []);
+        foreach ($placements as $p) $placementsByRow[$p['row']][] = $p;
+
+        $rowHeights = array_fill(0, $rowCount, 0.0);
+        $rowY = array_fill(0, $rowCount + 1, $contentY);
+        $cellLayoutsByRow = array_fill(0, $rowCount, []);
+        $spanningByEndRow = array_fill(0, $rowCount, []);
+
+        for ($r = 0; $r < $rowCount; $r++) {
+            $singleRowHeight = 0.0;
+            foreach ($placementsByRow[$r] as $p) {
+                $spanWidth = array_sum(array_slice($columnWidths, $p['col'], $p['colSpan']));
+                $cellLayout = $this->layoutBlock($p['cell'], $columnX[$p['col']], $rowY[$r], $spanWidth, $containingHeight, $fontSize, heightIsMinimum: true);
+                $cellLayoutsByRow[$r][] = ['layout' => $cellLayout, 'placement' => $p];
+                $height = $cellLayout->box->borderBox()->height;
+                if ($p['rowSpan'] === 1) {
+                    $singleRowHeight = max($singleRowHeight, $height);
+                } else {
+                    $spanningByEndRow[$r + $p['rowSpan'] - 1][] = ['startRow' => $r, 'height' => $height];
+                }
             }
-            $rowLayouts[] = new LayoutNode($tr, new LayoutBox(new Rect($contentX, $rowY, $contentWidth, $rowHeight)), $cellLayouts, $this->resolveFontSize($tr, $fontSize));
-            $rowY += $rowHeight;
+            $rowHeights[$r] = $singleRowHeight;
+            foreach ($spanningByEndRow[$r] as $spanning) {
+                $spannedSoFar = array_sum(array_slice($rowHeights, $spanning['startRow'], $r - $spanning['startRow'] + 1));
+                if ($spanning['height'] > $spannedSoFar) {
+                    $rowHeights[$r] += $spanning['height'] - $spannedSoFar;
+                }
+            }
+            $rowY[$r + 1] = $rowY[$r] + $rowHeights[$r];
         }
 
-        return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $rowY - $contentY), $padding, $border, $margin), $rowLayouts, $fontSize);
+        $rowLayouts = [];
+        foreach ($rows as $r => $tr) {
+            $cellLayouts = [];
+            foreach ($cellLayoutsByRow[$r] as ['layout' => $cellLayout, 'placement' => $p]) {
+                if ($p['rowSpan'] > 1) {
+                    $spanHeight = $rowY[$r + $p['rowSpan']] - $rowY[$r];
+                    $box = $cellLayout->box;
+                    $extra = max(0.0, $spanHeight - $box->borderBox()->height);
+                    if ($extra > 0.0) {
+                        $stretched = new LayoutBox(new Rect($box->content->x, $box->content->y, $box->content->width, $box->content->height + $extra), $box->padding, $box->border, $box->margin);
+                        $cellLayout = new LayoutNode($cellLayout->source, $stretched, $cellLayout->children, $cellLayout->fontSize, $cellLayout->lineBoxes);
+                    }
+                }
+                $cellLayouts[] = $cellLayout;
+            }
+            $rowLayouts[] = new LayoutNode($tr, new LayoutBox(new Rect($contentX, $rowY[$r], $contentWidth, $rowHeights[$r])), $cellLayouts, $this->resolveFontSize($tr, $fontSize));
+        }
+
+        return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $rowY[$rowCount] - $contentY), $padding, $border, $margin), $rowLayouts, $fontSize);
     }
 
     /** @return list<StyledNode> descendant `<tr>` elements, looking through `<thead>`/`<tbody>`/`<tfoot>` wrappers. */
@@ -411,6 +456,103 @@ final class BlockLayoutEngine
             if (in_array(strtolower($child->node->tagName ?? ''), ['td', 'th'], true)) $cells[] = $child;
         }
         return $cells;
+    }
+
+    /**
+     * Places every `<td>`/`<th>` at its real (row, col) origin instead of assuming one cell per
+     * column/row: `rowspan` reserves the same column across the following rows via
+     * $occupiedUntilRow, and `colspan` claims the following column indices in the same row.
+     * An invalid or missing span (non-numeric, zero, negative) falls back to 1, matching this
+     * port's general stance of ignoring what it cannot parse rather than failing the render.
+     *
+     * @param list<StyledNode> $rows
+     * @return array{0: list<array{row:int,col:int,colSpan:int,rowSpan:int,cell:StyledNode}>, 1: int}
+     */
+    private function buildTableGrid(array $rows): array
+    {
+        $placements = [];
+        $occupiedUntilRow = [];
+        $columnCount = 0;
+        foreach ($rows as $r => $tr) {
+            $c = 0;
+            foreach ($this->collectTableCells($tr) as $cell) {
+                while (($occupiedUntilRow[$c] ?? -1) >= $r) $c++;
+                $colSpan = max(1, (int) ($cell->node->attribute('colspan') ?? '1'));
+                $rowSpan = max(1, (int) ($cell->node->attribute('rowspan') ?? '1'));
+                $placements[] = ['row' => $r, 'col' => $c, 'colSpan' => $colSpan, 'rowSpan' => $rowSpan, 'cell' => $cell];
+                for ($k = 0; $k < $colSpan; $k++) {
+                    $occupiedUntilRow[$c + $k] = max($occupiedUntilRow[$c + $k] ?? -1, $r + $rowSpan - 1);
+                }
+                $c += $colSpan;
+            }
+            $columnCount = max($columnCount, $c);
+        }
+        return [$placements, $columnCount];
+    }
+
+    private function isBorderCollapse(StyledNode $table): bool
+    {
+        return strtolower(trim($table->style->get('border-collapse', 'separate') ?? 'separate')) === 'collapse';
+    }
+
+    /**
+     * `border-collapse: collapse` folds each interior shared edge into a single border instead
+     * of letting both cells paint their own: for every pair of grid-adjacent cells, the thicker
+     * declared side wins (a tie keeps the earlier cell's side) and the other side is zeroed out
+     * on a border-adjusted copy of that cell's StyledNode. Only cell-to-cell adjacency is
+     * resolved this way; merging the table's own border into its edge cells is not implemented.
+     *
+     * @param list<array{row:int,col:int,colSpan:int,rowSpan:int,cell:StyledNode}> $placements
+     * @return list<array{row:int,col:int,colSpan:int,rowSpan:int,cell:StyledNode}>
+     */
+    private function collapseCellBorders(array $placements, float $widthReference, float $heightReference, float $fontSize): array
+    {
+        $ownerAt = [];
+        foreach ($placements as $i => $p) {
+            for ($r = $p['row']; $r < $p['row'] + $p['rowSpan']; $r++) {
+                for ($c = $p['col']; $c < $p['col'] + $p['colSpan']; $c++) {
+                    $ownerAt[$r][$c] = $i;
+                }
+            }
+        }
+
+        $zeroSides = array_fill(0, count($placements), []);
+        foreach ($placements as $i => $p) {
+            $right = $ownerAt[$p['row']][$p['col'] + $p['colSpan']] ?? null;
+            if ($right !== null && $right !== $i) {
+                [$loserIndex, $loserSide] = $this->collapsedLoser($placements, $i, 'right', $right, 'left', $widthReference, $heightReference, $fontSize);
+                $zeroSides[$loserIndex][] = $loserSide;
+            }
+            $bottom = $ownerAt[$p['row'] + $p['rowSpan']][$p['col']] ?? null;
+            if ($bottom !== null && $bottom !== $i) {
+                [$loserIndex, $loserSide] = $this->collapsedLoser($placements, $i, 'bottom', $bottom, 'top', $widthReference, $heightReference, $fontSize);
+                $zeroSides[$loserIndex][] = $loserSide;
+            }
+        }
+
+        foreach ($placements as $i => $p) {
+            if ($zeroSides[$i] !== []) $placements[$i]['cell'] = $this->withBorderSidesRemoved($p['cell'], $zeroSides[$i]);
+        }
+        return $placements;
+    }
+
+    /** @return array{0: int, 1: string} the [placement index, side] to zero out. */
+    private function collapsedLoser(array $placements, int $a, string $sideA, int $b, string $sideB, float $widthReference, float $heightReference, float $fontSize): array
+    {
+        $widthA = $this->resolveBorderEdges($placements[$a]['cell'], $widthReference, $heightReference, $fontSize)->{$sideA};
+        $widthB = $this->resolveBorderEdges($placements[$b]['cell'], $widthReference, $heightReference, $fontSize)->{$sideB};
+        return $widthA >= $widthB ? [$b, $sideB] : [$a, $sideA];
+    }
+
+    /** @param list<string> $sides */
+    private function withBorderSidesRemoved(StyledNode $cell, array $sides): StyledNode
+    {
+        $properties = $cell->style->properties;
+        foreach ($sides as $side) {
+            $properties['border-' . $side . '-style'] = 'none';
+            $properties['border-' . $side . '-width'] = '0';
+        }
+        return new StyledNode($cell->node, new ComputedStyle($properties), $cell->children);
     }
 
     /**
