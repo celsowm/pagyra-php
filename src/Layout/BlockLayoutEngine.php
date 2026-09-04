@@ -19,6 +19,8 @@ final class BlockLayoutEngine
 
     private readonly LengthParser $lengthParser;
     private readonly InlineTextFormatter $inlineTextFormatter;
+    /** @var array<int,bool> memoiza containsBlockLevelChild() por nó */
+    private array $containsBlockCache = [];
 
     public function __construct(
         private readonly float $viewportWidth,
@@ -34,16 +36,43 @@ final class BlockLayoutEngine
         return $this->layoutDocument($root);
     }
 
+    /**
+     * The root runs its children through the same flow segmentation the block path uses, so
+     * inline content sitting directly at the top level lands in an anonymous block instead of
+     * being skipped. It used to be skipped: the loop below only accepted block-level children,
+     * so `<p>a</p><foobar>texto</foobar><p>b</p>` — any element the UA sheet does not know, and
+     * these documents arrive full of them — lost "texto" without a word of warning.
+     */
     private function layoutDocument(StyledNode $root): LayoutNode
     {
         $children = [];
+        $lineBoxes = [];
         $cursorY = 0.0;
         $previousBorderBottom = null;
         $previousBottomMargin = 0.0;
         $float = new FloatRun(0.0, $this->viewportWidth);
 
-        foreach ($root->children as $child) {
-            if ($this->display($child) === 'none' || !$this->isBlockLevel($child)) continue;
+        foreach ($this->flowSegments($root) as $segment) {
+            if ($segment[0] === 'inline') {
+                if ($float->active) {
+                    $cursorY = max($cursorY, $float->bottom);
+                    $float = $float->reset(0.0, $this->viewportWidth);
+                }
+                $run = $this->inlineTextFormatter->layout(
+                    new StyledNode($root->node, $root->style, $segment[1]),
+                    0.0,
+                    $cursorY,
+                    $this->viewportWidth,
+                    self::ROOT_FONT_SIZE,
+                );
+                array_push($lineBoxes, ...$run->lines);
+                $cursorY += $run->height;
+                $previousBorderBottom = null;
+                $previousBottomMargin = 0.0;
+                continue;
+            }
+
+            $child = $segment[1];
             $childFontSize = $this->resolveFontSize($child, self::ROOT_FONT_SIZE);
 
             $side = $this->floatSide($child);
@@ -70,7 +99,7 @@ final class BlockLayoutEngine
         }
         if ($float->active) $cursorY = max($cursorY, $float->bottom);
 
-        return new LayoutNode($root, new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY))), $children, self::ROOT_FONT_SIZE);
+        return new LayoutNode($root, new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY))), $children, self::ROOT_FONT_SIZE, $lineBoxes);
     }
 
     /**
@@ -786,7 +815,46 @@ final class BlockLayoutEngine
      */
     private function isBlockLevel(StyledNode $node): bool
     {
-        return in_array($this->display($node), ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell', 'flex', 'grid'], true);
+        $display = $this->display($node);
+        if (in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell', 'flex', 'grid'], true)) {
+            return true;
+        }
+
+        // An element the UA sheet does not know resolves to `inline`, and an inline box holding
+        // block-level content is something this engine has nowhere to put: the inline formatter
+        // only lays out text and atomic boxes, so every block inside it — and all of its text —
+        // was silently dropped. `<article><secao-custom><p>…</p></secao-custom></article>`
+        // rendered as an empty page. Real documents reach us with wrappers like that: the corpus
+        // already carries `<mce:style>` from TinyMCE, and HTML pasted out of Word brings `<o:p>`.
+        //
+        // CSS answers this by splitting the inline box around the block (block-in-inline). This
+        // port has no such splitting, so it does the next best thing and treats the inline box as
+        // a block, which keeps the content and its own layout. `inline-block` is deliberately
+        // left out: it is already laid out as an atomic box, and promoting it would change how
+        // documents that use it today are rendered.
+        return $display === 'inline' && $this->containsBlockLevelChild($node);
+    }
+
+    /**
+     * Whether any child is block-level, memoized because isBlockLevel() consults this for every
+     * inline element on every pass and these documents nest spans deeply.
+     */
+    private function containsBlockLevelChild(StyledNode $node): bool
+    {
+        $key = spl_object_id($node);
+        if (isset($this->containsBlockCache[$key])) {
+            return $this->containsBlockCache[$key];
+        }
+        // Set before recursing so a cyclic structure cannot loop forever.
+        $this->containsBlockCache[$key] = false;
+
+        foreach ($node->children as $child) {
+            if ($child->node->type === 'element' && $this->isBlockLevel($child)) {
+                return $this->containsBlockCache[$key] = true;
+            }
+        }
+
+        return false;
     }
 
     private function resolveFontSize(StyledNode $node, float $parentFontSize): float
