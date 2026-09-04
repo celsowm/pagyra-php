@@ -59,31 +59,56 @@ final class StyleComputer
             return [];
         }
 
+        $hints = [];
+
         if ($node->isElement('table')) {
             $width = $this->borderAttributeWidth($node);
-            return $width === null ? [] : [
-                'border-style' => 'solid',
-                'border-width' => $width . 'px',
-                'border-color' => '#808080',
-            ];
-        }
-
-        if (!$node->isElement('td') && !$node->isElement('th')) {
-            return [];
-        }
-
-        for ($i = count($ancestors) - 1; $i >= 0; $i--) {
-            if (!$ancestors[$i]->isElement('table')) {
-                continue;
+            if ($width !== null) {
+                $hints = ['border-style' => 'solid', 'border-width' => $width . 'px', 'border-color' => '#808080'];
             }
-            return $this->borderAttributeWidth($ancestors[$i]) === null ? [] : [
-                'border-style' => 'solid',
-                'border-width' => '1px',
-                'border-color' => '#808080',
-            ];
+        } elseif ($node->isElement('td') || $node->isElement('th')) {
+            for ($i = count($ancestors) - 1; $i >= 0; $i--) {
+                if (!$ancestors[$i]->isElement('table')) {
+                    continue;
+                }
+                if ($this->borderAttributeWidth($ancestors[$i]) !== null) {
+                    $hints = ['border-style' => 'solid', 'border-width' => '1px', 'border-color' => '#808080'];
+                }
+                break;
+            }
         }
 
-        return [];
+        if ($node->isElement('table') || $node->isElement('td') || $node->isElement('th') || $node->isElement('col')) {
+            foreach (['width', 'height'] as $property) {
+                $value = $this->dimensionAttribute($node, $property);
+                if ($value !== null) {
+                    $hints[$property] = $value;
+                }
+            }
+        }
+
+        return $hints;
+    }
+
+    /**
+     * The `width`/`height` content attributes as a CSS length: a bare number is pixels, a trailing
+     * `%` stays a percentage, anything else is ignored. These carry the column proportions of real
+     * tables — the requisição grids of JFRJ/EPROC1 are `<table width="100%">` whose cells declare
+     * `width="378"` and `width="227"` and no CSS width at all, so dropping the attribute left the
+     * columns to be guessed from their text and put the dividing rule in the wrong place.
+     */
+    private function dimensionAttribute(Node $node, string $name): ?string
+    {
+        $raw = trim($node->attribute($name) ?? '');
+        if ($raw === '') {
+            return null;
+        }
+        if (str_ends_with($raw, '%')) {
+            $number = trim(substr($raw, 0, -1));
+            return is_numeric($number) && (float) $number >= 0 ? $number . '%' : null;
+        }
+
+        return is_numeric($raw) && (float) $raw >= 0 ? $raw . 'px' : null;
     }
 
     /** The attribute's value as a positive pixel width, or null when absent, invalid or zero. */

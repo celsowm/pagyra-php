@@ -356,7 +356,14 @@ final class BlockLayoutEngine
         $naturalColumnWidths = array_fill(0, $columnCount, 0.0);
         foreach ($placements as $p) {
             $cellFontSize = $this->resolveFontSize($p['cell'], $fontSize);
-            $share = $this->shrinkToFitWidth($p['cell'], $contentWidth, $cellFontSize) / $p['colSpan'];
+            // A cell that declares its own width states the column's preferred width; only a cell
+            // that leaves it auto has the column guessed from its content. Real grids carry those
+            // proportions and nothing else: `<td width="378">` next to `<td width="227">` is what
+            // puts the dividing rule at 62%, and measuring the text instead moved it wherever the
+            // longest line happened to fall.
+            $declared = $this->declaredWidth($p['cell'], $contentWidth, $containingHeight, $cellFontSize);
+            $preferred = $declared ?? $this->shrinkToFitWidth($p['cell'], $contentWidth, $cellFontSize);
+            $share = $preferred / $p['colSpan'];
             for ($k = 0; $k < $p['colSpan']; $k++) {
                 $naturalColumnWidths[$p['col'] + $k] = max($naturalColumnWidths[$p['col'] + $k], $share);
             }
@@ -391,7 +398,7 @@ final class BlockLayoutEngine
             $singleRowHeight = 0.0;
             foreach ($placementsByRow[$r] as $p) {
                 $spanWidth = array_sum(array_slice($columnWidths, $p['col'], $p['colSpan']));
-                $cellLayout = $this->layoutBlock($p['cell'], $columnX[$p['col']], $rowY[$r], $spanWidth, $containingHeight, $fontSize, heightIsMinimum: true);
+                $cellLayout = $this->layoutBlock($this->withUsedWidth($p['cell'], $spanWidth), $columnX[$p['col']], $rowY[$r], $spanWidth, $containingHeight, $fontSize, heightIsMinimum: true);
                 $cellLayoutsByRow[$r][] = ['layout' => $cellLayout, 'placement' => $p];
                 $height = $cellLayout->box->borderBox()->height;
                 if ($p['rowSpan'] === 1) {
@@ -544,6 +551,24 @@ final class BlockLayoutEngine
         return $widthA >= $widthB ? [$b, $sideB] : [$a, $sideA];
     }
 
+    /**
+     * Pins a cell to the width its column ended up with. A `width` on a table cell states the
+     * column's preferred width, not the cell's final one: once the columns have been sized (and
+     * the leftover space handed out), the cell fills its column. Without this the cell kept
+     * drawing at its own declared width inside a wider column, leaving an unpainted gap between
+     * the columns — visible the moment `<td width="378">` started being honored at all.
+     * `box-sizing: border-box` comes along so the border box is exactly the column, padding and
+     * border included.
+     */
+    private function withUsedWidth(StyledNode $cell, float $width): StyledNode
+    {
+        $properties = $cell->style->properties;
+        $properties['width'] = $width . 'px';
+        $properties['box-sizing'] = 'border-box';
+
+        return new StyledNode($cell->node, new ComputedStyle($properties), $cell->children);
+    }
+
     /** @param list<string> $sides */
     private function withBorderSidesRemoved(StyledNode $cell, array $sides): StyledNode
     {
@@ -619,6 +644,21 @@ final class BlockLayoutEngine
      * measured this way (they always fill $available, same as normal-flow auto width) since
      * no float in the motivating corpus has block children.
      */
+    /**
+     * The element's own `width`, resolved against the containing block, or null when it is `auto`
+     * (or absent). Percentages resolve against $widthReference, so `width: 50%` on a cell is half
+     * the table's content width.
+     */
+    private function declaredWidth(StyledNode $styled, float $widthReference, float $heightReference, float $fontSize): ?float
+    {
+        $value = $styled->style->get('width', 'auto') ?? 'auto';
+        if ($this->isAuto($value)) {
+            return null;
+        }
+
+        return max(0.0, $this->resolveLength($value, $widthReference, $fontSize, $widthReference, $heightReference, 'zero'));
+    }
+
     private function shrinkToFitWidth(StyledNode $styled, float $available, float $fontSize): float
     {
         if (!$this->hasInlineContent($styled)) return $available;
