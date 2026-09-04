@@ -31,10 +31,80 @@ final class StyleComputer
         return $this->computeNode($root, $rules, null, [], []);
     }
 
+    /**
+     * The `border` content attribute of `<table>`, which the HTML Standard's rendering section
+     * maps to CSS ("Tables" > presentational hints): a table with a valid non-zero border gets
+     * that width, and every cell in it gets a 1px border of its own regardless of the value.
+     * These are hints, not author CSS — they sit with the UA defaults so any real declaration
+     * (stylesheet or inline `style`) still wins.
+     *
+     * Real judicial documents rely on this constantly: `<table border="1">` with no border
+     * anywhere in the CSS is the single most common table in the corpus, and without the hint
+     * every one of those grids renders with no rules at all, which is nothing like what the
+     * wkhtmltopdf output (WebKit, which implements the hint) shows.
+     *
+     * Two deliberate departures from the spec's exact mapping, both because the paint layer
+     * would otherwise drop the border entirely: the style is `solid` rather than the spec's
+     * `outset`/`inset`, since DisplayListBuilder only paints `solid` today and an unpaintable
+     * style would leave the grid invisible again; and the color is pinned to a neutral grey
+     * instead of being left to `currentcolor`, which in these documents is frequently the blue
+     * of the surrounding heading text and would paint blue grids.
+     *
+     * @param list<Node> $ancestors
+     * @return array<string,string>
+     */
+    private function presentationalHints(Node $node, array $ancestors): array
+    {
+        if ($node->type !== 'element') {
+            return [];
+        }
+
+        if ($node->isElement('table')) {
+            $width = $this->borderAttributeWidth($node);
+            return $width === null ? [] : [
+                'border-style' => 'solid',
+                'border-width' => $width . 'px',
+                'border-color' => '#808080',
+            ];
+        }
+
+        if (!$node->isElement('td') && !$node->isElement('th')) {
+            return [];
+        }
+
+        for ($i = count($ancestors) - 1; $i >= 0; $i--) {
+            if (!$ancestors[$i]->isElement('table')) {
+                continue;
+            }
+            return $this->borderAttributeWidth($ancestors[$i]) === null ? [] : [
+                'border-style' => 'solid',
+                'border-width' => '1px',
+                'border-color' => '#808080',
+            ];
+        }
+
+        return [];
+    }
+
+    /** The attribute's value as a positive pixel width, or null when absent, invalid or zero. */
+    private function borderAttributeWidth(Node $table): ?int
+    {
+        $raw = trim($table->attribute('border') ?? '');
+        if ($raw === '' || !ctype_digit($raw)) {
+            return null;
+        }
+        $width = (int) $raw;
+
+        return $width > 0 ? $width : null;
+    }
+
     /** @param list<StyleRule> $rules @param list<Node> $ancestors @param array<string,string> $inheritedVariables */
     private function computeNode(Node $node, array $rules, ?ComputedStyle $parent, array $ancestors, array $inheritedVariables): StyledNode
     {
         $properties = $this->userAgentStyles->forNode($node);
+        foreach ($this->presentationalHints($node, $ancestors) as $property => $value) {
+            $properties[$property] = $value;
+        }
         if ($parent !== null) {
             foreach (self::INHERITED as $property) {
                 $value = $parent->get($property);
