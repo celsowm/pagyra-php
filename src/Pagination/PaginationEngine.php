@@ -206,7 +206,18 @@ final class PaginationEngine
         // PDF. This node's own fragment still spans only its own box, so it paints exactly the
         // same area as before and simply collapses to zero height on the pages it does not cover.
         [$subtreeStart, $subtreeEnd] = $this->subtreeExtent($node, $nodeOffsets);
-        if ($subtreeEnd <= $pageStart + self::EPSILON || $subtreeStart >= $pageEnd - self::EPSILON) {
+        if ($subtreeEnd - $subtreeStart <= self::EPSILON) {
+            // A degenerate (zero-height) subtree is a single point, not a range, and the range
+            // check below treats a point that lands exactly on a page boundary as touching
+            // neither page. anonymousBlockOfLines() in BlockLayoutEngine produces exactly this: a
+            // block that is legitimately zero-height in flow (the `height: 0 !important` the
+            // eproc/JFRJ letterhead puts on its logo wrapper, to pull the image out of flow via a
+            // negative margin) sitting right at a page's own content start. Ask the flow which
+            // page the point itself belongs to instead of range-comparing it against this page.
+            if ($flow->pageIndexAt($subtreeStart) !== $pageIndex) {
+                return null;
+            }
+        } elseif ($subtreeEnd <= $pageStart + self::EPSILON || $subtreeStart >= $pageEnd - self::EPSILON) {
             return null;
         }
 

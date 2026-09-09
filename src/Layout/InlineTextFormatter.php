@@ -330,6 +330,7 @@ final class InlineTextFormatter
             'padding' => $metrics['padding'],
             'border' => $metrics['border'],
             'contentLines' => $metrics['contentLines'],
+            'hasInlineFlowBaseline' => $metrics['hasInlineFlowBaseline'],
         ];
     }
 
@@ -416,6 +417,9 @@ final class InlineTextFormatter
      */
     private function atomicBoxBaseline(array $token): ?float
     {
+        if (!($token['hasInlineFlowBaseline'] ?? true)) {
+            return null;
+        }
         $lines = $token['contentLines'] ?? [];
         if ($lines === []) {
             return null;
@@ -470,8 +474,15 @@ final class InlineTextFormatter
         if ($node->node->isImage() || $node->node->isSvg()) {
             [$contentWidth, $contentHeight] = $this->imageContentSize($node, $referenceWidth, $fontSize, $margin, $padding, $border);
             $contentLines = [];
+            $hasInlineFlowBaseline = false;
         } else {
             [$contentWidth, $contentHeight, $contentLines] = $this->inlineBlockContentSize($node, $referenceWidth, $fontSize);
+            // contentLines still carries a synthetic line for a block-level replaced child (the
+            // display:block <img> collectTokens() approximates as an atomic box of its own — see
+            // the comment there) because DisplayListBuilder needs it to paint that child. But it
+            // is not a real line box, so atomicBoxBaseline() must not read a baseline out of it;
+            // see hasInlineFlowContent().
+            $hasInlineFlowBaseline = $this->hasInlineFlowContent($node);
         }
 
         $horizontalExtras = $margin['left'] + $margin['right'] + $padding['left'] + $padding['right'] + $border['left'] + $border['right'];
@@ -486,7 +497,44 @@ final class InlineTextFormatter
             'padding' => $padding,
             'border' => $border,
             'contentLines' => $contentLines,
+            'hasInlineFlowBaseline' => $hasInlineFlowBaseline,
         ];
+    }
+
+    /**
+     * Whether this node's own children include content collectTokens() places as genuine inline
+     * flow — text, or an element it tokenizes as an atomic inline box on its own account — as
+     * opposed to content it drops outright (a block-level non-replaced child) or only
+     * approximates with a synthetic line (a block-level replaced child).
+     *
+     * atomicBoxBaseline() uses this to decide whether the last of this node's contentLines is a
+     * real in-flow line box to align by. When it is not — this node's only content is a
+     * block-level replaced child — CSS 2.1 9.2.1.1/10.8.1 says the node has no line boxes at all,
+     * so its baseline should fall back the same way an empty atomic box's does. Without this, the
+     * eproc/JFRJ letterhead's `.brasao { display:inline-block; height:0 }` wrapping
+     * `img { display:block }` — the brasao-out-of-flow trick CollapsedInlineBlockLineTest and
+     * NegativeMarginInlineBlockImageTest already cover — had its baseline read off the image's
+     * own synthetic line, near the image's bottom edge, and the timbre text that follows was
+     * pushed down by roughly that image's height.
+     */
+    private function hasInlineFlowContent(StyledNode $node): bool
+    {
+        foreach ($node->children as $child) {
+            if ($child->node->type === 'text') {
+                if (trim($child->node->text ?? '') !== '') return true;
+                continue;
+            }
+            $display = strtolower($child->style->get('display', 'inline') ?? 'inline');
+            if ($display === 'none') continue;
+            $blockLevel = in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true);
+            if ($blockLevel) continue;
+            if ($child->node->isElement('br')) continue;
+            if ($child->node->isImage() || $child->node->isSvg() || in_array($display, ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'], true)) {
+                return true;
+            }
+            if ($this->hasInlineFlowContent($child)) return true;
+        }
+        return false;
     }
 
     private function imageContentSize(StyledNode $node, float $referenceWidth, float $fontSize, array $margin, array $padding, array $border): array
