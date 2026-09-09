@@ -153,7 +153,7 @@ final class InlineTextFormatter
 
             foreach ($lineTokens as $token) {
                 if ($token['kind'] === 'box') {
-                    $top = $this->boxTopOffset($token, $nominalHeight, $fontSize);
+                    $top = $this->boxTopOffset($token, $nominalHeight, $fontSize, $lineBaseline);
                     $placements[] = ['token' => $token, 'top' => $top, 'baseline' => null];
                     $minTop = min($minTop, $top);
                     $maxBottom = max($maxBottom, $top + $token['lineHeight']);
@@ -385,19 +385,43 @@ final class InlineTextFormatter
         };
     }
 
-    private function boxTopOffset(array $token, float $lineHeight, float $parentFontSize): float
+    private function boxTopOffset(array $token, float $lineHeight, float $parentFontSize, float $lineBaseline): float
     {
         $value = strtolower(trim($token['style']->get('vertical-align', 'baseline') ?? 'baseline'));
         $height = $token['lineHeight'];
+        $ownBaseline = $this->atomicBoxBaseline($token);
 
         return match ($value) {
             'bottom', 'text-bottom' => max($lineHeight - $height, 0.0),
             'middle' => ($lineHeight - $height) / 2.0,
             'sub' => $parentFontSize * 0.2,
             'super' => -$parentFontSize * 0.4,
-            'top', 'text-top', 'baseline' => 0.0,
-            default => -$this->numericVerticalShift($value, $parentFontSize, $height),
+            'top', 'text-top' => 0.0,
+            'baseline' => $ownBaseline === null ? 0.0 : $lineBaseline - $ownBaseline,
+            default => ($ownBaseline === null ? 0.0 : $lineBaseline - $ownBaseline)
+                - $this->numericVerticalShift($value, $parentFontSize, $height),
         };
+    }
+
+    /**
+     * Distance from an atomic box's top margin edge down to the baseline it aligns by, or null
+     * when the box has no in-flow line box to take one from (a replaced element, or an empty
+     * inline-block), in which case the caller keeps sitting it on the line top.
+     *
+     * CSS 2.1 10.8.1: the baseline of an inline-block is the baseline of its *last* in-flow line
+     * box, not its first. Taking the first put a box that wraps internally one line too low, so
+     * its opening line sat on the parent's baseline and every following line spilled underneath,
+     * out of reading order.
+     */
+    private function atomicBoxBaseline(array $token): ?float
+    {
+        $lines = $token['contentLines'] ?? [];
+        if ($lines === []) {
+            return null;
+        }
+        $last = $lines[array_key_last($lines)];
+
+        return $token['margin']['top'] + $token['border']['top'] + $token['padding']['top'] + $last->baseline;
     }
 
     private function ownBaseline(float $fontSize, float $lineHeight): float
