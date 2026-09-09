@@ -16,9 +16,14 @@ use PHPUnit\Framework\TestCase;
  * navegador emite quando alguem cola texto no editor de um sistema processual —, entao nao ha
  * folha morta nenhuma entre elas.
  *
- * As razoes seguem a tabela FONT_SIZE_KEYWORDS da referencia, inclusive nos dois pontos em que
- * ela se afasta do navegador: so `medium` e absoluto (16px) e as demais escalam o tamanho do
- * pai em vez de escalar a base.
+ * As razoes seguem a tabela FONT_SIZE_KEYWORDS da referencia, mas nao a forma como ela as
+ * aplica: `xx-small`..`xxx-large` sao palavras-chave absolutas (CSS Fonts), ancoradas em
+ * `medium` = 16px fixo, e ignoram o tamanho do pai; so `smaller`/`larger` sao relativas e
+ * escalam o pai de verdade. A referencia trata as duas categorias como relativas — checado
+ * contra o wkhtmltopdf, aqui `large` e `x-large` saem no mesmo tamanho em qualquer pai, e uma
+ * aninhada dentro da outra nao compoe (testAbsoluteKeywordsIgnoreTheParentSizeAndDoNotCompound
+ * abaixo). O timbre de EPROC1/PJE1 aninha exatamente `large` dentro de `x-large` no titulo, e
+ * saia gigante e sobreposto ao texto seguinte antes desta correcao.
  */
 final class FontSizeKeywordsTest extends TestCase
 {
@@ -70,7 +75,36 @@ final class FontSizeKeywordsTest extends TestCase
         // 13pt saia do tamanho do corpo e ocupava a largura toda.
         $herdado = $this->fontSize('font-size: 13pt', 'small');
         self::assertLessThan($this->fontSize('font-size: 13pt', 'medium'), $herdado);
-        self::assertEqualsWithDelta(13.0 * 96.0 / 72.0 * 0.89, $herdado, 0.01);
+        // Absoluta: 0.89 x medium (16px), independente do 13pt do pai.
+        self::assertEqualsWithDelta(0.89 * 16.0, $herdado, 0.01);
+    }
+
+    public function testAbsoluteKeywordsIgnoreTheParentSizeAndDoNotCompound(): void
+    {
+        // `large` da o mesmo tamanho em qualquer pai — nao e "1.2x o que o pai tiver".
+        self::assertEqualsWithDelta(
+            $this->fontSize('font-size: 8pt', 'large'),
+            $this->fontSize('font-size: 24px', 'large'),
+            0.01,
+        );
+
+        // `x-large` aninhado dentro de `large` da o mesmo tamanho que `x-large` sozinho — as
+        // palavras-chave absolutas nao se compoem entre si, ao contrario do que a referencia faz.
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<p style="font-size: large"><span style="font-size: x-large">X</span></p>',
+            'viewportWidth' => 600,
+            'viewportHeight' => 800,
+        ]);
+        $tamanho = null;
+        foreach ($prepared->displayList->pages as $page) {
+            foreach ($page->commands as $command) {
+                if ($command instanceof TextPaintCommand && trim($command->text) === 'X') {
+                    $tamanho = $command->fontSize;
+                }
+            }
+        }
+        self::assertNotNull($tamanho);
+        self::assertEqualsWithDelta($this->fontSize('font-size: 16px', 'x-large'), $tamanho, 0.01);
     }
 
     public function testImportantSuffixDoesNotDefeatTheKeyword(): void
