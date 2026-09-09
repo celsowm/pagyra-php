@@ -559,7 +559,16 @@ final class InlineTextFormatter
     private function maxContentWidth(StyledNode $node, float $fontSize, float $referenceWidth): float
     {
         $tokens = $this->collectTokens($node, $fontSize, $referenceWidth);
-        $line = 0.0;
+        // `text-indent` is inherited and narrows the first line of this box's own
+        // layout, so the intrinsic width has to carry it or the content wraps
+        // inside a box that was measured for a single line.
+        $line = max(0.0, $this->resolveSimpleLength(
+            trim($node->style->get('text-indent', '0') ?? '0'),
+            $referenceWidth,
+            $fontSize,
+            0.0,
+            true,
+        ));
         $max = 0.0;
         foreach ($tokens as $token) {
             if ($token['kind'] === 'newline') {
