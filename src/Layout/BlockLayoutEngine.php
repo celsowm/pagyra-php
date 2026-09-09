@@ -377,9 +377,13 @@ final class BlockLayoutEngine
      * Row height for a rowspanning cell is reconciled the same incremental way: rows are laid
      * out top to bottom, and once a spanning cell's own row range has closed, whatever height
      * it still needs beyond what the non-spanning cells already gave those rows is added onto
-     * the last row it covers. The spanning cell's own box is then stretched down to that full
-     * span so its border/background covers it; its content stays anchored at the top, since
-     * this port has no vertical-align support for table cells yet.
+     * the last row it covers.
+     *
+     * Every cell's box is then stretched down to the full height of the row (or row span) it
+     * occupies, matching pagyra-js's unconditional `cell.box.borderBoxHeight = spanHeight`
+     * (TableLayoutStrategy) so a short cell's borders/background still reach the row's bottom
+     * edge next to a taller sibling; its content stays anchored at the top, since this port has
+     * no vertical-align support for table cells yet.
      */
     private function layoutTable(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
     {
@@ -477,14 +481,12 @@ final class BlockLayoutEngine
         foreach ($rows as $r => $tr) {
             $cellLayouts = [];
             foreach ($cellLayoutsByRow[$r] as ['layout' => $cellLayout, 'placement' => $p]) {
-                if ($p['rowSpan'] > 1) {
-                    $spanHeight = $rowY[$r + $p['rowSpan']] - $rowY[$r];
-                    $box = $cellLayout->box;
-                    $extra = max(0.0, $spanHeight - $box->borderBox()->height);
-                    if ($extra > 0.0) {
-                        $stretched = new LayoutBox(new Rect($box->content->x, $box->content->y, $box->content->width, $box->content->height + $extra), $box->padding, $box->border, $box->margin);
-                        $cellLayout = new LayoutNode($cellLayout->source, $stretched, $cellLayout->children, $cellLayout->fontSize, $cellLayout->lineBoxes);
-                    }
+                $spanHeight = $rowY[$r + $p['rowSpan']] - $rowY[$r];
+                $box = $cellLayout->box;
+                $extra = max(0.0, $spanHeight - $box->borderBox()->height);
+                if ($extra > 0.0) {
+                    $stretched = new LayoutBox(new Rect($box->content->x, $box->content->y, $box->content->width, $box->content->height + $extra), $box->padding, $box->border, $box->margin);
+                    $cellLayout = new LayoutNode($cellLayout->source, $stretched, $cellLayout->children, $cellLayout->fontSize, $cellLayout->lineBoxes);
                 }
                 $cellLayouts[] = $cellLayout;
             }
