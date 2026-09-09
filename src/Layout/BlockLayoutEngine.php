@@ -4,17 +4,27 @@ declare(strict_types=1);
 
 namespace Pagyra\Layout;
 
+use Pagyra\Css\Length\FontSizeKeywords;
 use Pagyra\Css\Length\LengthParser;
 use Pagyra\Css\Length\LengthResolver;
+use Pagyra\Dom\Node;
 use Pagyra\Fonts\HeuristicTextMetrics;
 use Pagyra\Fonts\TextMetrics;
 use Pagyra\Geometry\Edges;
 use Pagyra\Geometry\Rect;
 use Pagyra\Style\ComputedStyle;
+use Pagyra\Style\StyleComputer;
 use Pagyra\Style\StyledNode;
 
 final class BlockLayoutEngine
 {
+    /**
+     * Tag name given to the boxes this engine generates itself (CSS anonymous block and table
+     * boxes). It cannot collide with a parsed element, so a layout tree can be told apart from
+     * the markup that produced it.
+     */
+    public const ANONYMOUS_TAG = '#anonymous';
+
     private const ROOT_FONT_SIZE = 16.0;
 
     private readonly LengthParser $lengthParser;
@@ -46,7 +56,6 @@ final class BlockLayoutEngine
     private function layoutDocument(StyledNode $root): LayoutNode
     {
         $children = [];
-        $lineBoxes = [];
         $cursorY = 0.0;
         $previousBorderBottom = null;
         $previousBottomMargin = 0.0;
@@ -65,7 +74,12 @@ final class BlockLayoutEngine
                     $this->viewportWidth,
                     self::ROOT_FONT_SIZE,
                 );
-                array_push($lineBoxes, ...$run->lines);
+                // Always an anonymous block here, never lines on the root itself: the pagination
+                // walk starts at the root's children, so anything left on the root node was laid
+                // out and then never painted. `<p>a</p>solto<p>b</p>` lost "solto" that way, and
+                // an <img> or a bare text node directly under <body> went the same way — the
+                // layout tree had it, the display list and the PDF did not.
+                $children[] = $this->anonymousBlockOfLines($root, $run->lines, 0.0, $cursorY, $this->viewportWidth, $run->height, self::ROOT_FONT_SIZE);
                 $cursorY += $run->height;
                 $previousBorderBottom = null;
                 $previousBottomMargin = 0.0;
@@ -99,7 +113,8 @@ final class BlockLayoutEngine
         }
         if ($float->active) $cursorY = max($cursorY, $float->bottom);
 
-        return new LayoutNode($root, new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY))), $children, self::ROOT_FONT_SIZE, $lineBoxes);
+        // No lineBoxes of its own: everything inline became an anonymous block child above.
+        return new LayoutNode($root, new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY))), $children, self::ROOT_FONT_SIZE);
     }
 
     /**
@@ -157,6 +172,14 @@ final class BlockLayoutEngine
         $float = new FloatRun($contentX, $contentX + $contentWidth);
 
         $lineBoxes = [];
+        // CSS 2.1 9.2.1.1: a block container holding both inline and block-level content wraps
+        // each run of inline content in an anonymous block box. Without that the lines were all
+        // appended to this node's own lineBoxes while the blocks went to its children, and the
+        // paint walk emits every line of a node before any of its children — so the inline text
+        // that belongs *after* a block came out of the PDF before it. The geometry was right, the
+        // order of the drawing operations was not, which is what anyone copying text out of the
+        // decision gets. A block whose content is all inline keeps its lines on itself, as before.
+        $wrapsInlineInAnonymousBlocks = $this->hasMixedFlow($segments);
 
         foreach ($segments as $segment) {
             if ($segment[0] === 'inline') {
@@ -171,7 +194,11 @@ final class BlockLayoutEngine
                     $contentWidth,
                     $fontSize,
                 );
-                array_push($lineBoxes, ...$run->lines);
+                if ($wrapsInlineInAnonymousBlocks) {
+                    $children[] = $this->anonymousBlockOfLines($styled, $run->lines, $contentX, $cursorY, $contentWidth, $run->height, $fontSize);
+                } else {
+                    array_push($lineBoxes, ...$run->lines);
+                }
                 $cursorY += $run->height;
                 // An inline run between two blocks separates their margins, so nothing collapses
                 // across it — and it also ends the run of leading children whose top margin
@@ -467,31 +494,163 @@ final class BlockLayoutEngine
         return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $rowY[$rowCount] - $contentY), $padding, $border, $margin), $rowLayouts, $fontSize);
     }
 
-    /** @return list<StyledNode> descendant `<tr>` elements, looking through `<thead>`/`<tbody>`/`<tfoot>` wrappers. */
+    /**
+     * Whether this block container mixes inline and block-level content, the condition CSS 2.1
+     * 9.2.1.1 puts on generating anonymous block boxes.
+     *
+     * @param list<array{0:'inline'|'block',1:list<StyledNode>|StyledNode}> $segments
+     */
+    private function hasMixedFlow(array $segments): bool
+    {
+        $hasInline = false;
+        $hasBlock = false;
+        foreach ($segments as $segment) {
+            if ($segment[0] === 'inline') $hasInline = true;
+            else $hasBlock = true;
+            if ($hasInline && $hasBlock) return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * An anonymous block box holding one run of inline lines. It carries only the inheritable
+     * properties of the block that generated it, so it never repeats that block's border,
+     * padding or background around content it is merely rehoming, and its own box has no edges
+     * of its own — the lines were already positioned by the inline formatter.
+     *
+     * @param list<LineBox> $lines
+     */
+    private function anonymousBlockOfLines(StyledNode $source, array $lines, float $x, float $y, float $width, float $height, float $fontSize): LayoutNode
+    {
+        $properties = ['display' => 'block'];
+        foreach (StyleComputer::INHERITED as $property) {
+            $value = $source->style->get($property);
+            if ($value !== null) $properties[$property] = $value;
+        }
+        $styled = new StyledNode(Node::element(self::ANONYMOUS_TAG, [], []), new ComputedStyle($properties));
+        $zero = new Edges(0.0, 0.0, 0.0, 0.0);
+
+        return new LayoutNode($styled, new LayoutBox(new Rect($x, $y, $width, $height), $zero, $zero, $zero), [], $fontSize, $lines);
+    }
+
+    /**
+     * The rows of a table, read by computed `display` and no longer by tag name, with anonymous
+     * table boxes generated around anything that is not a row (CSS 2.1 17.2.1).
+     *
+     * Both halves of this were losing content. Matching `<tr>`/`<tbody>` by tag name meant a row
+     * written as `<div style="display:table-row">` was skipped, and the reference reads its rows
+     * off `child.style.display` (pagyra-js `src/layout/strategies/table.ts`), so that half was a
+     * plain divergence. The other half is that any child which is neither a row nor a row group
+     * was dropped outright: with no rows left the caller sees `columnCount === 0` and returns an
+     * empty box, so the whole subtree vanished from the PDF without an error.
+     *
+     * That is not a corner case in these documents. The CKEditor stylesheet the eproc and the JFRJ
+     * embed carries `.table { display: table }` and the markup is `<figure class="table"><table>`,
+     * so the real `<table>` becomes a non-row child of an outer table box — and three corpus
+     * documents lost a whole table that way, one of them the table of levels of scientific
+     * evidence that a decision is reasoned on. `<table><p>x</p></table>` and a bare text child had
+     * the same fate.
+     *
+     * Anonymous generation is where this goes past the reference, which drops those children too
+     * (AGENTS.md item 5): a run of consecutive non-row children is wrapped in one anonymous row
+     * holding one anonymous cell, which is what the spec asks for and what a browser shows.
+     * Whitespace-only text between rows generates nothing, so ordinary indented markup does not
+     * grow an empty row.
+     *
+     * @return list<StyledNode>
+     */
     private function collectTableRows(StyledNode $table): array
     {
         $rows = [];
+        $pending = [];
+
+        $flushPending = function () use (&$pending, &$rows, $table): void {
+            if ($pending === []) return;
+            $cell = $this->anonymousTableBox($table, 'table-cell', $pending);
+            $rows[] = $this->anonymousTableBox($table, 'table-row', [$cell]);
+            $pending = [];
+        };
+
         foreach ($table->children as $child) {
-            if ($child->node->type !== 'element') continue;
-            $tag = strtolower($child->node->tagName ?? '');
-            if ($tag === 'tr') {
+            $display = $this->display($child);
+            if ($display === 'none') continue;
+
+            if ($display === 'table-row') {
+                $flushPending();
                 $rows[] = $child;
-            } elseif (in_array($tag, ['tbody', 'thead', 'tfoot'], true)) {
-                array_push($rows, ...$this->collectTableRows($child));
+                continue;
             }
+            if (in_array($display, ['table-row-group', 'table-header-group', 'table-footer-group'], true)) {
+                $flushPending();
+                array_push($rows, ...$this->collectTableRows($child));
+                continue;
+            }
+            // Column boxes and captions are not rows and generate no anonymous ones either; the
+            // port has no layout for them yet, but swallowing them silently is right, unlike
+            // swallowing content.
+            if (in_array($display, ['table-column', 'table-column-group', 'table-caption'], true)) continue;
+            if ($child->node->type === 'text' && trim($child->node->text ?? '') === '') continue;
+
+            $pending[] = $child;
         }
+        $flushPending();
+
         return $rows;
     }
 
-    /** @return list<StyledNode> direct `<td>`/`<th>` children of a `<tr>`. */
+    /**
+     * The cells of a row, by computed `display`, wrapping any run of non-cell children in one
+     * anonymous cell for the same reason rows are wrapped above.
+     *
+     * @return list<StyledNode>
+     */
     private function collectTableCells(StyledNode $row): array
     {
         $cells = [];
+        $pending = [];
+
+        $flushPending = function () use (&$pending, &$cells, $row): void {
+            if ($pending === []) return;
+            $cells[] = $this->anonymousTableBox($row, 'table-cell', $pending);
+            $pending = [];
+        };
+
         foreach ($row->children as $child) {
-            if ($child->node->type !== 'element') continue;
-            if (in_array(strtolower($child->node->tagName ?? ''), ['td', 'th'], true)) $cells[] = $child;
+            $display = $this->display($child);
+            if ($display === 'none') continue;
+
+            if ($display === 'table-cell') {
+                $flushPending();
+                $cells[] = $child;
+                continue;
+            }
+            if ($child->node->type === 'text' && trim($child->node->text ?? '') === '') continue;
+
+            $pending[] = $child;
         }
+        $flushPending();
+
         return $cells;
+    }
+
+    /**
+     * An anonymous table box: it carries only the inheritable properties of the element that
+     * generated it plus the `display` it was generated as, so it never picks up that element's
+     * border, padding or background — which would double the table's own frame around content
+     * that is merely being rehomed.
+     *
+     * @param list<StyledNode> $children
+     */
+    private function anonymousTableBox(StyledNode $source, string $display, array $children): StyledNode
+    {
+        $properties = ['display' => $display];
+        foreach (StyleComputer::INHERITED as $property) {
+            $value = $source->style->get($property);
+            if ($value !== null) $properties[$property] = $value;
+        }
+
+        return new StyledNode(Node::element(self::ANONYMOUS_TAG, [], []), new ComputedStyle($properties), $children);
     }
 
     /**
@@ -861,6 +1020,8 @@ final class BlockLayoutEngine
     {
         $value = $node->style->get('font-size');
         if ($value === null) return $parentFontSize;
+        $keyword = FontSizeKeywords::resolve($value, $parentFontSize);
+        if ($keyword !== null) return $keyword;
         return max(0.0, $this->resolveLength($value, $parentFontSize, $parentFontSize, $this->viewportWidth, $this->viewportHeight, 'zero'));
     }
 

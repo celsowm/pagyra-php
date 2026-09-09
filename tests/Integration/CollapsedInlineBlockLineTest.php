@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Tests\Integration;
 
+use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Pagyra;
 use PHPUnit\Framework\TestCase;
 
@@ -35,9 +36,11 @@ final class CollapsedInlineBlockLineTest extends TestCase
             . '</div>',
         );
 
-        // wrapper: [anonymous inline line for the span] then the <p>
-        self::assertSame(0.0, $wrapper->lineBoxes[0]->height);
-        self::assertSame(0.0, $wrapper->children[0]->box->content->y);
+        // wrapper: a caixa de bloco anonima com a linha do span, e depois o <p>
+        $anonymous = $wrapper->children[0];
+        self::assertSame(BlockLayoutEngine::ANONYMOUS_TAG, $anonymous->source->node->tagName);
+        self::assertSame(0.0, $anonymous->lineBoxes[0]->height);
+        self::assertSame(0.0, $wrapper->children[1]->box->content->y);
     }
 
     public function testInlineBlockWithHeightStillGetsALineBox(): void
@@ -49,8 +52,8 @@ final class CollapsedInlineBlockLineTest extends TestCase
             . '</div>',
         );
 
-        self::assertGreaterThanOrEqual(12.0, $wrapper->lineBoxes[0]->height);
-        self::assertGreaterThanOrEqual(12.0, $wrapper->children[0]->box->content->y);
+        self::assertGreaterThanOrEqual(12.0, $wrapper->children[0]->lineBoxes[0]->height);
+        self::assertGreaterThanOrEqual(12.0, $wrapper->children[1]->box->content->y);
     }
 
     public function testConsecutiveBrStillProducesAStrutTallEmptyLine(): void

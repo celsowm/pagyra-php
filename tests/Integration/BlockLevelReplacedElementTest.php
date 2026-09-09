@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Tests\Integration;
 
+use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Pagyra;
 use Pagyra\Paint\ImagePaintCommand;
 use Pagyra\Core\PreparedRender;
@@ -123,11 +124,15 @@ final class BlockLevelReplacedElementTest extends TestCase
             '<div style="width:400px;margin:0"><p style="margin:0">primeiro</p>solto<p style="margin:0">terceiro</p></div>',
         );
 
+        // Conteudo inline entre dois blocos vive agora numa caixa de bloco anonima (CSS 2.1
+        // 9.2.1.1), e nao mais nas lineBoxes do proprio container, para que a ordem de pintura
+        // acompanhe a ordem do documento.
         $container = $prepared->layoutRoot->children[0];
-        [$first, $third] = $container->children;
-        self::assertCount(1, $container->lineBoxes);
+        [$first, $anonymous, $third] = $container->children;
+        self::assertSame(BlockLayoutEngine::ANONYMOUS_TAG, $anonymous->source->node->tagName);
+        self::assertCount(1, $anonymous->lineBoxes);
 
-        $loose = $container->lineBoxes[0];
+        $loose = $anonymous->lineBoxes[0];
         self::assertSame('solto', $loose->text);
         self::assertGreaterThanOrEqual($first->box->borderBox()->bottom(), $loose->y);
         self::assertGreaterThanOrEqual($loose->y + $loose->height, $third->box->content->y);
@@ -138,11 +143,13 @@ final class BlockLevelReplacedElementTest extends TestCase
         $prepared = $this->render('<div style="width:400px;margin:0">antes<p style="margin:0">bloco</p></div>');
 
         $container = $prepared->layoutRoot->children[0];
-        self::assertSame('antes', $container->lineBoxes[0]->text);
-        self::assertSame(0.0, $container->lineBoxes[0]->y);
+        $anonymous = $container->children[0];
+        self::assertSame(BlockLayoutEngine::ANONYMOUS_TAG, $anonymous->source->node->tagName);
+        self::assertSame('antes', $anonymous->lineBoxes[0]->text);
+        self::assertSame(0.0, $anonymous->lineBoxes[0]->y);
         self::assertGreaterThanOrEqual(
-            $container->lineBoxes[0]->height,
-            $container->children[0]->box->content->y,
+            $anonymous->lineBoxes[0]->height,
+            $container->children[1]->box->content->y,
         );
     }
 

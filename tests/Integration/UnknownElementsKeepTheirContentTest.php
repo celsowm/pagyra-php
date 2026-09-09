@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Pagyra\Tests\Integration;
 
-use Pagyra\Layout\LayoutNode;
 use Pagyra\Pagyra;
+use Pagyra\Paint\TextPaintCommand;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -15,7 +15,16 @@ use PHPUnit\Framework\TestCase;
  */
 final class UnknownElementsKeepTheirContentTest extends TestCase
 {
-    /** @return list<array{0:float,1:string}> todo texto renderizado, com o y da linha */
+    /**
+     * Todo texto que chega ao papel, na ordem em que e desenhado.
+     *
+     * Antes isto percorria a arvore de layout e ainda ordenava por y, e as duas coisas escondiam
+     * defeito: conteudo que era diagramado e depois nunca pintado passava no teste, e a ordenacao
+     * por y disfarcava qualquer troca de ordem entre as operacoes de desenho. Ler a display list
+     * na ordem de emissao e ler o que o PDF de fato tem, que e o que este teste quer garantir.
+     *
+     * @return list<array{0:float,1:string}> pares de y e texto
+     */
     private function textoRenderizado(string $html): array
     {
         $prepared = Pagyra::prepareHtmlRender([
@@ -25,22 +34,17 @@ final class UnknownElementsKeepTheirContentTest extends TestCase
         ]);
 
         $itens = [];
-        $percorre = function (LayoutNode $no) use (&$percorre, &$itens): void {
-            foreach ($no->lineBoxes as $linha) {
-                foreach ($linha->runs as $run) {
-                    $texto = trim($run->text);
-                    if ($texto !== '') {
-                        $itens[] = [$run->y, $texto];
-                    }
+        foreach ($prepared->displayList->pages as $pagina) {
+            foreach ($pagina->commands as $comando) {
+                if (!$comando instanceof TextPaintCommand) {
+                    continue;
+                }
+                $texto = trim($comando->text);
+                if ($texto !== '') {
+                    $itens[] = [$comando->y, $texto];
                 }
             }
-            foreach ($no->children as $filho) {
-                $percorre($filho);
-            }
-        };
-        $percorre($prepared->layoutRoot);
-
-        usort($itens, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+        }
 
         return $itens;
     }

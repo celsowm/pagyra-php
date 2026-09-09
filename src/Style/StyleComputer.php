@@ -11,11 +11,35 @@ use Pagyra\Dom\Node;
 
 final class StyleComputer
 {
-    private const INHERITED = [
+    /**
+     * The properties an anonymous box has to carry down from the element it was generated for
+     * (BlockLayoutEngine::anonymousTableBox()), which is why this is not private.
+     */
+    public const INHERITED = [
         'color', 'font-family', 'font-size', 'font-style', 'font-weight',
         'line-height', 'text-align', 'text-indent', 'visibility', 'white-space',
         'text-decoration', 'text-decoration-line',
         'x-link-href',
+    ];
+
+    /**
+     * Initial values for the inherited properties this port understands, used by `initial` (and
+     * only there: `revert`/`unset` want the UA value, which is what dropping the declaration
+     * already gives). `font-family` is deliberately absent — the port has no single named default
+     * family to reset to, and no corpus document asks for it.
+     */
+    private const INITIAL = [
+        'color' => '#000000',
+        'font-size' => 'medium',
+        'font-style' => 'normal',
+        'font-weight' => 'normal',
+        'line-height' => 'normal',
+        'text-align' => 'start',
+        'text-indent' => '0',
+        'visibility' => 'visible',
+        'white-space' => 'normal',
+        'text-decoration' => 'none',
+        'text-decoration-line' => 'none',
     ];
 
     public function __construct(
@@ -87,7 +111,121 @@ final class StyleComputer
             }
         }
 
+        foreach ($this->remainingHints($node, $ancestors) as $property => $value) {
+            $hints[$property] = $value;
+        }
+
         return $hints;
+    }
+
+    /**
+     * The rest of the HTML Standard's presentational hints that these documents actually rely on,
+     * measured against the corpus rather than transcribed wholesale from the spec.
+     *
+     * `align` is the one that decides anything: 1622 `<p align>` in 422 documents, though in 1447
+     * of those the same element also carries `text-align` in its `style`, which beats a hint — so
+     * 25 documents are the ones where dropping it left a heading flush left that should have been
+     * centred. `cellpadding`/`cellspacing` (12 and 24 documents) matter because without them
+     * every cell falls back to the UA sheet's 8px padding, so a grid written `cellpadding="0"`
+     * came out far looser than the wkhtmltopdf output. `hr size` (30 documents) is the rule's
+     * thickness, and `hspace`/`vspace`/`border` on `<img>` (46 documents) its margins and frame.
+     *
+     * These are hints, so they sit with the UA defaults and any author declaration still wins.
+     *
+     * @param list<Node> $ancestors
+     * @return array<string,string>
+     */
+    private function remainingHints(Node $node, array $ancestors): array
+    {
+        $hints = [];
+
+        // `align` maps to `text-align` on a block container, and the two edge values are the
+        // ones the spec spells out; `middle` is `center`. On <img> it is a float instead, which
+        // is left alone here: no corpus document depends on it and floating an image is a much
+        // larger behavioural change than aligning text.
+        if (!$node->isElement('img')) {
+            $align = strtolower(trim($node->attribute('align') ?? ''));
+            $textAlign = match ($align) {
+                'center', 'middle' => 'center',
+                'left' => 'left',
+                'right' => 'right',
+                'justify' => 'justify',
+                default => null,
+            };
+            if ($textAlign !== null) {
+                $hints['text-align'] = $textAlign;
+            }
+        }
+
+        if ($node->isElement('td') || $node->isElement('th')) {
+            $padding = $this->nonNegativeIntegerAttribute($this->nearestTable($ancestors), 'cellpadding');
+            if ($padding !== null) {
+                foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                    $hints['padding-' . $side] = $padding . 'px';
+                }
+            }
+            $valign = strtolower(trim($node->attribute('valign') ?? ''));
+            if (in_array($valign, ['top', 'middle', 'bottom', 'baseline'], true)) {
+                $hints['vertical-align'] = $valign;
+            }
+        }
+
+        if ($node->isElement('table')) {
+            $spacing = $this->nonNegativeIntegerAttribute($node, 'cellspacing');
+            if ($spacing !== null) {
+                $hints['border-spacing'] = $spacing . 'px';
+            }
+        }
+
+        if ($node->isElement('hr')) {
+            $size = $this->nonNegativeIntegerAttribute($node, 'size');
+            if ($size !== null && $size > 0) {
+                $hints['border-top-width'] = $size . 'px';
+            }
+        }
+
+        if ($node->isElement('img')) {
+            $hspace = $this->nonNegativeIntegerAttribute($node, 'hspace');
+            if ($hspace !== null) {
+                $hints['margin-left'] = $hspace . 'px';
+                $hints['margin-right'] = $hspace . 'px';
+            }
+            $vspace = $this->nonNegativeIntegerAttribute($node, 'vspace');
+            if ($vspace !== null) {
+                $hints['margin-top'] = $vspace . 'px';
+                $hints['margin-bottom'] = $vspace . 'px';
+            }
+            $border = $this->nonNegativeIntegerAttribute($node, 'border');
+            if ($border !== null) {
+                $hints['border-width'] = $border . 'px';
+                $hints['border-style'] = $border > 0 ? 'solid' : 'none';
+            }
+        }
+
+        return $hints;
+    }
+
+    /** @param list<Node> $ancestors */
+    private function nearestTable(array $ancestors): ?Node
+    {
+        for ($i = count($ancestors) - 1; $i >= 0; $i--) {
+            if ($ancestors[$i]->isElement('table')) {
+                return $ancestors[$i];
+            }
+        }
+
+        return null;
+    }
+
+    /** The attribute as a non-negative integer, or null when absent or not one. */
+    private function nonNegativeIntegerAttribute(?Node $node, string $name): ?int
+    {
+        if ($node === null) {
+            return null;
+        }
+        $raw = trim($node->attribute($name) ?? '');
+
+        return $raw !== '' && ctype_digit($raw) ? (int) $raw : null;
     }
 
     /**
@@ -121,6 +259,68 @@ final class StyleComputer
         $width = (int) $raw;
 
         return $width > 0 ? $width : null;
+    }
+
+
+    /**
+     * The CSS-wide keywords (`inherit`, `initial`, `unset`, `revert`), which no part of this port
+     * understood: the literal token was stored as if it were a value and carried all the way to
+     * the paint layer. `font-family: inherit` ended up as a family named "inherit", which matches
+     * nothing and drops the run into Times; `font-style: inherit` produced a font style of
+     * "inherit" instead of italic; `font-weight: inherit` inside a bold parent resolved to 400;
+     * `color: inherit` produced no colour at all; and `line-height: inherit` put a span on a
+     * different baseline from the text beside it on the same line.
+     *
+     * These are not exotic: 19 corpus documents carry 1368 of these declarations on the visual
+     * properties alone, 36 to 45 per document, because they are what a browser writes into the
+     * `style` attribute when text is pasted into the editors these systems use.
+     *
+     * The reference handles the keyword per property (font-weight.ts, compute-style/decoration.ts)
+     * rather than generally, so AGENTS.md's item 5 applies and this follows CSS Cascade: `inherit`
+     * takes the parent's computed value; `initial` and `revert` drop the author declaration, which
+     * in this port means falling back to whatever the UA sheet or a presentational hint already
+     * put there (the port has no table of per-property initial values, and for these documents the
+     * UA value is what both keywords should land on anyway); `unset` is `inherit` for an inherited
+     * property and the same drop for every other one.
+     *
+     * @param array<string,string> $properties the cascade so far, UA and hints already applied
+     * @return bool whether the value was a CSS-wide keyword and has been dealt with here
+     */
+    private function applyCssWideKeyword(array &$properties, string $property, string $value, ?ComputedStyle $parent): bool
+    {
+        $keyword = strtolower(trim($value));
+        if (!in_array($keyword, ['inherit', 'initial', 'unset', 'revert'], true)) {
+            return false;
+        }
+
+        $inheritsByDefault = in_array($property, self::INHERITED, true);
+        $takesParentValue = $keyword === 'inherit' || ($keyword === 'unset' && $inheritsByDefault);
+
+        if (!$takesParentValue) {
+            // `initial` asks for the property's own initial value, which for an inherited
+            // property is not at all the same as dropping the declaration: dropping would leave
+            // the value the parent handed down. `text-decoration-line: initial` is exactly that
+            // case in the corpus (334 declarations across 24 documents) and would keep the
+            // parent's underline instead of clearing it. So the inherited properties whose
+            // initial value this port can name are reset explicitly, and everything else falls
+            // back to dropping the author declaration — which is what `revert` means anyway and
+            // what `initial` lands on for a non-inherited property, since the UA sheet is the
+            // only thing underneath.
+            if ($keyword === 'initial' && array_key_exists($property, self::INITIAL)) {
+                $properties[$property] = self::INITIAL[$property];
+            }
+
+            return true;
+        }
+
+        $parentValue = $parent?->get($property);
+        if ($parentValue !== null) {
+            $properties[$property] = $parentValue;
+        } else {
+            unset($properties[$property]);
+        }
+
+        return true;
     }
 
     /** @param list<StyleRule> $rules @param list<Node> $ancestors @param array<string,string> $inheritedVariables */
@@ -176,7 +376,7 @@ final class StyleComputer
             foreach ($winners as $property => $winner) {
                 if (str_starts_with($property, '--')) {
                     $variables[$property] = $winner['value'];
-                } else {
+                } elseif (!$this->applyCssWideKeyword($properties, $property, $winner['value'], $parent)) {
                     $properties[$property] = $winner['value'];
                 }
             }

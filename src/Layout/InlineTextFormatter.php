@@ -9,6 +9,7 @@ use Pagyra\Fonts\TextMetrics;
 use Pagyra\Image\ReplacedElementSizingResolver;
 use Pagyra\Style\ComputedStyle;
 use Pagyra\Style\StyledNode;
+use Pagyra\Css\Length\FontSizeKeywords;
 use Pagyra\Units\Units;
 
 final class InlineTextFormatter
@@ -761,8 +762,11 @@ final class InlineTextFormatter
     {
         $slack = max(0.0, $availableWidth - $lineWidth);
         return match ($alignment) {
-            'center' => $slack / 2.0,
-            'right', 'end' => $slack,
+            // `-webkit-center` is the prefixed alias WebKit still honours, and wkhtmltopdf is
+            // WebKit, so seven corpus documents centre in the reference output and were coming
+            // out flush left here. The `-moz-` and `-webkit-` aliases of left/right go with it.
+            'center', '-webkit-center', '-moz-center' => $slack / 2.0,
+            'right', 'end', '-webkit-right', '-moz-right' => $slack,
             default => 0.0,
         };
     }
@@ -787,6 +791,8 @@ final class InlineTextFormatter
     {
         $raw = strtolower(trim($style->get('font-size') ?? ''));
         if ($raw === '') return $parentFontSize;
+        $keyword = FontSizeKeywords::resolve($raw, $parentFontSize);
+        if ($keyword !== null) return $keyword;
         if (preg_match('/^(-?\d+(?:\.\d+)?)px$/', $raw, $m) === 1) return max(0.0, (float) $m[1]);
         if (preg_match('/^(-?\d+(?:\.\d+)?)pt$/', $raw, $m) === 1) return max(0.0, Units::ptToPx((float) $m[1]));
         if (preg_match('/^(-?\d+(?:\.\d+)?)em$/', $raw, $m) === 1) return max(0.0, (float) $m[1] * $parentFontSize);
