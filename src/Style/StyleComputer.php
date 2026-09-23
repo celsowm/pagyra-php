@@ -21,7 +21,7 @@ final class StyleComputer
     public const INHERITED = [
         'color', 'font-family', 'font-size', 'font-style', 'font-weight',
         'line-height', 'text-align', 'text-indent', 'visibility', 'white-space',
-        'text-decoration', 'text-decoration-line',
+        'text-decoration', 'text-decoration-line', 'text-decoration-style', 'text-decoration-color',
         // The text properties CSS Text defines as inherited, as the reference also carries them
         // down (pagyra-js `src/css/style-inheritance.ts`; word-spacing is not in its list, but it
         // is inherited by the spec and follows letter-spacing everywhere else in this port).
@@ -51,6 +51,8 @@ final class StyleComputer
         'white-space' => 'normal',
         'text-decoration' => 'none',
         'text-decoration-line' => 'none',
+        'text-decoration-style' => 'solid',
+        'text-decoration-color' => 'currentcolor',
         'text-transform' => 'none',
         'letter-spacing' => 'normal',
         'word-spacing' => 'normal',

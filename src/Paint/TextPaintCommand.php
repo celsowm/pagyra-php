@@ -24,6 +24,11 @@ final readonly class TextPaintCommand implements \JsonSerializable
         public bool $underline = false,
         public bool $lineThrough = false,
         public ?string $linkHref = null,
+        public bool $overline = false,
+        /** `solid`, `double`, `dotted`, `dashed` or `wavy`. */
+        public string $decorationStyle = 'solid',
+        /** `text-decoration-color`, or null for currentcolor (the text colour). */
+        public ?Rgba $decorationColor = null,
     ) {
     }
 

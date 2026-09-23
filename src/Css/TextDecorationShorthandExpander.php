@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pagyra\Css;
 
+use Pagyra\Css\Color\ColorParser;
+
 /**
  * Expands the `text-decoration` shorthand into `text-decoration-line`, so that an author's
  * shorthand actually overrides a longhand set by the UA sheet.
@@ -14,9 +16,8 @@ namespace Pagyra\Css;
  * links (8 occurrences in 3 corpus documents), and it would do the same to any element whose
  * decoration the UA defines, `<u>` and `<s>` included.
  *
- * Only the line keywords are carried over; a colour, style or thickness in the shorthand is
- * dropped, which is what the paint layer already does with them. A declaration with no line
- * keyword at all is left unexpanded so it keeps whatever handling it had.
+ * The line keywords, the style and the colour are carried over; a thickness is dropped. A
+ * declaration with no line keyword at all is left unexpanded so it keeps whatever handling it had.
  */
 final class TextDecorationShorthandExpander
 {
@@ -38,6 +39,19 @@ final class TextDecorationShorthandExpander
         // `none` in the list clears everything, whatever else came with it.
         $line = in_array('none', $lines, true) ? 'none' : implode(' ', array_unique($lines));
 
-        return ['text-decoration-line' => $line];
+        // The shorthand also sets the style and the colour, back to their initial values when it
+        // does not name them (CSS Text Decoration 3 §2.4).
+        $expanded = ['text-decoration-line' => $line, 'text-decoration-style' => 'solid', 'text-decoration-color' => 'currentcolor'];
+        foreach (preg_split('/\s+(?![^(]*\))/', trim($value)) ?: [] as $token) {
+            $lower = strtolower($token);
+            if (in_array($lower, self::LINE_KEYWORDS, true)) continue;
+            if (in_array($lower, ['solid', 'double', 'dotted', 'dashed', 'wavy'], true)) {
+                $expanded['text-decoration-style'] = $lower;
+            } elseif ($lower === 'currentcolor' || ColorParser::parse($token) !== null) {
+                $expanded['text-decoration-color'] = $token;
+            }
+        }
+
+        return $expanded;
     }
 }

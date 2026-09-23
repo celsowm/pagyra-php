@@ -421,7 +421,10 @@ final class DisplayListBuilder
     {
         $weightRaw = strtolower(trim($run->style->get('font-weight', '400') ?? '400'));
         $fontWeight = $weightRaw === 'bold' ? 700 : ($weightRaw === 'normal' ? 400 : (is_numeric($weightRaw) ? (int) $weightRaw : 400));
-        [$underline, $lineThrough] = $this->resolveTextDecorationLines($run->style);
+        [$underline, $lineThrough, $overline] = $this->resolveTextDecorationLines($run->style);
+        $decorationStyle = strtolower(trim($run->style->get('text-decoration-style') ?? 'solid'));
+        $decorationColorRaw = strtolower(trim($run->style->get('text-decoration-color') ?? 'currentcolor'));
+        $decorationColor = $decorationColorRaw === 'currentcolor' ? null : ColorParser::parse($decorationColorRaw);
         $baseline = $lineFragment->pageBaseline + ($run->baseline - $line->baseline) + $margins['top'];
         if ($run->inlineBackground !== null) {
             // CSS paints an inline box's background over its content area, which is the font's
@@ -454,6 +457,9 @@ final class DisplayListBuilder
             underline: $underline,
             lineThrough: $lineThrough,
             linkHref: $run->style->get('x-link-href'),
+            overline: $overline,
+            decorationStyle: in_array($decorationStyle, ['solid', 'double', 'dotted', 'dashed', 'wavy'], true) ? $decorationStyle : 'solid',
+            decorationColor: $decorationColor,
         );
     }
 
@@ -462,15 +468,15 @@ final class DisplayListBuilder
      * into [underline, lineThrough], mirroring pagyra-js's parseTextDecorationLine, which keeps
      * only the recognized line keywords and treats "none" as clearing every line.
      *
-     * @return array{0:bool,1:bool}
+     * @return array{0:bool,1:bool,2:bool} underline, line-through, overline
      */
     private function resolveTextDecorationLines(ComputedStyle $style): array
     {
         $raw = $style->get('text-decoration-line') ?? $style->get('text-decoration');
-        if ($raw === null) return [false, false];
+        if ($raw === null) return [false, false, false];
         $tokens = preg_split('/\s+/', strtolower(trim($raw))) ?: [];
-        if ($tokens === [] || in_array('none', $tokens, true)) return [false, false];
-        return [in_array('underline', $tokens, true), in_array('line-through', $tokens, true)];
+        if ($tokens === [] || in_array('none', $tokens, true)) return [false, false, false];
+        return [in_array('underline', $tokens, true), in_array('line-through', $tokens, true), in_array('overline', $tokens, true)];
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */

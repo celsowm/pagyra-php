@@ -513,33 +513,91 @@ final class PdfSerializer
     }
 
     /**
-     * Paints `text-decoration: underline` / `line-through` as thin filled rectangles.
+     * Paints the text decoration lines of a run: underline, line-through and overline, in the
+     * `solid`, `double`, `dotted`, `dashed` and `wavy` styles, in `text-decoration-color` or else
+     * the text colour.
      *
-     * Position/thickness ratios (relative to font size) mirror pagyra-js's
-     * TextDecorationRenderer::renderSolid so both implementations produce the same
-     * geometry for the currently supported `solid` style. `overline` and the
-     * `double`/`dashed`/`dotted`/`wavy` styles are deliberately not ported yet.
+     * Positions, thicknesses, gaps, dash patterns and the wave's amplitude and wavelength are
+     * those of pagyra-js's TextDecorationRenderer (renderSolid, renderDouble,
+     * renderDashedOrDotted, renderWavy), so both implementations draw the same geometry. One
+     * deliberate difference: the reference sets the fill colour before stroking the dashed,
+     * dotted and wavy lines, so they come out in the default black stroke colour; here the
+     * stroke colour is set, so they take the decoration colour like the solid ones.
      */
     private function serializeTextDecorations(TextPaintCommand $command, float $pageHeightPx, ?string $graphicsState = null): string
     {
-        if (!$command->underline && !$command->lineThrough) return '';
-        if ($command->color instanceof Rgba && $command->color->a <= 0.0) return '';
+        if (!$command->underline && !$command->lineThrough && !$command->overline) return '';
+        $color = $command->decorationColor ?? $command->color ?? new Rgba(0, 0, 0, 1.0);
+        if ($color->a <= 0.0) return '';
         $widthPx = max($command->run->width, 0.0);
         if ($widthPx <= 0.0) return '';
-        $color = $command->color ?? new Rgba(0, 0, 0, 1.0);
+        if ($command->decorationColor !== null && $command->decorationColor->a !== ($command->color?->a ?? 1.0)) {
+            $graphicsState = null;
+        }
+
+        $lines = [];
+        if ($command->lineThrough) $lines[] = [$command->baseline - $command->fontSize * 0.3, max($command->fontSize * 0.085, 0.5)];
+        if ($command->underline) $lines[] = [$command->baseline + $command->fontSize * 0.1, max($command->fontSize * 0.065, 0.5)];
+        if ($command->overline) $lines[] = [$command->baseline - $command->fontSize * 0.9, max($command->fontSize * 0.05, 0.5)];
 
         $content = '';
-        if ($command->lineThrough) {
-            $thicknessPx = max($command->fontSize * 0.085, 0.5);
-            $centerYPx = $command->baseline - $command->fontSize * 0.3;
-            $content .= $this->serializeFilledRect($command->x, $centerYPx - $thicknessPx / 2, $widthPx, $thicknessPx, $pageHeightPx, $color, $graphicsState);
+        foreach ($lines as [$centerYPx, $thicknessPx]) {
+            $content .= match ($command->decorationStyle) {
+                'double' => $this->serializeDoubleLine($command->x, $centerYPx, $widthPx, $thicknessPx, $pageHeightPx, $color, $graphicsState),
+                'dotted', 'dashed' => $this->serializeStrokedLine($command, $centerYPx, $widthPx, $pageHeightPx, $color, $graphicsState),
+                'wavy' => $this->serializeWavyLine($command, $centerYPx, $widthPx, $pageHeightPx, $color, $graphicsState),
+                default => $this->serializeFilledRect($command->x, $centerYPx - $thicknessPx / 2, $widthPx, $thicknessPx, $pageHeightPx, $color, $graphicsState),
+            };
         }
-        if ($command->underline) {
-            $thicknessPx = max($command->fontSize * 0.065, 0.5);
-            $underlineYPx = $command->baseline + $command->fontSize * 0.1;
-            $content .= $this->serializeFilledRect($command->x, $underlineYPx - $thicknessPx / 2, $widthPx, $thicknessPx, $pageHeightPx, $color, $graphicsState);
-        }
+
         return $content;
+    }
+
+    private function serializeDoubleLine(float $xPx, float $centerYPx, float $widthPx, float $thicknessPx, float $pageHeightPx, Rgba $color, ?string $graphicsState): string
+    {
+        $gap = max($thicknessPx * 0.8, 0.5);
+        $single = max($thicknessPx * 0.8, 0.5);
+
+        return $this->serializeFilledRect($xPx, $centerYPx - $gap / 2 - $single / 2, $widthPx, $single, $pageHeightPx, $color, $graphicsState)
+            . $this->serializeFilledRect($xPx, $centerYPx + $gap / 2 - $single / 2, $widthPx, $single, $pageHeightPx, $color, $graphicsState);
+    }
+
+    private function serializeStrokedLine(TextPaintCommand $command, float $yPx, float $widthPx, float $pageHeightPx, Rgba $color, ?string $graphicsState): string
+    {
+        $lineWidthPx = max($command->fontSize * 0.065, 0.5);
+        $unit = max($lineWidthPx, 0.5);
+        $pattern = $command->decorationStyle === 'dashed' ? [3 * $unit, 3 * $unit] : [$unit, $unit];
+        [$r, $g, $b] = $color->toPdfRgb();
+        $y = Units::pxToPt($pageHeightPx - $yPx);
+
+        return "q\n"
+            . ($graphicsState !== null ? '/' . $graphicsState . " gs\n" : '')
+            . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " RG\n"
+            . $this->number(Units::pxToPt($lineWidthPx)) . " w\n"
+            . '[' . implode(' ', array_map(fn(float $v): string => $this->number(Units::pxToPt($v)), $pattern)) . "] 0 d\n"
+            . $this->number(Units::pxToPt($command->x)) . ' ' . $this->number($y) . " m\n"
+            . $this->number(Units::pxToPt($command->x + $widthPx)) . ' ' . $this->number($y) . " l\nS\nQ\n";
+    }
+
+    private function serializeWavyLine(TextPaintCommand $command, float $centerYPx, float $widthPx, float $pageHeightPx, Rgba $color, ?string $graphicsState): string
+    {
+        $amplitude = max($command->fontSize * 0.08, 0.5);
+        $wavelength = max($command->fontSize * 0.4, 2.0);
+        $lineWidthPx = max($command->fontSize * 0.065, 0.5);
+        $steps = max((int) round($widthPx / ($wavelength / 2)), 2);
+        [$r, $g, $b] = $color->toPdfRgb();
+        $path = '';
+        for ($i = 0; $i <= $steps; $i++) {
+            $x = Units::pxToPt($command->x + $widthPx * $i / $steps);
+            $y = Units::pxToPt($pageHeightPx - ($centerYPx + ($i % 2 === 0 ? -1 : 1) * $amplitude));
+            $path .= $this->number($x) . ' ' . $this->number($y) . ($i === 0 ? " m\n" : " l\n");
+        }
+
+        return "q\n"
+            . ($graphicsState !== null ? '/' . $graphicsState . " gs\n" : '')
+            . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " RG\n"
+            . $this->number(Units::pxToPt($lineWidthPx)) . " w\n"
+            . $path . "S\nQ\n";
     }
 
     private function serializeFilledRect(
