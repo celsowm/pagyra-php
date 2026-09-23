@@ -28,10 +28,15 @@ final class BackgroundShorthandExpanderTest extends TestCase
         self::assertSame('rgba(255, 0, 0, .5)', $parsed['background-color']);
     }
 
-    public function testShorthandWithoutAnyColorTokenLeavesBackgroundColorUnset(): void
+    public function testShorthandWithoutAColorResetsItAndCarriesTheOtherComponents(): void
     {
-        $parsed = (new DeclarationParser())->parse('background:url(x.png) no-repeat center');
-        self::assertArrayNotHasKey('background-color', $parsed);
+        // CSS Backgrounds 3 §3.10: omitted components go back to their initial values.
+        $parsed = (new DeclarationParser())->parse('background:url(x.png) no-repeat center / cover');
+        self::assertSame('transparent', $parsed['background-color']);
+        self::assertSame('url(x.png)', $parsed['background-image']);
+        self::assertSame('no-repeat', $parsed['background-repeat']);
+        self::assertSame('center', $parsed['background-position']);
+        self::assertSame('cover', $parsed['background-size']);
     }
 
     public function testALaterExplicitBackgroundColorDeclarationStillWinsOverTheShorthand(): void

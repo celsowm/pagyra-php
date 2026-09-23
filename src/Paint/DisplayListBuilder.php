@@ -23,6 +23,7 @@ use Pagyra\Pagination\PaginationResult;
 use Pagyra\Pagination\PhysicalPageEntry;
 use Pagyra\Style\ComputedStyle;
 use Pagyra\Style\ListMarker;
+use Pagyra\Style\StyledNode;
 
 final class DisplayListBuilder
 {
@@ -110,6 +111,7 @@ final class DisplayListBuilder
             backgroundColor: Opacity::apply(ColorParser::parse($node->source->style->get('background-color')), $node->source->style),
             borderRadius: BorderRadiusResolver::normalize($radius, $width, $height),
         );
+        $this->appendBackgroundImage($commands, $node->source, $node->source->style, $pageIndex, $x, $y, $width, $height, $node->box->border, $node->fontSize);
         $this->appendBorders($commands, $node, $pageIndex, $x, $y, $width, $height, $drawTop, $drawBottom);
         $this->appendOutline($commands, $node, $node->source->style, $pageIndex, $x, $y, $width, $height);
 
@@ -178,6 +180,7 @@ final class DisplayListBuilder
                 backgroundColor: Opacity::apply(ColorParser::parse($block->node->source->style->get('background-color')), $block->node->source->style),
                 borderRadius: BorderRadiusResolver::normalize($radius, $border->width, $block->height),
             );
+            $this->appendBackgroundImage($commands, $block->node->source, $block->node->source->style, $block->pageIndex, $x, $y, $border->width, $block->height, $block->node->box->border, $block->node->fontSize);
 
             $this->appendBorders(
                 $commands,
@@ -299,6 +302,279 @@ final class DisplayListBuilder
             backgroundColor: $color,
             borderRadius: $shape === 'disc' ? $round : new BorderRadius(),
         );
+    }
+
+    /**
+     * `background-image: url(...)` (CSS Backgrounds 3 §3), positioned in the padding box by
+     * `background-position` and `background-size` (`auto`, `cover`, `contain`, lengths and
+     * percentages), tiled by `background-repeat` and clipped to the border box. The image is
+     * drawn as ImagePaintCommands between a ClipPaintCommand pair; a box whose tiles would run
+     * into the thousands is left with its background colour. Background images used to be
+     * ignored entirely: the paint layer only knew `background-color`.
+     *
+     * @param list<object> $commands
+     */
+    private function appendBackgroundImage(array &$commands, StyledNode $source, ComputedStyle $style, int $pageIndex, float $x, float $y, float $width, float $height, \Pagyra\Geometry\Edges $border, float $fontSize): void
+    {
+        $raw = trim($style->get('background-image') ?? '');
+        if ($raw === '' || strtolower($raw) === 'none' || $width <= 0.0 || $height <= 0.0) return;
+        if (preg_match('/^(repeating-)?(linear|radial)-gradient\(/i', $raw) === 1) {
+            $this->appendGradient($commands, $source, $style, $pageIndex, $x, $y, $width, $height, $raw);
+            return;
+        }
+        if ($this->imageBytes === null || preg_match('/^url\(\s*([\'"]?)(.*?)\1\s*\)$/is', $raw, $m) !== 1) return;
+        $bytes = $this->imageBytes->resolve($m[2]);
+        if ($bytes === null) return;
+        try {
+            $metadata = $this->imageMetadata->read($bytes);
+        } catch (\InvalidArgumentException) {
+            return;
+        }
+        if (!in_array($metadata->format, ['jpeg', 'png'], true) || $metadata->width <= 0 || $metadata->height <= 0) return;
+
+        // Positioning area: the padding box.
+        $areaX = $x + $border->left;
+        $areaY = $y + $border->top;
+        $areaW = max(0.0, $width - $border->horizontal());
+        $areaH = max(0.0, $height - $border->vertical());
+        [$tileW, $tileH] = $this->backgroundTileSize($style->get('background-size') ?? 'auto', (float) $metadata->width, (float) $metadata->height, $areaW, $areaH, $fontSize);
+        if ($tileW <= 0.0 || $tileH <= 0.0) return;
+        [$posX, $posY] = $this->backgroundPosition($style->get('background-position') ?? '0% 0%', $areaW - $tileW, $areaH - $tileH, $fontSize);
+
+        $repeat = preg_split('/\s+/', strtolower(trim($style->get('background-repeat') ?? 'repeat'))) ?: ['repeat'];
+        [$repeatX, $repeatY] = match ($repeat[0]) {
+            'repeat-x' => [true, false],
+            'repeat-y' => [false, true],
+            'no-repeat' => [false, false],
+            default => [$repeat[0] !== 'no-repeat', ($repeat[1] ?? $repeat[0]) !== 'no-repeat'],
+        };
+        $startX = $areaX + $posX;
+        $startY = $areaY + $posY;
+        $xs = [$startX];
+        $ys = [$startY];
+        if ($repeatX) {
+            $first = $startX - ceil(($startX - $x) / $tileW) * $tileW;
+            $xs = range(0, (int) ceil(($x + $width - $first) / $tileW) - 1);
+            $xs = array_map(static fn(int $i): float => $first + $i * $tileW, $xs);
+        }
+        if ($repeatY) {
+            $first = $startY - ceil(($startY - $y) / $tileH) * $tileH;
+            $ys = range(0, (int) ceil(($y + $height - $first) / $tileH) - 1);
+            $ys = array_map(static fn(int $i): float => $first + $i * $tileH, $ys);
+        }
+        if (count($xs) * count($ys) > 2000) return;
+
+        $box = new AtomicInlineBox($source, $x, $y, $width, $height, $style, $width, $height);
+        $source = is_string($m[2]) ? $m[2] : '';
+        $commands[] = new ClipPaintCommand($pageIndex, $x, $y, $width, $height);
+        foreach ($ys as $tileY) {
+            foreach ($xs as $tileX) {
+                if ($tileX >= $x + $width || $tileY >= $y + $height || $tileX + $tileW <= $x || $tileY + $tileH <= $y) continue;
+                $commands[] = new ImagePaintCommand($box, $pageIndex, $tileX, $tileY, $tileW, $tileH, $bytes, $metadata, $source, opacity: Opacity::of($style));
+            }
+        }
+        $commands[] = new ClipPaintCommand($pageIndex);
+    }
+
+    /**
+     * `linear-gradient()` and `radial-gradient()` backgrounds (CSS Images 3 §3), over the border
+     * box. Linear gradients take an angle or a `to <side-or-corner>` (the corner case uses the
+     * direction perpendicular to the other diagonal, as the spec defines it); radial ones take
+     * `circle`/`ellipse`, the four extent keywords and `at <position>`. Stops take colours with
+     * optional positions, the missing ones spread evenly. Two approximations: the PDF shading is
+     * opaque, so a stop's alpha is folded into its colour over white paper; and the
+     * `repeating-` variants are drawn once, without repeating.
+     *
+     * @param list<object> $commands
+     */
+    private function appendGradient(array &$commands, StyledNode $source, ComputedStyle $style, int $pageIndex, float $x, float $y, float $width, float $height, string $raw): void
+    {
+        if (preg_match('/^(?:repeating-)?(linear|radial)-gradient\((.*)\)$/is', trim($raw), $m) !== 1) return;
+        $arguments = self::splitTopLevel($m[2], ',');
+        if ($arguments === []) return;
+        $kind = strtolower($m[1]);
+        $first = strtolower(trim($arguments[0]));
+        $firstIsStop = ColorParser::parse(self::splitTopLevel($arguments[0], ' ')[0] ?? '') !== null
+            || str_starts_with($first, 'transparent') || str_starts_with($first, 'currentcolor');
+        $shapeArgument = $firstIsStop ? null : array_shift($arguments);
+        $opacity = Opacity::of($style);
+        $currentColor = ColorParser::parse($style->get('color', 'black'));
+
+        if ($kind === 'linear') {
+            $direction = $this->gradientDirection($shapeArgument, $width, $height);
+            if ($direction === null) return;
+            [$dx, $dy] = $direction;
+            $length = abs($width * $dx) + abs($height * $dy);
+            $cx = $x + $width / 2;
+            $cy = $y + $height / 2;
+            $geometry = [$cx - $dx * $length / 2, $cy - $dy * $length / 2, $cx + $dx * $length / 2, $cy + $dy * $length / 2];
+            $lineLength = $length;
+        } else {
+            [$cx, $cy, $rx, $ry] = $this->radialShape($shapeArgument, $x, $y, $width, $height);
+            if ($rx <= 0.0 || $ry <= 0.0) return;
+            $geometry = [$cx, $cy, $rx, $ry];
+            $lineLength = $rx;
+        }
+
+        $stops = [];
+        foreach ($arguments as $argument) {
+            $parts = self::splitTopLevel($argument, ' ');
+            if ($parts === []) continue;
+            $colorToken = strtolower($parts[0]);
+            $color = $colorToken === 'transparent' ? new \Pagyra\Css\Color\Rgba(255, 255, 255, 0.0)
+                : ($colorToken === 'currentcolor' ? $currentColor : ColorParser::parse($parts[0]));
+            if ($color === null) return;
+            $alpha = $color->a * $opacity;
+            $color = new \Pagyra\Css\Color\Rgba(
+                $color->r * $alpha + 255.0 * (1.0 - $alpha),
+                $color->g * $alpha + 255.0 * (1.0 - $alpha),
+                $color->b * $alpha + 255.0 * (1.0 - $alpha),
+                1.0,
+            );
+            $positions = array_slice($parts, 1, 2);
+            if ($positions === []) {
+                $stops[] = [null, $color];
+            }
+            foreach ($positions as $position) {
+                $offset = str_ends_with($position, '%') ? (float) $position / 100.0 : ($lineLength > 0.0 ? $this->shadowLength($position, 16.0) / $lineLength : 0.0);
+                $stops[] = [$offset, $color];
+            }
+        }
+        if (count($stops) < 2) return;
+        $stops[0][0] ??= 0.0;
+        $stops[count($stops) - 1][0] ??= 1.0;
+        // Fill the unpositioned stops evenly between their positioned neighbours, and keep the
+        // positions from going backwards (CSS Images 3 §3.5.3).
+        for ($i = 1, $count = count($stops); $i < $count; $i++) {
+            if ($stops[$i][0] !== null) {
+                $stops[$i][0] = max($stops[$i][0], $stops[$i - 1][0]);
+                continue;
+            }
+            $next = $i;
+            while ($stops[$next][0] === null) $next++;
+            $end = max($stops[$next][0], $stops[$i - 1][0]);
+            for ($k = $i; $k < $next; $k++) {
+                $stops[$k][0] = $stops[$i - 1][0] + ($end - $stops[$i - 1][0]) * ($k - $i + 1) / ($next - $i + 1);
+            }
+        }
+
+        $commands[] = new GradientPaintCommand($source, $pageIndex, $x, $y, $width, $height, $kind, $geometry, $stops);
+    }
+
+    /** @return array{0:float,1:float}|null unit vector of the gradient line, y pointing down */
+    private function gradientDirection(?string $argument, float $width, float $height): ?array
+    {
+        $value = strtolower(trim($argument ?? 'to bottom'));
+        if (str_starts_with($value, 'to ')) {
+            $words = preg_split('/\s+/', substr($value, 3)) ?: [];
+            $sx = in_array('right', $words, true) ? 1.0 : (in_array('left', $words, true) ? -1.0 : 0.0);
+            $sy = in_array('bottom', $words, true) ? 1.0 : (in_array('top', $words, true) ? -1.0 : 0.0);
+            if ($sx !== 0.0 && $sy !== 0.0) {
+                $norm = hypot($height, $width);
+                return $norm > 0.0 ? [$sx * $height / $norm, $sy * $width / $norm] : null;
+            }
+            return $sx === 0.0 && $sy === 0.0 ? null : [$sx, $sy];
+        }
+        if (preg_match('/^(-?\d*\.?\d+)(deg|rad|grad|turn)$/', $value, $m) !== 1) return null;
+        $degrees = match ($m[2]) {
+            'rad' => rad2deg((float) $m[1]),
+            'grad' => (float) $m[1] * 0.9,
+            'turn' => (float) $m[1] * 360.0,
+            default => (float) $m[1],
+        };
+        $radians = deg2rad($degrees);
+
+        return [sin($radians), -cos($radians)];
+    }
+
+    /** @return array{0:float,1:float,2:float,3:float} centre and radii of a radial gradient */
+    private function radialShape(?string $argument, float $x, float $y, float $width, float $height): array
+    {
+        $value = strtolower(trim($argument ?? ''));
+        $at = '50% 50%';
+        if (preg_match('/\bat\s+(.*)$/', $value, $m) === 1) {
+            $at = $m[1];
+            $value = trim(substr($value, 0, -strlen($m[0])));
+        }
+        [$px, $py] = $this->backgroundPosition($at, $width, $height, 16.0);
+        $cx = $x + $px;
+        $cy = $y + $py;
+        $circle = str_contains($value, 'circle');
+        $left = $px;
+        $right = $width - $px;
+        $top = $py;
+        $bottom = $height - $py;
+        $extent = 'farthest-corner';
+        foreach (['closest-side', 'closest-corner', 'farthest-side', 'farthest-corner'] as $keyword) {
+            if (str_contains($value, $keyword)) $extent = $keyword;
+        }
+        $lengths = [];
+        foreach (preg_split('/\s+/', $value) ?: [] as $token) {
+            if (preg_match('/^\d*\.?\d+(px|pt|em|%)$/', $token) === 1) {
+                $lengths[] = $token;
+            }
+        }
+        if ($lengths !== []) {
+            $rx = str_ends_with($lengths[0], '%') ? (float) $lengths[0] / 100.0 * $width : $this->shadowLength($lengths[0], 16.0);
+            $ry = isset($lengths[1]) ? (str_ends_with($lengths[1], '%') ? (float) $lengths[1] / 100.0 * $height : $this->shadowLength($lengths[1], 16.0)) : $rx;
+            return [$cx, $cy, $rx, $circle || !isset($lengths[1]) ? $rx : $ry];
+        }
+        $sideX = str_starts_with($extent, 'closest') ? min($left, $right) : max($left, $right);
+        $sideY = str_starts_with($extent, 'closest') ? min($top, $bottom) : max($top, $bottom);
+        if ($circle) {
+            $r = str_ends_with($extent, 'side') ? (str_starts_with($extent, 'closest') ? min($sideX, $sideY) : max($sideX, $sideY)) : hypot($sideX, $sideY);
+            return [$cx, $cy, $r, $r];
+        }
+        if (str_ends_with($extent, 'side')) return [$cx, $cy, $sideX, $sideY];
+
+        // An ellipse through the corner, with the aspect ratio of the sides (CSS Images 3 §3.6.1).
+        return [$cx, $cy, $sideX * M_SQRT2, $sideY * M_SQRT2];
+    }
+
+    /** @return array{0:float,1:float} */
+    private function backgroundTileSize(string $size, float $imageW, float $imageH, float $areaW, float $areaH, float $fontSize): array
+    {
+        $parts = preg_split('/\s+/', strtolower(trim($size))) ?: ['auto'];
+        if ($parts[0] === 'cover' || $parts[0] === 'contain') {
+            $scale = $parts[0] === 'cover' ? max($areaW / $imageW, $areaH / $imageH) : min($areaW / $imageW, $areaH / $imageH);
+            return [$imageW * $scale, $imageH * $scale];
+        }
+        $resolve = fn(string $v, float $reference): ?float => $v === 'auto' ? null
+            : (str_ends_with($v, '%') ? (float) $v / 100.0 * $reference : $this->shadowLength($v, $fontSize));
+        $w = $resolve($parts[0], $areaW);
+        $h = $resolve($parts[1] ?? 'auto', $areaH);
+        if ($w === null && $h === null) return [$imageW, $imageH];
+        if ($w === null) return [$h * $imageW / $imageH, $h];
+        if ($h === null) return [$w, $w * $imageH / $imageW];
+
+        return [$w, $h];
+    }
+
+    /**
+     * `background-position` as the offset of the image inside the positioning area; a
+     * percentage (and the keywords) aligns that point of the image with that point of the area.
+     *
+     * @return array{0:float,1:float}
+     */
+    private function backgroundPosition(string $position, float $freeX, float $freeY, float $fontSize): array
+    {
+        $tokens = preg_split('/\s+/', strtolower(trim($position))) ?: [];
+        $horizontal = null;
+        $vertical = null;
+        $plain = [];
+        foreach ($tokens as $token) {
+            if (in_array($token, ['left', 'right'], true)) $horizontal = $token;
+            elseif (in_array($token, ['top', 'bottom'], true)) $vertical = $token;
+            else $plain[] = $token;
+        }
+        $keyword = static fn(?string $k): ?string => match ($k) { 'left', 'top' => '0%', 'right', 'bottom' => '100%', 'center' => '50%', default => $k };
+        $xValue = $horizontal !== null ? $keyword($horizontal) : $keyword($plain[0] ?? '0%');
+        $yValue = $vertical !== null ? $keyword($vertical) : $keyword($horizontal !== null ? ($plain[0] ?? '50%') : ($plain[1] ?? ($plain === [] ? '0%' : '50%')));
+        if ($vertical !== null && $horizontal === null && $plain !== []) $xValue = $keyword($plain[0]);
+        if ($vertical !== null && $horizontal === null && $plain === []) $xValue = '50%';
+        $resolve = fn(string $v, float $free): float => str_ends_with($v, '%') ? (float) $v / 100.0 * $free : $this->shadowLength($v, $fontSize);
+
+        return [$resolve($xValue, $freeX), $resolve($yValue, $freeY)];
     }
 
     /**
@@ -703,6 +979,7 @@ final class DisplayListBuilder
                 backgroundColor: Opacity::apply(ColorParser::parse($box->style->get('background-color')), $box->style),
                 borderRadius: $radius,
             );
+            $this->appendBackgroundImage($commands, $box->source, $box->style, $lineFragment->pageIndex, $borderX, $borderY, $borderWidth, $borderHeight, new \Pagyra\Geometry\Edges($box->border['top'], $box->border['right'], $box->border['bottom'], $box->border['left']), 16.0);
             $this->appendAtomicBorders($commands, $box, $lineFragment->pageIndex, $borderX, $borderY, $borderWidth, $borderHeight, $radius);
             $this->appendOutline($commands, $box, $box->style, $lineFragment->pageIndex, $borderX, $borderY, $borderWidth, $borderHeight);
         }

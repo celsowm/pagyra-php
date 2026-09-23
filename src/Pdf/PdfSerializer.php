@@ -12,6 +12,7 @@ use Pagyra\Fonts\Ttf\TtfSubsetter;
 use Pagyra\Paint\BorderPaintCommand;
 use Pagyra\Paint\BoxPaintCommand;
 use Pagyra\Paint\ClipPaintCommand;
+use Pagyra\Paint\GradientPaintCommand;
 use Pagyra\Paint\DisplayList;
 use Pagyra\Paint\ImagePaintCommand;
 use Pagyra\Paint\RoundedBorderPaintCommand;
@@ -45,8 +46,15 @@ final class PdfSerializer
             $content = '';
             $usedFonts = [];
             $usedImages = [];
+            $usedShadings = [];
             $linkAnnotations = [];
             foreach ($page->commands as $command) {
+                if ($command instanceof GradientPaintCommand) {
+                    $name = 'Sh' . (count($usedShadings) + 1);
+                    $usedShadings[$name] = $this->buildShading($command, $page->height, $objects, $reserve);
+                    $content .= $this->serializeGradient($command, $page->height, $name);
+                    continue;
+                }
                 if ($command instanceof ClipPaintCommand) {
                     $content .= $command->opens()
                         ? "q\n" . $this->number(Units::pxToPt($command->x)) . ' '
@@ -124,7 +132,10 @@ final class PdfSerializer
             foreach ($usedImages as $resourceName => $imageId) $images .= '/' . $resourceName . ' ' . $imageId . ' 0 R ';
             $states = '';
             foreach ($extGStateResources as $state) $states .= '/' . $state['name'] . ' ' . $state['id'] . ' 0 R ';
-            $resources = '<< /Font << ' . $fonts . '>> /XObject << ' . $images . '>> /ExtGState << ' . $states . '>> >>';
+            $shadings = '';
+            foreach ($usedShadings as $resourceName => $shadingId) $shadings .= '/' . $resourceName . ' ' . $shadingId . ' 0 R ';
+            $resources = '<< /Font << ' . $fonts . '>> /XObject << ' . $images . '>> /ExtGState << ' . $states . '>>'
+                . ($shadings !== '' ? ' /Shading << ' . $shadings . '>>' : '') . ' >>';
             $widthPt = $this->number(Units::pxToPt($page->width) * $contentScale);
             $heightPt = $this->number(Units::pxToPt($page->height) * $contentScale);
             $objects[$pageId] = '<< /Type /Page /Parent ' . $pagesId . ' 0 R '
@@ -609,6 +620,69 @@ final class PdfSerializer
             . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " RG\n"
             . $this->number(Units::pxToPt($lineWidthPx)) . " w\n"
             . $path . "S\nQ\n";
+    }
+
+    /**
+     * The shading object of a gradient: a Type 2 (axial) or Type 3 (radial) shading over a Type 3
+     * stitching function of Type 2 segments, one per pair of stops, extended at both ends like
+     * CSS pads a gradient with its end colours. Radial geometry is expressed as a circle of the
+     * horizontal radius; serializeGradient scales it vertically to the ellipse.
+     */
+    private function buildShading(GradientPaintCommand $command, float $pageHeightPx, array &$objects, callable $reserve): int
+    {
+        $stops = $command->stops;
+        $functions = [];
+        $bounds = [];
+        $encode = [];
+        for ($i = 0; $i < count($stops) - 1; $i++) {
+            [$r0, $g0, $b0] = $stops[$i][1]->toPdfRgb();
+            [$r1, $g1, $b1] = $stops[$i + 1][1]->toPdfRgb();
+            $functions[] = '<< /FunctionType 2 /Domain [0 1] /C0 [' . $this->number($r0) . ' ' . $this->number($g0) . ' ' . $this->number($b0)
+                . '] /C1 [' . $this->number($r1) . ' ' . $this->number($g1) . ' ' . $this->number($b1) . '] /N 1 >>';
+            if ($i > 0) $bounds[] = $this->number(max(0.0, min(1.0, $stops[$i][0])));
+            $encode[] = '0 1';
+        }
+        $start = max(0.0, min(1.0, $stops[0][0]));
+        $end = max($start + 1e-6, min(1.0, $stops[count($stops) - 1][0]));
+        $function = count($functions) === 1
+            ? $functions[0]
+            : '<< /FunctionType 3 /Domain [0 1] /Functions [' . implode(' ', $functions) . '] /Bounds [' . implode(' ', $bounds) . '] /Encode [' . implode(' ', $encode) . '] >>';
+
+        [$a, $b, $c, $d] = $command->geometry;
+        if ($command->kind === 'linear') {
+            // Map the stop range onto the part of the gradient line it covers.
+            $x0 = $a + ($c - $a) * $start;
+            $y0 = $b + ($d - $b) * $start;
+            $x1 = $a + ($c - $a) * $end;
+            $y1 = $b + ($d - $b) * $end;
+            $coords = [Units::pxToPt($x0), Units::pxToPt($pageHeightPx - $y0), Units::pxToPt($x1), Units::pxToPt($pageHeightPx - $y1)];
+            $dictionary = '<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [' . implode(' ', array_map(fn(float $v): string => $this->number($v), $coords)) . ']';
+        } else {
+            $cx = Units::pxToPt($a);
+            $cy = Units::pxToPt($pageHeightPx - $b);
+            $radius = Units::pxToPt($c);
+            $dictionary = '<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [' . $this->number($cx) . ' ' . $this->number($cy) . ' ' . $this->number($radius * $start)
+                . ' ' . $this->number($cx) . ' ' . $this->number($cy) . ' ' . $this->number($radius * $end) . ']';
+        }
+        $id = $reserve();
+        $objects[$id] = $dictionary . ' /Function ' . $function . ' /Extend [true true] >>';
+
+        return $id;
+    }
+
+    private function serializeGradient(GradientPaintCommand $command, float $pageHeightPx, string $name): string
+    {
+        if ($command->width <= 0.0 || $command->height <= 0.0) return '';
+        $content = "q\n"
+            . $this->number(Units::pxToPt($command->x)) . ' ' . $this->number(Units::pxToPt($pageHeightPx - $command->y - $command->height)) . ' '
+            . $this->number(Units::pxToPt($command->width)) . ' ' . $this->number(Units::pxToPt($command->height)) . " re W n\n";
+        if ($command->kind === 'radial' && $command->geometry[2] > 0.0 && abs($command->geometry[3] - $command->geometry[2]) > 1e-6) {
+            $scale = $command->geometry[3] / $command->geometry[2];
+            $cy = Units::pxToPt($pageHeightPx - $command->geometry[1]);
+            $content .= '1 0 0 ' . $this->number($scale) . ' 0 ' . $this->number($cy * (1 - $scale)) . " cm\n";
+        }
+
+        return $content . '/' . $name . " sh\nQ\n";
     }
 
     private function serializeFilledRect(
