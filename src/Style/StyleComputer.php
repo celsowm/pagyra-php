@@ -19,6 +19,14 @@ final class StyleComputer
         'color', 'font-family', 'font-size', 'font-style', 'font-weight',
         'line-height', 'text-align', 'text-indent', 'visibility', 'white-space',
         'text-decoration', 'text-decoration-line',
+        // The text properties CSS Text defines as inherited, as the reference also carries them
+        // down (pagyra-js `src/css/style-inheritance.ts`; word-spacing is not in its list, but it
+        // is inherited by the spec and follows letter-spacing everywhere else in this port).
+        // Without them the value stopped at the element that declared it: the text node's style
+        // only receives what is listed here, so `<p style="text-transform:uppercase">` upper-cased
+        // its own text but not a `<b>` inside it.
+        'text-transform', 'letter-spacing', 'word-spacing', 'word-break', 'overflow-wrap', 'word-wrap',
+        'font-variant', 'orphans', 'widows',
         'x-link-href',
     ];
 
@@ -40,6 +48,15 @@ final class StyleComputer
         'white-space' => 'normal',
         'text-decoration' => 'none',
         'text-decoration-line' => 'none',
+        'text-transform' => 'none',
+        'letter-spacing' => 'normal',
+        'word-spacing' => 'normal',
+        'word-break' => 'normal',
+        'overflow-wrap' => 'normal',
+        'word-wrap' => 'normal',
+        'font-variant' => 'normal',
+        'orphans' => '2',
+        'widows' => '2',
     ];
 
     public function __construct(
