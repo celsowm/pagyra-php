@@ -552,6 +552,29 @@ final class BlockLayoutEngine
                 $spanHeight = $rowY[$r + $p['rowSpan']] - $rowY[$r];
                 $box = $cellLayout->box;
                 $extra = max(0.0, $spanHeight - $box->borderBox()->height);
+                // CSS 2.1 17.5.3: a cell shorter than its row places its content by
+                // `vertical-align` — `middle` is the UA default for td/th, and `valign` maps
+                // here too. The content always sat at the top. Its lines and child blocks are
+                // moved down by the offset; the cell's own box is untouched, and the stretch
+                // below still makes it fill the row.
+                // The free space is measured against what the content actually takes, not the
+                // cell's box: a declared `height` makes the box taller than its content, and
+                // that difference is exactly what `valign="bottom"` is about.
+                $free = $spanHeight - $box->borderBox()->height + max(0.0, $box->content->height - $this->usedContentHeight($cellLayout));
+                $shift = $free * match (strtolower(trim($p['cell']->style->get('vertical-align') ?? 'top'))) {
+                    'middle' => 0.5,
+                    'bottom' => 1.0,
+                    default => 0.0,
+                };
+                if ($shift > 0.0) {
+                    $cellLayout = new LayoutNode(
+                        $cellLayout->source,
+                        $box,
+                        array_map(fn(LayoutNode $child): LayoutNode => $this->translateNode($child, $shift), $cellLayout->children),
+                        $cellLayout->fontSize,
+                        $this->inlineTextFormatter->translateLines($cellLayout->lineBoxes, 0.0, $shift),
+                    );
+                }
                 if ($extra > 0.0) {
                     $stretched = new LayoutBox(new Rect($box->content->x, $box->content->y, $box->content->width, $box->content->height + $extra), $box->padding, $box->border, $box->margin);
                     $cellLayout = new LayoutNode($cellLayout->source, $stretched, $cellLayout->children, $cellLayout->fontSize, $cellLayout->lineBoxes);
@@ -564,6 +587,36 @@ final class BlockLayoutEngine
         $table = new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $rowY[$rowCount] - $contentY), $padding, $border, $margin), $rowLayouts, $fontSize);
 
         return $this->wrapWithCaptions($styled, $table, $wrapperMargin, $captionLayouts, $bottomCaptions, $containingHeight, $fontSize);
+    }
+
+    /** The laid-out subtree moved down by $dy. */
+    private function translateNode(LayoutNode $node, float $dy): LayoutNode
+    {
+        $box = $node->box;
+        $content = $box->content;
+
+        return new LayoutNode(
+            $node->source,
+            new LayoutBox(new Rect($content->x, $content->y + $dy, $content->width, $content->height), $box->padding, $box->border, $box->margin),
+            array_map(fn(LayoutNode $child): LayoutNode => $this->translateNode($child, $dy), $node->children),
+            $node->fontSize,
+            $this->inlineTextFormatter->translateLines($node->lineBoxes, 0.0, $dy),
+        );
+    }
+
+    /** How far below the content edge a laid-out box's lines and children actually reach. */
+    private function usedContentHeight(LayoutNode $node): float
+    {
+        $top = $node->box->content->y;
+        $bottom = $top;
+        foreach ($node->lineBoxes as $line) {
+            $bottom = max($bottom, $line->y + $line->height);
+        }
+        foreach ($node->children as $child) {
+            $bottom = max($bottom, $child->box->marginBox()->bottom());
+        }
+
+        return $bottom - $top;
     }
 
     /**

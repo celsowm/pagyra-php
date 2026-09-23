@@ -46,7 +46,7 @@ final class TableCellFillsRowHeightTest extends TestCase
     {
         $prepared = Pagyra::prepareHtmlRender([
             'html' => '<table><tr>'
-                . '<td style="padding:0"><p style="margin:0">so uma linha</p></td>'
+                . '<td style="padding:0;vertical-align:top"><p style="margin:0">so uma linha</p></td>'
                 . '<td style="padding:0">' . $this->paragraphs(6) . '</td>'
                 . '</tr></table>',
             'viewportWidth' => 400,
@@ -56,7 +56,8 @@ final class TableCellFillsRowHeightTest extends TestCase
         $shortCell = $row->children[0];
         $firstLine = $shortCell->children[0];
 
-        // Content stays anchored at the cell's top edge (no vertical-align support yet).
+        // With vertical-align: top the content stays anchored at the cell's top edge; the UA
+        // default, middle, is covered by TableCellVerticalAlignTest.
         self::assertEqualsWithDelta($shortCell->box->content->y, $firstLine->box->content->y, 0.01);
     }
 

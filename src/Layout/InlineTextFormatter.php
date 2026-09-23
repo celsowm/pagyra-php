@@ -397,6 +397,15 @@ final class InlineTextFormatter
     private function textBaseline(array $token, float $lineBaseline, float $lineHeight): float
     {
         $value = strtolower(trim($token['style']->get('vertical-align', 'baseline') ?? 'baseline'));
+        // Text is tokenized with the style of the element that contains it, and `vertical-align`
+        // is not inherited: it only positions the text of an inline box. On the block container
+        // itself — a table cell, where the UA sheet sets `middle` to align the cell's content, or
+        // an inline-block — it says nothing about the text, but it was applied to every line of
+        // it, so each line of a <td> was re-centred on its strut and grew by half a line.
+        $display = strtolower(trim($token['style']->get('display', 'inline') ?? 'inline'));
+        if ($display !== 'inline') {
+            $value = 'baseline';
+        }
         $fontSize = $token['fontSize'];
         $ownHeight = $token['lineHeight'];
 
@@ -803,7 +812,11 @@ final class InlineTextFormatter
         return $token;
     }
 
-    private function translateLines(array $lines, float $dx, float $dy): array
+    /**
+     * @param list<LineBox> $lines
+     * @return list<LineBox>
+     */
+    public function translateLines(array $lines, float $dx, float $dy): array
     {
         $translated = [];
         foreach ($lines as $line) {

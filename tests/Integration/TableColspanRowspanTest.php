@@ -67,7 +67,8 @@ final class TableColspanRowspanTest extends TestCase
 
         $tall = $firstRow->children[0];
         self::assertEqualsWithDelta($firstRow->box->content->height + $secondRow->box->content->height, $tall->box->borderBox()->height, 0.5);
-        self::assertEqualsWithDelta($firstRow->box->content->y, $tall->box->content->y, 0.01);
+        // The border box starts at the row; the text inside sits in the middle (vertical-align: middle).
+        self::assertEqualsWithDelta($firstRow->box->content->y, $tall->box->borderBox()->y, 0.01);
     }
 
     public function testInvalidOrZeroSpanValuesFallBackToOneInsteadOfBreakingTheGrid(): void
