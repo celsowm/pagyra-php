@@ -29,7 +29,7 @@ final class StyleComputer
         // only receives what is listed here, so `<p style="text-transform:uppercase">` upper-cased
         // its own text but not a `<b>` inside it.
         'text-transform', 'letter-spacing', 'word-spacing', 'word-break', 'overflow-wrap', 'word-wrap',
-        'font-variant', 'orphans', 'widows',
+        'font-variant', 'orphans', 'widows', 'quotes',
         'x-link-href',
     ];
 
@@ -68,6 +68,14 @@ final class StyleComputer
     /** The computed font-size of the root element, which is what `rem` means. */
     private float $rootFontSize = FontSizeKeywords::MEDIUM_PX;
 
+    /** @var list<array{rule:StyleRule,pseudo:string}> the rules that target `::before`/`::after` */
+    private array $pseudoRules = [];
+
+    private CounterScopes $counters;
+
+    /** Set while walking a `display: none` subtree, which neither generates content nor counts. */
+    private bool $outsideRendering = false;
+
     public function __construct(
         private readonly SelectorMatcher $selectorMatcher = new SelectorMatcher(),
         private readonly DeclarationParser $declarationParser = new DeclarationParser(),
@@ -90,16 +98,31 @@ final class StyleComputer
     public function computeTree(Node $root, array $rules, ?Node $html = null, ?Node $body = null, bool $zeroBodyMargin = false): StyledNode
     {
         $this->rootFontSize = FontSizeKeywords::MEDIUM_PX;
+        $this->counters = new CounterScopes();
+        $this->outsideRendering = false;
+        $this->pseudoRules = [];
+        $elementRules = [];
+        foreach ($rules as $rule) {
+            $pseudo = $this->selectorMatcher->pseudoElement($rule->selector);
+            if ($pseudo === null) {
+                $elementRules[] = $rule;
+            } elseif ($pseudo === 'before' || $pseudo === 'after') {
+                $this->pseudoRules[] = ['rule' => $rule, 'pseudo' => $pseudo];
+            }
+        }
+        $rules = $elementRules;
         if ($html === null) {
             return $this->computeNode($root, $rules, null, [], []);
         }
 
         [$htmlStyle, $variables] = $this->computeStyle($html, $rules, null, [], []);
+        $this->counters->apply($htmlStyle, 0);
         $this->rootFontSize = self::pxValue($htmlStyle->get('font-size')) ?? FontSizeKeywords::MEDIUM_PX;
         $rootStyle = $htmlStyle;
         $ancestors = [$html];
         if ($body !== null) {
             [$rootStyle, $variables] = $this->computeStyle($body, $rules, $htmlStyle, $ancestors, $variables);
+            $this->counters->apply($rootStyle, 1);
             $ancestors[] = $body;
             if ($zeroBodyMargin) {
                 // Unconditional, author margin included, as the reference's `zero` mode does.
@@ -536,14 +559,230 @@ final class StyleComputer
         [$style, $variables] = $this->computeStyle($node, $rules, $parent, $ancestors, $inheritedVariables);
         $children = [];
         $nextAncestors = $ancestors;
-        if ($node->type === 'element') {
-            $nextAncestors[] = $node;
+        if ($node->type !== 'element') {
+            foreach ($node->children as $child) {
+                $this->appendStyledChild($children, $this->computeNode($child, $rules, $style, $nextAncestors, $variables));
+            }
+
+            return new StyledNode($node, $style, $children);
+        }
+        $nextAncestors[] = $node;
+
+        $depth = count($ancestors);
+        $wasOutside = $this->outsideRendering;
+        if (strtolower(trim($style->get('display') ?? '')) === 'none') {
+            $this->outsideRendering = true;
+        }
+        $generates = !$this->outsideRendering && !str_starts_with($node->tagName ?? '', '#');
+        if ($generates) {
+            $this->counters->apply($style, $depth);
+            $before = $this->generatedBox('before', $node, $style, $ancestors, $variables, $depth + 1);
+            if ($before !== null) {
+                $children[] = $before;
+            }
         }
         foreach ($this->renderedChildren($node) as $child) {
             $this->appendStyledChild($children, $this->computeNode($child, $rules, $style, $nextAncestors, $variables));
         }
+        if ($generates) {
+            $after = $this->generatedBox('after', $node, $style, $ancestors, $variables, $depth + 1);
+            if ($after !== null) {
+                $children[] = $after;
+            }
+        }
+        $this->counters->closeScopesFrom($depth + 1);
+        $this->outsideRendering = $wasOutside;
 
         return new StyledNode($node, $style, $children);
+    }
+
+    /**
+     * The `::before` or `::after` box of an element (CSS Pseudo 4 §3, CSS Content 3), as a
+     * synthetic element holding the generated text, or null when there is none.
+     *
+     * Rules aimed at these pseudo-elements were dropped whole, so `content` never produced
+     * anything: CSS-numbered headings and paragraphs (`h1::before { counter-increment: sec;
+     * content: counter(sec) ". " }`), label prefixes and the quotation marks of `<q>` were all
+     * missing from the page. The pseudo-element's style is cascaded from the rules that target it
+     * and inherits from its element; its own `counter-*` properties apply at its place in the
+     * tree, before `content` reads the counters.
+     *
+     * @param list<Node> $ancestors the element's ancestors
+     * @param array<string,string> $variables the element's custom properties
+     */
+    private function generatedBox(string $pseudo, Node $element, ComputedStyle $elementStyle, array $ancestors, array $variables, int $depth): ?StyledNode
+    {
+        $winners = [];
+        foreach ($this->pseudoRules as ['rule' => $rule, 'pseudo' => $rulePseudo]) {
+            if ($rulePseudo !== $pseudo || !$this->selectorMatcher->matchesOriginating($element, $rule->selector, $ancestors)) {
+                continue;
+            }
+            foreach ($rule->declarations as $property => $rawValue) {
+                [$value, $important] = $this->extractImportant($rawValue);
+                $this->considerWinner($winners, $property, $value, $important, $rule->specificity, $rule->sourceOrder, false);
+            }
+        }
+        // The UA sheet's `q::before { content: open-quote }` and `q::after { content: close-quote }`.
+        if ($element->isElement('q') && !isset($winners['content'])) {
+            $winners['content'] = ['value' => $pseudo === 'before' ? 'open-quote' : 'close-quote', 'important' => false, 'specificity' => 0, 'sourceOrder' => -1, 'inline' => false];
+        }
+        if (!isset($winners['content'])) {
+            return null;
+        }
+
+        $properties = [];
+        foreach (self::INHERITED as $property) {
+            $value = $elementStyle->get($property);
+            if ($value !== null) {
+                $properties[$property] = $value;
+            }
+        }
+        foreach ($winners as $property => $winner) {
+            if (str_starts_with($property, '--')) {
+                $variables[$property] = $winner['value'];
+            } elseif (!$this->applyCssWideKeyword($properties, $property, $winner['value'], $elementStyle)) {
+                $properties[$property] = $winner['value'];
+            }
+        }
+        foreach ($properties as $property => $value) {
+            $resolved = $this->resolveVariables($value, $variables);
+            if ($resolved !== null) {
+                $properties[$property] = $resolved;
+            } else {
+                unset($properties[$property]);
+            }
+        }
+        $this->absolutizeFontRelativeLengths($properties, $elementStyle);
+        $style = new ComputedStyle($properties);
+        if (strtolower(trim($style->get('display') ?? '')) === 'none') {
+            return null;
+        }
+
+        $this->counters->apply($style, $depth);
+        $text = $this->evaluateContent($style->get('content') ?? 'none', $element, $style);
+        if ($text === null) {
+            return null;
+        }
+        $this->counters->closeScopesFrom($depth + 1);
+
+        $textNode = Node::text($text);
+        $textProperties = [];
+        foreach (self::INHERITED as $property) {
+            $value = $style->get($property);
+            if ($value !== null) {
+                $textProperties[$property] = $value;
+            }
+        }
+
+        return new StyledNode(
+            Node::element('::' . $pseudo, [], [$textNode]),
+            $style,
+            [new StyledNode($textNode, new ComputedStyle($textProperties))],
+        );
+    }
+
+    /**
+     * The text a `content` value generates: strings, `attr()`, `counter()`, `counters()` and the
+     * quote keywords, concatenated. Null for `none`/`normal`, which generate no box at all.
+     */
+    private function evaluateContent(string $content, Node $element, ComputedStyle $style): ?string
+    {
+        $content = trim($content);
+        if ($content === '' || in_array(strtolower($content), ['none', 'normal'], true)) {
+            return null;
+        }
+
+        $text = '';
+        $pattern = '/\G\s*(?:"((?:[^"\\\\]|\\\\.)*)"|\'((?:[^\'\\\\]|\\\\.)*)\'|(attr|counter|counters)\(([^)]*)\)|(open-quote|close-quote|no-open-quote|no-close-quote)|(url\([^)]*\)))/i';
+        $offset = 0;
+        $length = strlen($content);
+        while ($offset < $length) {
+            if (preg_match($pattern, $content, $m, PREG_UNMATCHED_AS_NULL, $offset) !== 1) {
+                return null;
+            }
+            $offset += strlen($m[0]);
+            if ($m[1] !== null) {
+                $text .= self::unescapeCssString($m[1]);
+            } elseif ($m[2] !== null) {
+                $text .= self::unescapeCssString($m[2]);
+            } elseif ($m[3] !== null) {
+                $arguments = array_map('trim', explode(',', $m[4] ?? ''));
+                $text .= match (strtolower($m[3])) {
+                    'attr' => $element->attribute(strtolower($arguments[0])) ?? '',
+                    'counter' => ListMarker::representation($arguments[1] ?? 'decimal', $this->counters->value($arguments[0])),
+                    default => implode(
+                        self::unescapeCssString(trim($arguments[1] ?? '', '"\'')),
+                        array_map(
+                            static fn(int $value): string => ListMarker::representation($arguments[2] ?? 'decimal', $value),
+                            $this->counters->values($arguments[0]),
+                        ),
+                    ),
+                };
+            } elseif ($m[5] !== null) {
+                $text .= $this->quote(strtolower($m[5]), $style);
+            }
+            // url() images are not generated; the rest of the value still is.
+        }
+
+        return $text;
+    }
+
+    private function quote(string $keyword, ComputedStyle $style): string
+    {
+        $pairs = self::quotePairs($style->get('quotes'));
+        switch ($keyword) {
+            case 'open-quote':
+                $pair = $pairs[min($this->counters->quoteDepth, count($pairs) - 1)] ?? null;
+                $this->counters->quoteDepth++;
+                return $pair[0] ?? '';
+            case 'close-quote':
+                if ($this->counters->quoteDepth === 0) return '';
+                $this->counters->quoteDepth--;
+                return ($pairs[min($this->counters->quoteDepth, count($pairs) - 1)] ?? ['', ''])[1];
+            case 'no-open-quote':
+                $this->counters->quoteDepth++;
+                return '';
+            default:
+                $this->counters->quoteDepth = max(0, $this->counters->quoteDepth - 1);
+                return '';
+        }
+    }
+
+    /**
+     * The `quotes` pairs, with the typographic “ ” then ‘ ’ that browsers use for Portuguese and
+     * English when the property is `auto` or absent.
+     *
+     * @return list<array{0:string,1:string}>
+     */
+    private static function quotePairs(?string $value): array
+    {
+        $value = trim($value ?? '');
+        if (strtolower($value) === 'none') {
+            return [];
+        }
+        preg_match_all('/"((?:[^"\\\\]|\\\\.)*)"|\'((?:[^\'\\\\]|\\\\.)*)\'/', $value, $matches, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL);
+        $strings = array_map(static fn(array $m): string => self::unescapeCssString($m[1] ?? $m[2] ?? ''), $matches);
+        if (count($strings) < 2) {
+            return [["\u{201C}", "\u{201D}"], ["\u{2018}", "\u{2019}"]];
+        }
+        $pairs = [];
+        for ($i = 0; $i + 1 < count($strings); $i += 2) {
+            $pairs[] = [$strings[$i], $strings[$i + 1]];
+        }
+
+        return $pairs;
+    }
+
+    /** A CSS string's escapes (`\201C`, `\"`, `\A`) turned into the characters they stand for. */
+    private static function unescapeCssString(string $value): string
+    {
+        return (string) preg_replace_callback('/\\\\([0-9a-fA-F]{1,6})\s?|\\\\(.)/s', static function (array $m): string {
+            if (($m[1] ?? '') !== '') {
+                $codepoint = hexdec($m[1]);
+                return mb_chr($codepoint > 0 && $codepoint <= 0x10FFFF ? $codepoint : 0xFFFD, 'UTF-8') ?: '';
+            }
+            return $m[2];
+        }, $value);
     }
 
     /**

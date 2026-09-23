@@ -252,7 +252,7 @@ Still pending in block layout: parent/child margin collapsing, full BFC rules, p
 
 Still pending in pagination/paint: stacking contexts/z-index, rounded asymmetric per-side borders, border styles beyond the current solid/dashed/dotted subset (`double`, `groove`, `ridge`, `inset`, `outset`), WebP/SVG paint, Adam7 PNG, element-level opacity and richer clipping/overflow behavior.
 
-Still pending in the cascade/style layer: pseudo-classes/elements, sibling combinators, the remaining shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
+Selectors cover type/class/id/attribute selectors, the four combinators, the structural pseudo-classes, `:not()`/`:is()`/`:where()`/`:root`, and `::before`/`::after` generate content (strings, `attr()`, `counter()`/`counters()` with `counter-reset`/`-set`/`-increment`, quotes). Still pending in the cascade/style layer: `::first-line`/`::first-letter`/`::marker`, the remaining shorthands/property parsers, complete Chromium-derived UA styles, richer media queries, richer `@font-face` descriptors and the remaining `pagyra-js` CSS surface.
 
 Remote HTTP resource loading is intentionally not enabled in the current PHP resource layer; local deterministic resources are resolved through explicit paths / `resourceBaseDir`.
 

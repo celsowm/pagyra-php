@@ -81,6 +81,27 @@ final class ListMarker
         return in_array($type, self::ORDERED, true);
     }
 
+    /**
+     * The counter's value in a counter style without the list suffix, which is what `counter()`
+     * and `counters()` insert (CSS Counter Styles 3): `3`, `c`, `iii`, a bullet, or nothing for
+     * `none`. Roman numerals outside 1..3999 and alphabetic values below 1 fall back to decimal.
+     */
+    public static function representation(string $type, int $index): string
+    {
+        $type = self::normalizeType($type) ?? 'decimal';
+
+        return match ($type) {
+            'none' => '',
+            'decimal-leading-zero' => ($index < 0 ? '-' : '') . str_pad((string) abs($index), 2, '0', STR_PAD_LEFT),
+            'lower-alpha' => $index >= 1 ? strtolower(self::alphaSequence($index)) : (string) $index,
+            'upper-alpha' => $index >= 1 ? strtoupper(self::alphaSequence($index)) : (string) $index,
+            'lower-roman' => strtolower(self::roman($index) ?? (string) $index),
+            'upper-roman' => strtoupper(self::roman($index) ?? (string) $index),
+            'disc', 'circle', 'square' => self::BULLETS[$type],
+            default => (string) $index,
+        };
+    }
+
     public static function format(string $type, int $index): ?string
     {
         return match ($type) {
