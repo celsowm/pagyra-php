@@ -43,7 +43,67 @@ final class BlockLayoutEngine
 
     public function layout(StyledNode $root): LayoutNode
     {
-        return $this->layoutDocument($root);
+        return $this->applyRelativeOffsets($this->layoutDocument($root), $this->viewportWidth, $this->viewportHeight);
+    }
+
+    /**
+     * `position: relative` (CSS 2.1 §9.4.3): once the flow is laid out, a relatively positioned
+     * box is moved by `left`/`top` (or minus `right`/`bottom`) without disturbing anything around
+     * it. Running this after layout is what keeps the siblings where the unshifted box left them.
+     * A block moves with its whole subtree; the text of a relatively positioned inline element
+     * moves by itself. The offsets were ignored, so such content stayed at its flow position.
+     */
+    private function applyRelativeOffsets(LayoutNode $node, float $containingWidth, float $containingHeight): LayoutNode
+    {
+        $children = [];
+        $changed = false;
+        foreach ($node->children as $child) {
+            $moved = $this->applyRelativeOffsets($child, $node->box->content->width, $node->box->content->height);
+            $changed = $changed || $moved !== $child;
+            $children[] = $moved;
+        }
+        $lines = [];
+        foreach ($node->lineBoxes as $line) {
+            $runs = [];
+            $lineChanged = false;
+            foreach ($line->runs as $run) {
+                // Only the text of an inline element moves on its own; a run styled by a block
+                // container is that block's own text and moves with the block below.
+                $inline = strtolower(trim($run->style->get('display', 'inline') ?? 'inline')) === 'inline';
+                [$dx, $dy] = $inline ? $this->relativeOffset($run->style, $node->box->content->width, $node->box->content->height, $run->fontSize) : [0.0, 0.0];
+                if ($dx != 0.0 || $dy != 0.0) {
+                    $run = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground);
+                    $lineChanged = true;
+                }
+                $runs[] = $run;
+            }
+            $lines[] = $lineChanged ? new LineBox($line->x, $line->y, $line->width, $line->height, $line->baseline, $line->text, $runs, $line->atomicBoxes) : $line;
+            $changed = $changed || $lineChanged;
+        }
+        if ($changed) {
+            $node = new LayoutNode($node->source, $node->box, $children, $node->fontSize, $lines);
+        }
+        [$dx, $dy] = $this->relativeOffset($node->source->style, $containingWidth, $containingHeight, $node->fontSize);
+
+        return $this->translateNode($node, $dy, $dx);
+    }
+
+    /** @return array{0:float,1:float} */
+    private function relativeOffset(ComputedStyle $style, float $containingWidth, float $containingHeight, float $fontSize): array
+    {
+        if (strtolower(trim($style->get('position') ?? 'static')) !== 'relative') {
+            return [0.0, 0.0];
+        }
+        $resolve = function (string $side, float $reference) use ($style, $fontSize): ?float {
+            $value = $style->get($side);
+            return $value === null || $this->isAuto($value) ? null : $this->resolveLength($value, $reference, $fontSize, $reference, $this->viewportHeight, 'zero');
+        };
+        $left = $resolve('left', $containingWidth);
+        $right = $resolve('right', $containingWidth);
+        $top = $resolve('top', $containingHeight);
+        $bottom = $resolve('bottom', $containingHeight);
+
+        return [$left ?? ($right !== null ? -$right : 0.0), $top ?? ($bottom !== null ? -$bottom : 0.0)];
     }
 
     /**
