@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Style;
 
+use Pagyra\Css\Color\ColorParser;
 use Pagyra\Css\DeclarationParser;
 use Pagyra\Css\Length\FontSizeKeywords;
 use Pagyra\Css\SelectorMatcher;
@@ -201,7 +202,7 @@ final class StyleComputer
         // ones the spec spells out; `middle` is `center`. On <img> it is a float instead, which
         // is left alone here: no corpus document depends on it and floating an image is a much
         // larger behavioural change than aligning text.
-        if (!$node->isElement('img')) {
+        if (!$node->isElement('img') && !$node->isElement('table') && !$node->isElement('hr')) {
             $align = strtolower(trim($node->attribute('align') ?? ''));
             $textAlign = match ($align) {
                 'center', 'middle' => 'center',
@@ -240,6 +241,70 @@ final class StyleComputer
             if ($size !== null && $size > 0) {
                 $hints['border-top-width'] = $size . 'px';
             }
+            // HTML §15.3.10: `width` is a dimension hint, `align` places the rule with its side
+            // margins, and `color` paints it (the spec sets both border and background colour;
+            // the rule here is its top border, so that is the one that shows).
+            $width = $this->dimensionAttribute($node, 'width');
+            if ($width !== null) {
+                $hints['width'] = $width;
+            }
+            [$left, $right] = match (strtolower(trim($node->attribute('align') ?? ''))) {
+                'left' => ['0', 'auto'],
+                'right' => ['auto', '0'],
+                default => [null, null],
+            };
+            if ($left !== null) {
+                $hints['margin-left'] = $left;
+                $hints['margin-right'] = $right;
+            }
+            $color = $this->colorAttribute($node, 'color');
+            if ($color !== null) {
+                $hints['border-top-color'] = $color;
+                $hints['background-color'] = $color;
+            }
+        }
+
+        // `<table align="center">` centres the table with auto side margins (§15.3.8); it does
+        // not centre the text of the cells, which is what mapping it to text-align did.
+        if ($node->isElement('table') && strtolower(trim($node->attribute('align') ?? '')) === 'center') {
+            $hints['margin-left'] = 'auto';
+            $hints['margin-right'] = 'auto';
+        }
+
+        // `bgcolor` (§15.3.8, §15.3.3 for body) is how HTML exported by word processors and older
+        // editors colours tables and cells; it was ignored, so shaded header rows came out white.
+        if ($node->isElement('body') || $node->isElement('table') || $node->isElement('tr')
+            || $node->isElement('td') || $node->isElement('th') || $node->isElement('thead')
+            || $node->isElement('tbody') || $node->isElement('tfoot')) {
+            $background = $this->colorAttribute($node, 'bgcolor');
+            if ($background !== null) {
+                $hints['background-color'] = $background;
+            }
+        }
+        if (($node->isElement('td') || $node->isElement('th')) && $node->attribute('nowrap') !== null) {
+            $hints['white-space'] = 'nowrap';
+        }
+
+        // `<font color face size>` (§15.3.4), still what pasted and legacy HTML is made of.
+        if ($node->isElement('font')) {
+            $color = $this->colorAttribute($node, 'color');
+            if ($color !== null) {
+                $hints['color'] = $color;
+            }
+            $face = trim($node->attribute('face') ?? '');
+            if ($face !== '') {
+                $hints['font-family'] = $face;
+            }
+            $size = $this->legacyFontSize($node->attribute('size'));
+            if ($size !== null) {
+                $hints['font-size'] = $size;
+            }
+        }
+
+        // The `hidden` attribute is `display: none` in the UA sheet (§15.3.1), and so is a
+        // <dialog> that is not open; both used to print their content like any other element.
+        if ($node->attribute('hidden') !== null || ($node->isElement('dialog') && $node->attribute('open') === null)) {
+            $hints['display'] = 'none';
         }
 
         if ($node->isElement('img')) {
@@ -261,6 +326,43 @@ final class StyleComputer
         }
 
         return $hints;
+    }
+
+    /** A presentational colour attribute's value when it parses as a colour, else null. */
+    private function colorAttribute(Node $node, string $name): ?string
+    {
+        $raw = trim($node->attribute($name) ?? '');
+        if ($raw === '') {
+            return null;
+        }
+        // Legacy colour parsing accepts hex digits without the `#` (`bgcolor="c0c0c0"`).
+        if (preg_match('/^[0-9a-f]{6}$|^[0-9a-f]{3}$/i', $raw) === 1) {
+            $raw = '#' . $raw;
+        }
+
+        return ColorParser::parse($raw) !== null ? $raw : null;
+    }
+
+    /**
+     * `<font size>`: 1 to 7, or a signed offset from 3, mapped to the pixel sizes browsers use
+     * for the legacy scale (§15.3.4 "rules for parsing a legacy font size": x-small .. xxx-large,
+     * which WebKit and Blink resolve to 10, 13, 16, 18, 24, 32 and 48px).
+     */
+    private function legacyFontSize(?string $raw): ?string
+    {
+        $raw = trim($raw ?? '');
+        if (preg_match('/^([+-]?)(\d+)/', $raw, $m) !== 1) {
+            return null;
+        }
+        $value = (int) $m[2];
+        $value = match ($m[1]) {
+            '+' => 3 + $value,
+            '-' => 3 - $value,
+            default => $value,
+        };
+        $value = max(1, min(7, $value));
+
+        return [1 => '10px', 2 => '13px', 3 => '16px', 4 => '18px', 5 => '24px', 6 => '32px', 7 => '48px'][$value];
     }
 
     /** @param list<Node> $ancestors */
@@ -390,11 +492,31 @@ final class StyleComputer
         if ($node->type === 'element') {
             $nextAncestors[] = $node;
         }
-        foreach ($node->children as $child) {
+        foreach ($this->renderedChildren($node) as $child) {
             $children[] = $this->computeNode($child, $rules, $style, $nextAncestors, $variables);
         }
 
         return new StyledNode($node, $style, $children);
+    }
+
+    /**
+     * A closed `<details>` renders only its first `<summary>` (HTML §15.5.4); everything else in
+     * it, text included, is not rendered. It used to print the whole disclosed content.
+     *
+     * @return list<Node>
+     */
+    private function renderedChildren(Node $node): array
+    {
+        if (!$node->isElement('details') || $node->attribute('open') !== null) {
+            return $node->children;
+        }
+        foreach ($node->children as $child) {
+            if ($child->isElement('summary')) {
+                return [$child];
+            }
+        }
+
+        return [];
     }
 
     /**

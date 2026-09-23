@@ -25,7 +25,7 @@ final class UserAgentStyles
             // engine, so a document built out of <blockquote> loses that content entirely.
             'blockquote', 'figure', 'figcaption', 'pre', 'address', 'dl', 'dt', 'dd',
             'fieldset', 'form', 'aside', 'hgroup', 'center', 'details', 'summary',
-            'dir', 'menu', 'legend' => ['display' => 'block'],
+            'dir', 'menu', 'legend', 'search', 'dialog', 'listing', 'xmp', 'plaintext' => ['display' => 'block'],
             'table' => ['display' => 'table'],
             // The table-internal displays, which the reference spells out the same way
             // (pagyra-js `src/css/ua-defaults/element-defaults.ts`). `tr` used to resolve to
@@ -40,7 +40,8 @@ final class UserAgentStyles
             'col' => ['display' => 'table-column'],
             'td', 'th' => ['display' => 'table-cell'],
             'span', 'a', 'strong', 'b', 'em', 'i', 'small', 'label',
-            'u', 's', 'del', 'strike', 'code', 'sup', 'sub' => ['display' => 'inline'],
+            'u', 's', 'del', 'strike', 'code', 'sup', 'sub',
+            'small', 'big', 'mark', 'ins', 'cite', 'var', 'dfn', 'kbd', 'samp', 'tt', 'nobr', 'abbr', 'q', 'font' => ['display' => 'inline'],
             'hr' => ['display' => 'block'],
             'img', 'svg', 'input', 'button', 'select', 'textarea' => ['display' => 'inline-block'],
             default => [],
@@ -57,7 +58,16 @@ final class UserAgentStyles
             'em', 'i' => ['font-style' => 'italic'],
             'u' => ['text-decoration-line' => 'underline'],
             's', 'del', 'strike' => ['text-decoration-line' => 'line-through'],
-            'code' => ['font-family' => "Monaco, 'Courier New', monospace"],
+            'code', 'kbd', 'samp', 'tt' => ['font-family' => "Monaco, 'Courier New', monospace"],
+            // The rest of the phrasing elements of the HTML Standard's rendering section (§15.3.3),
+            // none of which the reference styles. Each was plain body text here: `<small>` was
+            // not smaller, `<mark>` had no highlight, `<ins>` no underline, `<cite>` no italics.
+            'small' => ['font-size' => 'smaller'],
+            'big' => ['font-size' => 'larger'],
+            'mark' => ['background-color' => 'yellow', 'color' => 'black'],
+            'ins' => ['text-decoration-line' => 'underline'],
+            'cite', 'var', 'dfn' => ['font-style' => 'italic'],
+            'nobr' => ['white-space' => 'nowrap'],
             // The reference gives <a> only the colour, with no decoration at all
             // (pagyra-js `src/css/ua-defaults/element-defaults.ts`), so this is a deliberate
             // departure from it towards CSS 2.1 and WebKit: 221 corpus documents carry 656 links
@@ -80,6 +90,9 @@ final class UserAgentStyles
                 'border-top-width' => '1px',
                 'border-top-style' => 'solid',
                 'border-top-color' => '#a0a0a0',
+                // `margin-inline: auto`, so an <hr width="50%"> is centred as in browsers.
+                'margin-left' => 'auto',
+                'margin-right' => 'auto',
             ],
             'th' => [
                 'font-weight' => 'bold',
@@ -99,7 +112,7 @@ final class UserAgentStyles
                 'margin-top' => '1em', 'margin-bottom' => '1em',
                 'margin-left' => '40px', 'margin-right' => '40px',
             ],
-            'pre' => ['margin-top' => '1em', 'margin-bottom' => '1em', 'white-space' => 'pre', 'font-family' => "Monaco, 'Courier New', monospace"],
+            'pre', 'listing', 'xmp', 'plaintext' => ['margin-top' => '1em', 'margin-bottom' => '1em', 'white-space' => 'pre', 'font-family' => "Monaco, 'Courier New', monospace"],
             'dl' => ['margin-top' => '1em', 'margin-bottom' => '1em'],
             'dd' => ['margin-left' => '40px'],
             'address' => ['font-style' => 'italic'],

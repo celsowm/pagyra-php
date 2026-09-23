@@ -14,9 +14,10 @@ final class HtmlParser
      * is needed: parseDocument() harvests every `<style>` straight off the DOMDocument before the
      * tree is converted, so keeping the element in the Pagyra DOM only gives the inline formatter
      * a text node full of CSS to lay out, and a `<style>` sitting inside the body then prints its
-     * own source in the middle of the page.
+     * own source in the middle of the page. `template` content is inert by definition, and
+     * `noscript` is what a browser with scripting enabled (Chrome, wkhtmltopdf) does not render.
      */
-    private const SKIPPED_CONTENT_TAGS = ['head', 'meta', 'title', 'link', 'script', 'style'];
+    private const SKIPPED_CONTENT_TAGS = ['head', 'meta', 'title', 'link', 'script', 'style', 'template', 'noscript'];
 
     private readonly ImageSourceIntrinsicSizeResolver $imageIntrinsicSizeResolver;
 
