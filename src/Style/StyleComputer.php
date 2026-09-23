@@ -527,6 +527,23 @@ final class StyleComputer
             }
         }
 
+        // `rem` is relative to the root element's font-size, which the layout engines do not know
+        // (they resolve it against a fixed 16px), and `ch`/`ex` they do not know at all. All
+        // three are absolute once the font sizes are known, so they are turned into px here, in
+        // every property, the way a computed value would carry them. `ex` and `ch` take the usual
+        // 0.5em fallback the CSS Values spec allows when the font's own metric is not at hand.
+        foreach ($properties as $property => $value) {
+            if (str_starts_with($property, '--') || str_starts_with($property, 'x-') || $property === 'font-size'
+                || preg_match('/\d(?:rem|ch|ex)\b/i', $value) !== 1) {
+                continue;
+            }
+            $properties[$property] = (string) preg_replace_callback(
+                '/(?<![\w.#-])(-?\d*\.?\d+)(rem|ch|ex)\b/i',
+                fn(array $m): string => self::px((float) $m[1] * (strtolower($m[2]) === 'rem' ? $this->rootFontSize : 0.5 * $fontSize)),
+                $value,
+            );
+        }
+
         foreach (['line-height', 'letter-spacing', 'word-spacing', 'text-indent'] as $property) {
             if (!isset($properties[$property])) {
                 continue;

@@ -169,12 +169,14 @@ final class StylesheetParser
         return null;
     }
 
-    /** @return list<string> */
+    /**
+     * The selectors of a rule's list, split only at top-level commas: `:is(h3, h4) span` and
+     * `[title="a,b"]` are one selector each, not two broken halves.
+     *
+     * @return list<string>
+     */
     private function splitSelectors(string $selectorText): array
     {
-        return array_values(array_filter(
-            array_map('trim', explode(',', $selectorText)),
-            static fn(string $selector): bool => $selector !== '',
-        ));
+        return SelectorSyntax::splitList($selectorText);
     }
 }
