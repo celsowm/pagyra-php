@@ -12,6 +12,7 @@ final class BreakInsidePaginationTest extends TestCase
     public function testBreakInsideAvoidMovesCrossingBlockToNextPage(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:300px 100px; margin:10px; } .spacer { height:50px; margin:0; } .keep { height:40px; margin:0; break-inside:avoid; }</style><div class="spacer"></div><div class="keep"></div>',
             'viewportWidth' => 300,
             'viewportHeight' => 100,
@@ -28,6 +29,7 @@ final class BreakInsidePaginationTest extends TestCase
     public function testAvoidPageAliasUsesSameBehavior(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:300px 100px; margin:10px; } .spacer { height:50px; margin:0; } .keep { height:40px; margin:0; break-inside:avoid-page; }</style><div class="spacer"></div><div class="keep"></div>',
             'viewportWidth' => 300,
             'viewportHeight' => 100,
@@ -41,6 +43,7 @@ final class BreakInsidePaginationTest extends TestCase
     public function testLegacyPageBreakInsideAvoidIsSupported(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:300px 100px; margin:10px; } .spacer { height:50px; margin:0; } .keep { height:40px; margin:0; page-break-inside:avoid; }</style><div class="spacer"></div><div class="keep"></div>',
             'viewportWidth' => 300,
             'viewportHeight' => 100,
@@ -53,6 +56,7 @@ final class BreakInsidePaginationTest extends TestCase
     public function testOversizedAvoidBoxStillMovesToNextPageLikeReference(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:300px 100px; margin:10px; } .spacer { height:50px; margin:0; } .keep { height:100px; margin:0; break-inside:avoid; }</style><div class="spacer"></div><div class="keep"></div>',
             'viewportWidth' => 300,
             'viewportHeight' => 100,
@@ -67,6 +71,7 @@ final class BreakInsidePaginationTest extends TestCase
     public function testForcedBreakRunsBeforeBreakInsideAvoidPass(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:300px 100px; margin:10px; } .spacer { height:30px; margin:0; } .keep { height:100px; margin:0; break-before:page; break-inside:avoid; }</style><div class="spacer"></div><div class="keep"></div>',
             'viewportWidth' => 300,
             'viewportHeight' => 100,

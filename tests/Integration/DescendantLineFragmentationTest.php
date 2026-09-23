@@ -12,6 +12,7 @@ final class DescendantLineFragmentationTest extends TestCase
     public function testDescendantTextLinesFollowPhysicalBlockFragments(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:200px 80px; margin:20px; }</style>'
                 . '<section style="margin:0">'
                 . '<p style="margin:0;white-space:pre;font-size:16px;line-height:20px">one' . "\n" . 'two' . "\n" . 'three</p>'

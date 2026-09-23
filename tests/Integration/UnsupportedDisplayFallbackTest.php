@@ -12,6 +12,7 @@ final class UnsupportedDisplayFallbackTest extends TestCase
     public function testDisplayFlexFallsBackToBlockInsteadOfDisappearingFromLayout(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:300px"><footer style="display:flex"><p>conteudo</p></footer></div>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
@@ -26,6 +27,7 @@ final class UnsupportedDisplayFallbackTest extends TestCase
     public function testDisplayGridFallsBackToBlockInsteadOfDisappearingFromLayout(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:300px"><div style="display:grid"><p>conteudo</p></div></div>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
@@ -43,6 +45,7 @@ final class UnsupportedDisplayFallbackTest extends TestCase
         // any other block-level siblings. That is a known, documented limitation, not a bug
         // this fallback tries to hide.
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;display:flex">'
                 . '<div style="height:10px"><span>a</span></div>'
                 . '<div style="height:10px"><span>b</span></div>'

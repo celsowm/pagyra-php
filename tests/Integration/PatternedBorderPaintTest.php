@@ -13,6 +13,7 @@ final class PatternedBorderPaintTest extends TestCase
     public function testUniformDashedBorderUsesThreeWidthDashAndGap(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:120px 80px;margin:0}div{box-sizing:border-box;width:50px;height:30px;border:2px dashed #000;margin:0}</style><div></div>',
             'pageWidth' => 120.0,
             'pageHeight' => 80.0,
@@ -34,6 +35,7 @@ final class PatternedBorderPaintTest extends TestCase
         self::assertSame(12.0, $top[1]->x - $top[0]->x);
 
         $pdf = Pagyra::renderHtmlToPdf([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:120px 80px;margin:0}div{box-sizing:border-box;width:50px;height:30px;border:2px dashed #000;margin:0}</style><div></div>',
             'pageWidth' => 120.0,
             'pageHeight' => 80.0,
@@ -47,6 +49,7 @@ final class PatternedBorderPaintTest extends TestCase
     public function testMixedStylesSwitchAllVisibleSidesToStrokeGeometry(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:140px 90px;margin:0}div{box-sizing:border-box;width:60px;height:40px;margin:0;'
                 . 'border-width:4px;border-color:red green blue black;'
                 . 'border-style:solid dotted dashed none}</style><div></div>',
@@ -80,6 +83,7 @@ final class PatternedBorderPaintTest extends TestCase
     public function testFragmentedDashedBorderOnlyDrawsTopAndBottomOnOuterFragments(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:120px 60px;margin:0}div{box-sizing:border-box;width:50px;height:130px;border:2px dashed #000;margin:0}</style><div></div>',
             'pageWidth' => 120.0,
             'pageHeight' => 60.0,

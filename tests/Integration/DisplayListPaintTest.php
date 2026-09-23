@@ -14,6 +14,7 @@ final class DisplayListPaintTest extends TestCase
     public function testPreparedRenderBuildsPhysicalBoxAndTextCommands(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:200px 100px; margin:10px; }</style>'
                 . '<div style="margin:0;background-color:red">'
                 . '<p style="margin:0;color:#123456;font-family:Fixture;font-weight:700;font-style:italic;font-size:10px;line-height:20px">Hi</p>'
@@ -60,6 +61,7 @@ final class DisplayListPaintTest extends TestCase
     public function testDisplayListKeepsSkippedPhysicalPageEmpty(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>'
                 . '@page { size:300px 200px; margin:20px; }'
                 . 'p { margin:0; height:40px; }'

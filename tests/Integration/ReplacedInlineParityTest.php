@@ -12,6 +12,7 @@ final class ReplacedInlineParityTest extends TestCase
     public function testAutoImageShrinksAgainstAvailableContentWidthAfterOuterExtras(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<p style="margin:0"><img width="200" height="100" style="margin:3px;padding:10px;border-width:2px;border-style:solid"></p>',
             'viewportWidth' => 100,
             'viewportHeight' => 300,
@@ -27,6 +28,7 @@ final class ReplacedInlineParityTest extends TestCase
     public function testMinWidthIsAppliedAfterAutoShrinkAndRestoresAspectRatio(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<p style="margin:0"><img width="200" height="100" style="min-width:80px"></p>',
             'viewportWidth' => 70,
             'viewportHeight' => 300,
@@ -41,6 +43,7 @@ final class ReplacedInlineParityTest extends TestCase
     public function testInlineSvgParticipatesAsAtomicReplacedElement(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<p style="margin:0"><svg viewBox="0 0 400 200"></svg></p>',
             'viewportWidth' => 500,
             'viewportHeight' => 300,

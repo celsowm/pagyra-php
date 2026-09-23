@@ -12,6 +12,7 @@ final class WidowOrphanPaginationTest extends TestCase
     public function testDefaultWidowsMoveShortParagraphToNextPage(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => "<style>@page { size:300px 100px; margin:10px; } .spacer { height:40px; margin:0; } p { margin:0; white-space:pre; font-size:16px; line-height:20px; }</style><div class=\"spacer\"></div><p>one\ntwo\nthree</p>",
             'viewportWidth' => 300,
             'viewportHeight' => 100,
@@ -37,6 +38,7 @@ final class WidowOrphanPaginationTest extends TestCase
     public function testWidowsAndOrphansOneAllowNaturalSplit(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => "<style>@page { size:300px 100px; margin:10px; } .spacer { height:40px; margin:0; } p { margin:0; white-space:pre; font-size:16px; line-height:20px; widows:1; orphans:1; }</style><div class=\"spacer\"></div><p>one\ntwo\nthree</p>",
             'viewportWidth' => 300,
             'viewportHeight' => 100,
@@ -54,6 +56,7 @@ final class WidowOrphanPaginationTest extends TestCase
     public function testSignedWidowOrphanValuesAreInvalidAndUseFallback(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => "<style>@page { size:300px 100px; margin:10px; } .spacer { height:40px; margin:0; } p { margin:0; white-space:pre; font-size:16px; line-height:20px; widows:+1; orphans:+1; }</style><div class=\"spacer\"></div><p>one\ntwo\nthree</p>",
             'viewportWidth' => 300,
             'viewportHeight' => 100,
@@ -69,6 +72,7 @@ final class WidowOrphanPaginationTest extends TestCase
     public function testOversizedParagraphIsNotMovedForWidowOrphanConstraint(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => "<style>@page { size:300px 100px; margin:10px; } p { margin:0; white-space:pre; font-size:16px; line-height:20px; widows:4; orphans:4; }</style><p>one\ntwo\nthree\nfour\nfive</p>",
             'viewportWidth' => 300,
             'viewportHeight' => 100,

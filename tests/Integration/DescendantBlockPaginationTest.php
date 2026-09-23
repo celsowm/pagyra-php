@@ -12,6 +12,7 @@ final class DescendantBlockPaginationTest extends TestCase
     public function testDescendantBlockIsClippedIntoPhysicalPageFragments(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:200px 120px; margin:20px; }</style>'
                 . '<section style="margin:0">'
                 . '<div style="margin:0;height:50px"></div>'
@@ -44,6 +45,7 @@ final class DescendantBlockPaginationTest extends TestCase
     public function testDescendantHierarchyIsPreservedPerPage(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page { size:200px 90px; margin:20px; }</style>'
                 . '<section style="margin:0">'
                 . '<div style="margin:0">'

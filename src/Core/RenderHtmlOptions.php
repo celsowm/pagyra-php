@@ -18,11 +18,21 @@ final readonly class RenderHtmlOptions
         public ?string $resourceBaseDir = null,
         public float $contentScale = 1.0,
         public string $media = 'print',
+        /**
+         * `auto` keeps the body's margin from the cascade (the UA's 8px unless the document says
+         * otherwise), `zero` removes it so the page margins alone decide where content starts.
+         * Same option, values and default as the reference's `pagedBodyMargin` (pagyra-js
+         * `src/html-to-pdf/types.ts`).
+         */
+        public string $pagedBodyMargin = 'auto',
     ) {
         if ($this->html === '') throw new \InvalidArgumentException('html must not be empty');
         if ($this->contentScale <= 0) throw new \InvalidArgumentException('contentScale must be greater than zero');
         if (!in_array($this->media, ['print', 'screen', 'all'], true)) {
             throw new \InvalidArgumentException("media must be 'print', 'screen' or 'all'");
+        }
+        if (!in_array($this->pagedBodyMargin, ['auto', 'zero'], true)) {
+            throw new \InvalidArgumentException("pagedBodyMargin must be 'auto' or 'zero'");
         }
         if ($this->resourceBaseDir !== null && !self::isAbsoluteResourceBase($this->resourceBaseDir)) {
             throw new \InvalidArgumentException('resourceBaseDir must be an absolute local path or file:// URL');
@@ -49,6 +59,7 @@ final readonly class RenderHtmlOptions
             resourceBaseDir: $resourceBaseDir,
             contentScale: self::positiveNumber($options['contentScale'] ?? 1.0, 'contentScale'),
             media: is_string($options['media'] ?? null) ? strtolower(trim($options['media'])) : 'print',
+            pagedBodyMargin: is_string($options['pagedBodyMargin'] ?? null) ? strtolower(trim($options['pagedBodyMargin'])) : 'auto',
         );
     }
 
@@ -78,6 +89,7 @@ final readonly class RenderHtmlOptions
             resourceBaseDir: $this->resourceBaseDir,
             contentScale: 1.0,
             media: $this->media,
+            pagedBodyMargin: $this->pagedBodyMargin,
         );
     }
 

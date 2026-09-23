@@ -16,6 +16,15 @@ final readonly class HtmlDocument implements \JsonSerializable
         public Node $root,
         public array $embeddedCss = [],
         public array $stylesheetHrefs = [],
+        /**
+         * The `<html>` and `<body>` elements themselves, which the content tree in `$root` does not
+         * include (it starts at the body's children). They carry no layout of their own here, but
+         * their style is the root of the cascade: `body { font-family }`, `html { font-size }`,
+         * `:root { --var }`, `<body class="x">` for `.x p`. `bodyElement` holds the same child
+         * nodes as `$root`, so sibling and structural selectors can see the top-level elements.
+         */
+        public ?Node $htmlElement = null,
+        public ?Node $bodyElement = null,
     ) {
     }
 

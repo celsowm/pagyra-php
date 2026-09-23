@@ -71,7 +71,27 @@ final class HtmlParser
             }
         }
 
-        return new HtmlDocument(Node::document($children), $embeddedCss, $stylesheetHrefs);
+        $htmlElement = $document->documentElement;
+        $bodyNode = $contentRoot instanceof \DOMElement && strtolower($contentRoot->tagName) === 'body'
+            ? Node::element('body', $this->attributesOf($contentRoot), $children)
+            : null;
+        $htmlNode = $htmlElement instanceof \DOMElement && strtolower($htmlElement->tagName) === 'html'
+            ? Node::element('html', $this->attributesOf($htmlElement), $bodyNode !== null ? [$bodyNode] : $children)
+            : null;
+
+        return new HtmlDocument(Node::document($children), $embeddedCss, $stylesheetHrefs, $htmlNode, $bodyNode);
+    }
+
+    /** @return array<string,string> */
+    private function attributesOf(\DOMElement $element): array
+    {
+        $attributes = [];
+        foreach ($element->attributes as $attribute) {
+            $attributes[strtolower($attribute->name)] = $attribute->value;
+        }
+        ksort($attributes);
+
+        return $attributes;
     }
 
     public function normalizeHtmlInput(string $html): string
@@ -98,11 +118,7 @@ final class HtmlParser
             return null;
         }
 
-        $attributes = [];
-        foreach ($node->attributes as $attribute) {
-            $attributes[strtolower($attribute->name)] = $attribute->value;
-        }
-        ksort($attributes);
+        $attributes = $this->attributesOf($node);
 
         $children = [];
         foreach ($node->childNodes as $child) {

@@ -18,6 +18,7 @@ final class BlockLevelReplacedElementTest extends TestCase
     private function render(string $html): PreparedRender
     {
         return Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => $html,
             'viewportWidth' => 400,
             'viewportHeight' => 400,

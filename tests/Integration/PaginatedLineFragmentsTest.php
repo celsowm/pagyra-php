@@ -12,6 +12,7 @@ final class PaginatedLineFragmentsTest extends TestCase
     public function testPreformattedLinesAreAssignedToPageFragmentsByBaseline(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => "<style>@page { size:300px 50px; margin:5px; } p { margin:0; white-space:pre; font-size:16px; line-height:20px; }</style><p>one\ntwo\nthree\nfour\nfive</p>",
             'viewportWidth' => 300,
             'viewportHeight' => 100,
@@ -57,6 +58,7 @@ final class PaginatedLineFragmentsTest extends TestCase
     public function testForcedBreakOffsetIsAppliedToPaginatedLineCoordinatesOnly(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => "<style>@page { size:300px 60px; margin:10px; } p { margin:0; white-space:pre; font-size:16px; line-height:20px; } #second { break-before:page; }</style><p>one</p><p id=\"second\">two\nthree</p>",
             'viewportWidth' => 300,
             'viewportHeight' => 100,

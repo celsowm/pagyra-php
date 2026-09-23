@@ -25,6 +25,7 @@ final class JustifiedLineWordSpacingTest extends TestCase
     private function lines(string $align = 'justify'): array
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<p>' . self::TEXT . '</p>',
             'css' => str_replace('justify', $align, self::CSS),
             'viewportWidth' => 600,
@@ -67,6 +68,7 @@ final class JustifiedLineWordSpacingTest extends TestCase
     public function testStretchIsEmittedAsPdfWordSpacing(): void
     {
         $pdf = Pagyra::renderHtmlToPdf([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>' . self::CSS . '</style><p>' . self::TEXT . '</p>',
         ]);
 

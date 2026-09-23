@@ -20,6 +20,7 @@ final class PagePseudoPaginationTest extends TestCase
             . 'div { margin:0; height:190px; background:#123456; }'
             . '</style><div></div>';
         $options = [
+            'pagedBodyMargin' => 'zero',
             'html' => $html,
             'pageWidth' => 200.0,
             'pageHeight' => 100.0,
@@ -80,6 +81,7 @@ final class PagePseudoPaginationTest extends TestCase
     public function testPrintViewportUsesMostConstrainedPageVariant(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>'
                 . '@page { size:200px 120px; margin:10px; }'
                 . '@page :first { margin-left:40px; margin-right:30px; }'
@@ -101,6 +103,7 @@ final class PagePseudoPaginationTest extends TestCase
     public function testRightParityBreakUsesVariableContentStarts(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>'
                 . '@page { size:200px 100px; margin:10px; }'
                 . '@page :right { margin-top:10px; margin-bottom:20px; }'

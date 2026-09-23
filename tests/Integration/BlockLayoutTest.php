@@ -12,6 +12,7 @@ final class BlockLayoutTest extends TestCase
     public function testNestedBlockFlowAndBoxSizing(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div class="outer"><div class="child"></div></div>',
             'css' => <<<'CSS'
 .outer {
@@ -63,6 +64,7 @@ CSS,
     public function testMinMaxConstraintsApplyToContentBox(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div class="box"></div>',
             'css' => '.box { display:block; width: 50px; min-width: 120px; max-width: 140px; height: 10px; min-height: 30px; }',
             'viewportWidth' => 400,
@@ -77,6 +79,7 @@ CSS,
     public function testHorizontalAutoMarginsCenterFixedWidthBlock(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div class="centered"></div>',
             'css' => '.centered { display:block; width:100px; height:10px; margin-left:auto; margin-right:auto; }',
             'viewportWidth' => 300,
@@ -93,6 +96,7 @@ CSS,
     public function testAdjacentVerticalMarginsCollapse(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div class="a"></div><div class="b"></div>',
             'css' => <<<'CSS'
 .a { display:block; height:10px; margin-bottom:20px; }

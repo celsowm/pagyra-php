@@ -18,6 +18,7 @@ final class InlineBlockIntrinsicWidthCarriesTextIndentTest extends TestCase
     private function firstBlock(string $html): \Pagyra\Layout\LayoutNode
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => $html,
             'viewportWidth' => 300,
             'viewportHeight' => 400,

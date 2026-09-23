@@ -30,7 +30,13 @@
                 }
             ]
         },
-        "style": [],
+        "style": {
+            "display": "block",
+            "margin-bottom": "8px",
+            "margin-left": "8px",
+            "margin-right": "8px",
+            "margin-top": "8px"
+        },
         "children": [
             {
                 "node": {
@@ -153,7 +159,7 @@
                                 "continuousY": 16,
                                 "continuousBaseline": 29.6,
                                 "line": {
-                                    "x": 0,
+                                    "x": 8,
                                     "y": 16,
                                     "width": 80.432,
                                     "height": 19.2,
@@ -161,7 +167,7 @@
                                     "text": "Hello World",
                                     "runs": [
                                         {
-                                            "x": 0,
+                                            "x": 8,
                                             "y": 16,
                                             "width": 80.432,
                                             "height": 19.2,
@@ -180,7 +186,7 @@
                                     "atomicBoxes": [],
                                     "items": [
                                         {
-                                            "x": 0,
+                                            "x": 8,
                                             "y": 16,
                                             "width": 80.432,
                                             "height": 19.2,
@@ -220,27 +226,27 @@
                     },
                     "box": {
                         "content": {
-                            "x": 0,
+                            "x": 8,
                             "y": 16,
-                            "width": 760,
+                            "width": 744,
                             "height": 19.200000000000003
                         },
                         "paddingBox": {
-                            "x": 0,
+                            "x": 8,
                             "y": 16,
-                            "width": 760,
+                            "width": 744,
                             "height": 19.200000000000003
                         },
                         "borderBox": {
-                            "x": 0,
+                            "x": 8,
                             "y": 16,
-                            "width": 760,
+                            "width": 744,
                             "height": 19.200000000000003
                         },
                         "marginBox": {
-                            "x": 0,
+                            "x": 8,
                             "y": 0,
-                            "width": 760,
+                            "width": 744,
                             "height": 51.2
                         },
                         "padding": {
@@ -265,7 +271,7 @@
                     "fontSize": 16,
                     "lineBoxes": [
                         {
-                            "x": 0,
+                            "x": 8,
                             "y": 16,
                             "width": 80.432,
                             "height": 19.2,
@@ -273,7 +279,7 @@
                             "text": "Hello World",
                             "runs": [
                                 {
-                                    "x": 0,
+                                    "x": 8,
                                     "y": 16,
                                     "width": 80.432,
                                     "height": 19.2,
@@ -292,7 +298,7 @@
                             "atomicBoxes": [],
                             "items": [
                                 {
-                                    "x": 0,
+                                    "x": 8,
                                     "y": 16,
                                     "width": 80.432,
                                     "height": 19.2,
@@ -342,7 +348,7 @@
                                             "continuousY": 16,
                                             "continuousBaseline": 29.6,
                                             "line": {
-                                                "x": 0,
+                                                "x": 8,
                                                 "y": 16,
                                                 "width": 80.432,
                                                 "height": 19.2,
@@ -350,7 +356,7 @@
                                                 "text": "Hello World",
                                                 "runs": [
                                                     {
-                                                        "x": 0,
+                                                        "x": 8,
                                                         "y": 16,
                                                         "width": 80.432,
                                                         "height": 19.2,
@@ -369,7 +375,7 @@
                                                 "atomicBoxes": [],
                                                 "items": [
                                                     {
-                                                        "x": 0,
+                                                        "x": 8,
                                                         "y": 16,
                                                         "width": 80.432,
                                                         "height": 19.2,
@@ -409,27 +415,27 @@
                                 },
                                 "box": {
                                     "content": {
-                                        "x": 0,
+                                        "x": 8,
                                         "y": 16,
-                                        "width": 760,
+                                        "width": 744,
                                         "height": 19.200000000000003
                                     },
                                     "paddingBox": {
-                                        "x": 0,
+                                        "x": 8,
                                         "y": 16,
-                                        "width": 760,
+                                        "width": 744,
                                         "height": 19.200000000000003
                                     },
                                     "borderBox": {
-                                        "x": 0,
+                                        "x": 8,
                                         "y": 16,
-                                        "width": 760,
+                                        "width": 744,
                                         "height": 19.200000000000003
                                     },
                                     "marginBox": {
-                                        "x": 0,
+                                        "x": 8,
                                         "y": 0,
-                                        "width": 760,
+                                        "width": 744,
                                         "height": 51.2
                                     },
                                     "padding": {
@@ -454,7 +460,7 @@
                                 "fontSize": 16,
                                 "lineBoxes": [
                                     {
-                                        "x": 0,
+                                        "x": 8,
                                         "y": 16,
                                         "width": 80.432,
                                         "height": 19.2,
@@ -462,7 +468,7 @@
                                         "text": "Hello World",
                                         "runs": [
                                             {
-                                                "x": 0,
+                                                "x": 8,
                                                 "y": 16,
                                                 "width": 80.432,
                                                 "height": 19.2,
@@ -481,7 +487,7 @@
                                         "atomicBoxes": [],
                                         "items": [
                                             {
-                                                "x": 0,
+                                                "x": 8,
                                                 "y": 16,
                                                 "width": 80.432,
                                                 "height": 19.2,
@@ -517,7 +523,7 @@
                                     "continuousY": 16,
                                     "continuousBaseline": 29.6,
                                     "line": {
-                                        "x": 0,
+                                        "x": 8,
                                         "y": 16,
                                         "width": 80.432,
                                         "height": 19.2,
@@ -525,7 +531,7 @@
                                         "text": "Hello World",
                                         "runs": [
                                             {
-                                                "x": 0,
+                                                "x": 8,
                                                 "y": 16,
                                                 "width": 80.432,
                                                 "height": 19.2,
@@ -544,7 +550,7 @@
                                         "atomicBoxes": [],
                                         "items": [
                                             {
-                                                "x": 0,
+                                                "x": 8,
                                                 "y": 16,
                                                 "width": 80.432,
                                                 "height": 19.2,
@@ -580,9 +586,9 @@
                     {
                         "type": "box",
                         "pageIndex": 0,
-                        "x": 20,
+                        "x": 28,
                         "y": 36,
-                        "width": 760,
+                        "width": 744,
                         "height": 19.200000000000003,
                         "backgroundColor": null,
                         "borderRadius": {
@@ -621,27 +627,27 @@
                             },
                             "box": {
                                 "content": {
-                                    "x": 0,
+                                    "x": 8,
                                     "y": 16,
-                                    "width": 760,
+                                    "width": 744,
                                     "height": 19.200000000000003
                                 },
                                 "paddingBox": {
-                                    "x": 0,
+                                    "x": 8,
                                     "y": 16,
-                                    "width": 760,
+                                    "width": 744,
                                     "height": 19.200000000000003
                                 },
                                 "borderBox": {
-                                    "x": 0,
+                                    "x": 8,
                                     "y": 16,
-                                    "width": 760,
+                                    "width": 744,
                                     "height": 19.200000000000003
                                 },
                                 "marginBox": {
-                                    "x": 0,
+                                    "x": 8,
                                     "y": 0,
-                                    "width": 760,
+                                    "width": 744,
                                     "height": 51.2
                                 },
                                 "padding": {
@@ -666,7 +672,7 @@
                             "fontSize": 16,
                             "lineBoxes": [
                                 {
-                                    "x": 0,
+                                    "x": 8,
                                     "y": 16,
                                     "width": 80.432,
                                     "height": 19.2,
@@ -674,7 +680,7 @@
                                     "text": "Hello World",
                                     "runs": [
                                         {
-                                            "x": 0,
+                                            "x": 8,
                                             "y": 16,
                                             "width": 80.432,
                                             "height": 19.2,
@@ -693,7 +699,7 @@
                                     "atomicBoxes": [],
                                     "items": [
                                         {
-                                            "x": 0,
+                                            "x": 8,
                                             "y": 16,
                                             "width": 80.432,
                                             "height": 19.2,
@@ -717,7 +723,7 @@
                     {
                         "type": "text",
                         "pageIndex": 0,
-                        "x": 20,
+                        "x": 28,
                         "y": 36,
                         "baseline": 49.6,
                         "text": "Hello World",
@@ -735,7 +741,7 @@
                         "lineThrough": false,
                         "linkHref": null,
                         "run": {
-                            "x": 0,
+                            "x": 8,
                             "y": 16,
                             "width": 80.432,
                             "height": 19.2,

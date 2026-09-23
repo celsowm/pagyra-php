@@ -12,6 +12,7 @@ final class FloatLayoutTest extends TestCase
     public function testFloatLeftAndFloatRightSiblingsShareTheSameRowInsteadOfStacking(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:400px">'
                 . '<div style="float:left"><span>esquerda</span></div>'
                 . '<div style="float:right"><span>direita</span></div>'
@@ -34,6 +35,7 @@ final class FloatLayoutTest extends TestCase
     public function testFloatRunHeightIsTheTallestFloatNotTheSumOfBoth(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:400px;font-size:10px">'
                 . '<div style="float:left;height:12px"><span>a</span></div>'
                 . '<div style="float:right;height:40px"><span>b</span></div>'
@@ -49,6 +51,7 @@ final class FloatLayoutTest extends TestCase
     public function testNormalFlowSiblingAfterAFloatRunClearsBelowIt(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:400px">'
                 . '<div style="float:left;height:30px"><span>a</span></div>'
                 . '<p style="margin:0">depois</p>'
@@ -66,6 +69,7 @@ final class FloatLayoutTest extends TestCase
     public function testTwoLeftFloatsStackHorizontallySideBySideNotOnTopOfEachOther(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:400px">'
                 . '<div style="float:left"><span>um</span></div>'
                 . '<div style="float:left"><span>dois</span></div>'
@@ -85,6 +89,7 @@ final class FloatLayoutTest extends TestCase
     public function testFloatWithAutoWidthShrinksToItsInlineContentInsteadOfFillingTheContainer(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:400px;font-size:16px">'
                 . '<div style="float:left"><span>curto</span></div>'
                 . '</div>',
@@ -101,6 +106,7 @@ final class FloatLayoutTest extends TestCase
     public function testFloatWithExplicitWidthKeepsThatWidthInsteadOfShrinkToFit(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:400px">'
                 . '<div style="float:left;width:120px"><span>x</span></div>'
                 . '</div>',
@@ -121,7 +127,7 @@ final class FloatLayoutTest extends TestCase
             . '<div style="float:right;font-weight:bold"><span>190004408723</span></div>'
             . '</footer>';
 
-        $prepared = Pagyra::prepareHtmlRender(['html' => $html, 'viewportWidth' => 400, 'viewportHeight' => 100]);
+        $prepared = Pagyra::prepareHtmlRender(['pagedBodyMargin' => 'zero', 'html' => $html, 'viewportWidth' => 400, 'viewportHeight' => 100]);
         $footer = $prepared->layoutRoot->children[0];
 
         self::assertCount(2, $footer->children);

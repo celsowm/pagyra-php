@@ -61,6 +61,9 @@ final class StyleComputer
         'widows' => '2',
     ];
 
+    /** The computed font-size of the root element, which is what `rem` means. */
+    private float $rootFontSize = FontSizeKeywords::MEDIUM_PX;
+
     public function __construct(
         private readonly SelectorMatcher $selectorMatcher = new SelectorMatcher(),
         private readonly DeclarationParser $declarationParser = new DeclarationParser(),
@@ -68,10 +71,46 @@ final class StyleComputer
     ) {
     }
 
-    /** @param list<StyleRule> $rules */
-    public function computeTree(Node $root, array $rules): StyledNode
+    /**
+     * With the document's `<html>` and `<body>` elements at hand, the cascade starts at them, as
+     * it does in the reference (pagyra-js `src/html-to-pdf/layout-build.ts` computes the html
+     * style, then the body style from it, and uses the body style for the root layout node): the
+     * root StyledNode carries the body's computed style and every top-level element inherits from
+     * it and sees `html > body` as its ancestors. Without them `body { font-family: Arial }`,
+     * `html { font-size: 10px }`, `:root { --cor: red }` and `<body class="ck-content">` for
+     * `.ck-content p` all did nothing.
+     *
+     * @param list<StyleRule> $rules
+     * @param bool $zeroBodyMargin the reference's `pagedBodyMargin: 'zero'`
+     */
+    public function computeTree(Node $root, array $rules, ?Node $html = null, ?Node $body = null, bool $zeroBodyMargin = false): StyledNode
     {
-        return $this->computeNode($root, $rules, null, [], []);
+        $this->rootFontSize = FontSizeKeywords::MEDIUM_PX;
+        if ($html === null) {
+            return $this->computeNode($root, $rules, null, [], []);
+        }
+
+        [$htmlStyle, $variables] = $this->computeStyle($html, $rules, null, [], []);
+        $this->rootFontSize = self::pxValue($htmlStyle->get('font-size')) ?? FontSizeKeywords::MEDIUM_PX;
+        $rootStyle = $htmlStyle;
+        $ancestors = [$html];
+        if ($body !== null) {
+            [$rootStyle, $variables] = $this->computeStyle($body, $rules, $htmlStyle, $ancestors, $variables);
+            $ancestors[] = $body;
+            if ($zeroBodyMargin) {
+                // Unconditional, author margin included, as the reference's `zero` mode does.
+                $rootStyle = new ComputedStyle(array_merge($rootStyle->properties, [
+                    'margin-top' => '0', 'margin-right' => '0', 'margin-bottom' => '0', 'margin-left' => '0',
+                ]));
+            }
+        }
+
+        $children = [];
+        foreach ($root->children as $child) {
+            $children[] = $this->computeNode($child, $rules, $rootStyle, $ancestors, $variables);
+        }
+
+        return new StyledNode($root, $rootStyle, $children);
     }
 
     /**
@@ -345,6 +384,25 @@ final class StyleComputer
     /** @param list<StyleRule> $rules @param list<Node> $ancestors @param array<string,string> $inheritedVariables */
     private function computeNode(Node $node, array $rules, ?ComputedStyle $parent, array $ancestors, array $inheritedVariables): StyledNode
     {
+        [$style, $variables] = $this->computeStyle($node, $rules, $parent, $ancestors, $inheritedVariables);
+        $children = [];
+        $nextAncestors = $ancestors;
+        if ($node->type === 'element') {
+            $nextAncestors[] = $node;
+        }
+        foreach ($node->children as $child) {
+            $children[] = $this->computeNode($child, $rules, $style, $nextAncestors, $variables);
+        }
+
+        return new StyledNode($node, $style, $children);
+    }
+
+    /**
+     * @param list<StyleRule> $rules @param list<Node> $ancestors @param array<string,string> $inheritedVariables
+     * @return array{0:ComputedStyle,1:array<string,string>} the style and the custom properties in scope for the children
+     */
+    private function computeStyle(Node $node, array $rules, ?ComputedStyle $parent, array $ancestors, array $inheritedVariables): array
+    {
         $properties = $this->userAgentStyles->forNode($node);
         foreach ($this->presentationalHints($node, $ancestors) as $property => $value) {
             $properties[$property] = $value;
@@ -433,17 +491,8 @@ final class StyleComputer
         }
 
         ksort($properties);
-        $style = new ComputedStyle($properties);
-        $children = [];
-        $nextAncestors = $ancestors;
-        if ($node->type === 'element') {
-            $nextAncestors[] = $node;
-        }
-        foreach ($node->children as $child) {
-            $children[] = $this->computeNode($child, $rules, $style, $nextAncestors, $variables);
-        }
 
-        return new StyledNode($node, $style, $children);
+        return [new ComputedStyle($properties), $variables];
     }
 
     /**
@@ -494,7 +543,7 @@ final class StyleComputer
             $number = (float) $m[1];
             $properties[$property] = self::px(match ($m[2]) {
                 'em' => $number * $fontSize,
-                'rem' => $number * FontSizeKeywords::MEDIUM_PX,
+                'rem' => $number * $this->rootFontSize,
                 'ex' => $number * $fontSize * 0.5,
                 '%' => $number / 100.0 * $fontSize,
             });
@@ -522,7 +571,7 @@ final class StyleComputer
             'mm' => Units::mmToPx($number),
             'q' => Units::qToPx($number),
             'em' => $number * $parentFontSize,
-            'rem' => $number * FontSizeKeywords::MEDIUM_PX,
+            'rem' => $number * $this->rootFontSize,
             'ex' => $number * $parentFontSize * 0.5,
             '%' => $number / 100.0 * $parentFontSize,
         };

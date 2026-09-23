@@ -15,6 +15,7 @@ final class VisibilityPaintTest extends TestCase
     public function testHiddenBoxKeepsLayoutButProducesNoPaintCommands(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:160px 100px;margin:0}div,p{margin:0}</style>'
                 . '<div id="hidden" style="height:30px;background:red;visibility:hidden">SECRET</div>'
                 . '<p id="visible" style="height:20px;background:green">VISIBLE</p>',
@@ -47,6 +48,7 @@ final class VisibilityPaintTest extends TestCase
     public function testVisibleDescendantCanOverrideInheritedHiddenVisibility(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:180px 100px;margin:0}div{margin:0}</style>'
                 . '<div style="visibility:hidden"><span style="visibility:visible">CHILD</span><span>HIDDEN</span></div>',
             'pageWidth' => 180.0,

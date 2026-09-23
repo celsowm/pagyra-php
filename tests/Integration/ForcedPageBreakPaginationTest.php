@@ -12,6 +12,7 @@ final class ForcedPageBreakPaginationTest extends TestCase
     public function testBreakBeforeMovesFollowingBlockToNextPage(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>'
                 . '@page { size:300px 200px; margin:20px; }'
                 . 'p { margin:0; height:40px; }'
@@ -35,6 +36,7 @@ final class ForcedPageBreakPaginationTest extends TestCase
     public function testLegacyPageBreakAfterAlwaysMovesNextBlock(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>'
                 . '@page { size:300px 200px; margin:20px; }'
                 . 'p { margin:0; height:40px; }'
@@ -54,6 +56,7 @@ final class ForcedPageBreakPaginationTest extends TestCase
     public function testRightBreakCanSkipAParityPage(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>'
                 . '@page { size:300px 200px; margin:20px; }'
                 . 'p { margin:0; height:40px; }'
@@ -73,6 +76,7 @@ final class ForcedPageBreakPaginationTest extends TestCase
     public function testTallBlockReportsAllPagesAndFragmentGeometry(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>'
                 . '@page { size:300px 200px; margin:20px; }'
                 . 'div { margin:0; height:350px; }'

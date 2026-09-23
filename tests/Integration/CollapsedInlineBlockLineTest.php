@@ -19,6 +19,7 @@ final class CollapsedInlineBlockLineTest extends TestCase
     private function firstBlock(string $html): \Pagyra\Layout\LayoutNode
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => $html,
             'viewportWidth' => 600,
             'viewportHeight' => 400,

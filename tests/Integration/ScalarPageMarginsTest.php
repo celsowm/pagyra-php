@@ -31,7 +31,7 @@ final class ScalarPageMarginsTest extends TestCase
 
     public function testANumberIsTheMarginOnEverySide(): void
     {
-        $prepared = Pagyra::prepareHtmlRender(['html' => '<p style="margin:0">x</p>', 'margins' => self::TEN_MM]);
+        $prepared = Pagyra::prepareHtmlRender(['pagedBodyMargin' => 'zero', 'html' => '<p style="margin:0">x</p>', 'margins' => self::TEN_MM]);
 
         self::assertSame(
             ['top' => self::TEN_MM, 'right' => self::TEN_MM, 'bottom' => self::TEN_MM, 'left' => self::TEN_MM],

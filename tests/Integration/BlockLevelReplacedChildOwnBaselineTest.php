@@ -53,6 +53,7 @@ final class BlockLevelReplacedChildOwnBaselineTest extends TestCase
     public function testFollowingSiblingIsNotPushedDownByTheImagesOwnHeight(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => sprintf(self::LOGO_HTML, $this->pngDataUrl()),
             'viewportWidth' => 300,
             'viewportHeight' => 400,
@@ -71,6 +72,7 @@ final class BlockLevelReplacedChildOwnBaselineTest extends TestCase
     public function testImageStillReachesThePdf(): void
     {
         $pdf = Pagyra::renderHtmlToPdf([
+            'pagedBodyMargin' => 'zero',
             'html' => sprintf(self::LOGO_HTML, $this->pngDataUrl()),
             'viewportWidth' => 300,
             'viewportHeight' => 400,

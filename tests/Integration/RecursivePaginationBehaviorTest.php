@@ -12,6 +12,7 @@ final class RecursivePaginationBehaviorTest extends TestCase
     public function testDescendantBreakBeforeMovesOnlyThatDescendantAndFollowingFlow(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:200px 100px;margin:0} section,div{margin:0}</style>'
                 . '<section><div style="height:20px"></div><div style="height:20px;break-before:page"></div><div style="height:20px"></div></section>',
             'viewportWidth' => 200,
@@ -35,6 +36,7 @@ final class RecursivePaginationBehaviorTest extends TestCase
     public function testDescendantRightBreakPreservesSkippedParityPage(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:200px 100px;margin:0} section,div{margin:0}</style>'
                 . '<section><div style="height:20px"></div><div style="height:20px;break-before:right"></div></section>',
             'viewportWidth' => 200,
@@ -54,6 +56,7 @@ final class RecursivePaginationBehaviorTest extends TestCase
     public function testDescendantBreakAfterMovesFollowingSibling(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:200px 100px;margin:0} section,div{margin:0}</style>'
                 . '<section><div style="height:20px;break-after:page"></div><div style="height:20px"></div></section>',
             'viewportWidth' => 200,
@@ -70,6 +73,7 @@ final class RecursivePaginationBehaviorTest extends TestCase
     public function testDescendantBreakInsideAvoidMovesWholeBoxToNextPage(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:200px 100px;margin:0} section,div{margin:0}</style>'
                 . '<section><div style="height:80px"></div><div style="height:30px;break-inside:avoid"></div><div style="height:10px"></div></section>',
             'viewportWidth' => 200,
@@ -86,6 +90,7 @@ final class RecursivePaginationBehaviorTest extends TestCase
     public function testDescendantWidowsMoveParagraphInsideWrapper(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
             'html' => '<style>@page{size:300px 80px;margin:0} section,div,p{margin:0} p{white-space:pre;font-size:16px;line-height:20px}</style>'
                 . '<section><div style="height:40px"></div><p>one' . "\n" . 'two' . "\n" . 'three</p></section>',
             'viewportWidth' => 300,

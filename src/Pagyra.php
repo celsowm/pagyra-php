@@ -56,7 +56,13 @@ final class Pagyra
             viewportWidth: $viewportWidth,
             viewportHeight: $viewportHeight,
         );
-        $styledRoot = (new StyleComputer())->computeTree($document->root, $rules);
+        $styledRoot = (new StyleComputer())->computeTree(
+            $document->root,
+            $rules,
+            $document->htmlElement,
+            $document->bodyElement,
+            zeroBodyMargin: $options->pagedBodyMargin === 'zero',
+        );
 
         $registry = self::buildFontRegistry(
             $options->fontConfig,

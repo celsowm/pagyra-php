@@ -55,31 +55,70 @@ final class BlockLayoutEngine
      */
     private function layoutDocument(StyledNode $root): LayoutNode
     {
+        // The root carries the body's computed style (StyleComputer::computeTree), and the body is
+        // a block box like any other: its margin (8px from the UA sheet), border and padding
+        // inset the content, `width`/`max-width` narrow it and auto side margins centre it. The
+        // reference lays the root out from that same body style (pagyra-js
+        // `src/html-to-pdf/layout-build.ts`). The root node keeps the full viewport as its own
+        // box, and only its children move, so the tree the pagination walks is unchanged.
+        $fontSize = $this->resolveFontSize($root, self::ROOT_FONT_SIZE);
+        [$marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw] = $this->edgeRawValues($root, 'margin');
+        $margin = $this->resolveRawEdges($marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw, $this->viewportWidth, $this->viewportHeight, $fontSize);
+        $padding = $this->resolveEdges($root, 'padding', $this->viewportWidth, $this->viewportHeight, $fontSize);
+        $border = $this->resolveBorderEdges($root, $this->viewportWidth, $this->viewportHeight, $fontSize);
+        $horizontalNonContent = $padding->horizontal() + $border->horizontal();
+        $widthValue = $root->style->get('width', 'auto') ?? 'auto';
+        if ($this->isAuto($widthValue)) {
+            $contentWidth = max(0.0, $this->viewportWidth - $margin->horizontal() - $horizontalNonContent);
+        } else {
+            $resolvedWidth = $this->resolveLength($widthValue, $this->viewportWidth, $fontSize, $this->viewportWidth, $this->viewportHeight, 'zero');
+            $contentWidth = ($root->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedWidth - $horizontalNonContent) : max(0.0, $resolvedWidth);
+        }
+        $autoWidthBeforeConstraints = $contentWidth;
+        $contentWidth = $this->applyHorizontalConstraints($root, $contentWidth, $horizontalNonContent, $this->viewportWidth, $this->viewportHeight, $fontSize);
+        if (!$this->isAuto($widthValue) || $contentWidth !== $autoWidthBeforeConstraints) {
+            $usedMargins = BlockMath::resolveAutoMargins($this->viewportWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
+            $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
+        }
+        $contentX = $margin->left + $border->left + $padding->left;
+        $contentRight = $contentX + $contentWidth;
+
+        $segments = $this->flowSegments($root);
+        $cursorY = $margin->top + $border->top + $padding->top;
+        $collapsesTop = $border->top <= 0.0 && $padding->top <= 0.0;
+        $first = $segments[0] ?? null;
+        if ($collapsesTop && $first !== null && $first[0] === 'block' && $this->floatSide($first[1]) === null) {
+            // CSS 2.1 8.3.1: the body's top margin collapses with its first child's (the 8px
+            // and a paragraph's 16px give 16, not 24). The child adds its own used top margin
+            // when it is laid out, so it starts where the collapsed margin minus that one ends.
+            $leading = $this->leadingChildTopMargin($segments, $contentWidth, $this->viewportHeight, $fontSize);
+            $cursorY = max($margin->top, $leading) - $leading;
+        }
+
         $children = [];
-        $cursorY = 0.0;
         $previousBorderBottom = null;
         $previousBottomMargin = 0.0;
-        $float = new FloatRun(0.0, $this->viewportWidth);
+        $float = new FloatRun($contentX, $contentRight);
 
-        foreach ($this->flowSegments($root) as $segment) {
+        foreach ($segments as $segment) {
             if ($segment[0] === 'inline') {
                 if ($float->active) {
                     $cursorY = max($cursorY, $float->bottom);
-                    $float = $float->reset(0.0, $this->viewportWidth);
+                    $float = $float->reset($contentX, $contentRight);
                 }
                 $run = $this->inlineTextFormatter->layout(
                     new StyledNode($root->node, $root->style, $segment[1]),
-                    0.0,
+                    $contentX,
                     $cursorY,
-                    $this->viewportWidth,
-                    self::ROOT_FONT_SIZE,
+                    $contentWidth,
+                    $fontSize,
                 );
                 // Always an anonymous block here, never lines on the root itself: the pagination
                 // walk starts at the root's children, so anything left on the root node was laid
                 // out and then never painted. `<p>a</p>solto<p>b</p>` lost "solto" that way, and
                 // an <img> or a bare text node directly under <body> went the same way — the
                 // layout tree had it, the display list and the PDF did not.
-                $children[] = $this->anonymousBlockOfLines($root, $run->lines, 0.0, $cursorY, $this->viewportWidth, $run->height, self::ROOT_FONT_SIZE);
+                $children[] = $this->anonymousBlockOfLines($root, $run->lines, $contentX, $cursorY, $contentWidth, $run->height, $fontSize);
                 $cursorY += $run->height;
                 $previousBorderBottom = null;
                 $previousBottomMargin = 0.0;
@@ -87,7 +126,7 @@ final class BlockLayoutEngine
             }
 
             $child = $segment[1];
-            $childFontSize = $this->resolveFontSize($child, self::ROOT_FONT_SIZE);
+            $childFontSize = $this->resolveFontSize($child, $fontSize);
 
             $side = $this->floatSide($child);
             if ($side !== null) {
@@ -100,21 +139,24 @@ final class BlockLayoutEngine
                 $cursorY = max($cursorY, $float->bottom);
                 $previousBorderBottom = null;
                 $previousBottomMargin = 0.0;
-                $float = $float->reset(0.0, $this->viewportWidth);
+                $float = $float->reset($contentX, $contentRight);
             }
 
-            $childTopMargin = $this->resolveMarginSide($child, 'top', $this->viewportWidth, $this->viewportHeight, $childFontSize);
+            $childTopMargin = $this->resolveMarginSide($child, 'top', $contentWidth, $this->viewportHeight, $childFontSize);
             $flowY = $previousBorderBottom === null ? $cursorY : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
-            $layout = $this->layoutBlockLevelChild($child, 0.0, $flowY, $this->viewportWidth, $this->viewportHeight, self::ROOT_FONT_SIZE);
+            $layout = $this->layoutBlockLevelChild($child, $contentX, $flowY, $contentWidth, $this->viewportHeight, $fontSize);
             $children[] = $layout;
             $previousBorderBottom = $layout->box->borderBox()->bottom();
             $previousBottomMargin = $layout->box->margin->bottom;
             $cursorY = $previousBorderBottom + $previousBottomMargin;
         }
         if ($float->active) $cursorY = max($cursorY, $float->bottom);
+        $collapsesBottom = $border->bottom <= 0.0 && $padding->bottom <= 0.0 && $previousBorderBottom !== null;
+        $cursorY += $padding->bottom + $border->bottom
+            + ($collapsesBottom ? max(0.0, $margin->bottom - $previousBottomMargin) : $margin->bottom);
 
         // No lineBoxes of its own: everything inline became an anonymous block child above.
-        return new LayoutNode($root, new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY))), $children, self::ROOT_FONT_SIZE);
+        return new LayoutNode($root, new LayoutBox(new Rect(0.0, 0.0, $this->viewportWidth, max(0.0, $cursorY))), $children, $fontSize);
     }
 
     /**
