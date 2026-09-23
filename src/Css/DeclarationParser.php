@@ -11,6 +11,7 @@ final class DeclarationParser
         private readonly BackgroundShorthandExpander $backgroundShorthandExpander = new BackgroundShorthandExpander(),
         private readonly BoxEdgeShorthandExpander $boxEdgeShorthandExpander = new BoxEdgeShorthandExpander(),
         private readonly TextDecorationShorthandExpander $textDecorationShorthandExpander = new TextDecorationShorthandExpander(),
+        private readonly FontShorthandExpander $fontShorthandExpander = new FontShorthandExpander(),
     ) {
     }
 
@@ -52,7 +53,8 @@ final class DeclarationParser
             $expanded = $this->borderShorthandExpander->expand($property, $value)
                 ?? $this->backgroundShorthandExpander->expand($property, $value)
                 ?? $this->boxEdgeShorthandExpander->expand($property, $value)
-                ?? $this->textDecorationShorthandExpander->expand($property, $value);
+                ?? $this->textDecorationShorthandExpander->expand($property, $value)
+                ?? $this->fontShorthandExpander->expand($property, $value);
             if ($expanded !== null) {
                 foreach ($expanded as $expandedProperty => $expandedValue) {
                     $this->assignDeclaration($declarations, $expandedProperty, $expandedValue, $important);
