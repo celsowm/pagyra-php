@@ -29,7 +29,7 @@ final class StyleComputer
         // only receives what is listed here, so `<p style="text-transform:uppercase">` upper-cased
         // its own text but not a `<b>` inside it.
         'text-transform', 'letter-spacing', 'word-spacing', 'word-break', 'overflow-wrap', 'word-wrap',
-        'font-variant', 'orphans', 'widows', 'quotes',
+        'font-variant', 'orphans', 'widows', 'quotes', 'text-align-last',
         'x-link-href',
     ];
 
@@ -53,6 +53,7 @@ final class StyleComputer
         'text-decoration-line' => 'none',
         'text-decoration-style' => 'solid',
         'text-decoration-color' => 'currentcolor',
+        'text-align-last' => 'auto',
         'text-transform' => 'none',
         'letter-spacing' => 'normal',
         'word-spacing' => 'normal',
@@ -915,6 +916,7 @@ final class StyleComputer
 
         if ($node->type === 'element') {
             $this->absolutizeFontRelativeLengths($properties, $parent);
+            $this->absolutizeFontWeight($properties, $parent);
         }
 
         if ($node->isElement('li')) {
@@ -1003,6 +1005,30 @@ final class StyleComputer
                 '%' => $number / 100.0 * $fontSize,
             });
         }
+    }
+
+    /**
+     * `bolder`/`lighter` against the parent's computed weight (CSS Fonts 4 §2.2 "meaning of the
+     * relative weights"); both were read as 400, so `<b style="font-weight:bolder">` inside normal
+     * text came out regular.
+     *
+     * @param array<string,string> $properties
+     */
+    private function absolutizeFontWeight(array &$properties, ?ComputedStyle $parent): void
+    {
+        $value = strtolower(trim($properties['font-weight'] ?? ''));
+        if ($value !== 'bolder' && $value !== 'lighter') {
+            return;
+        }
+        $parentWeight = strtolower(trim($parent?->get('font-weight') ?? 'normal'));
+        $inherited = match ($parentWeight) {
+            'bold' => 700,
+            'normal' => 400,
+            default => is_numeric($parentWeight) ? (int) $parentWeight : 400,
+        };
+        $properties['font-weight'] = (string) ($value === 'bolder'
+            ? ($inherited < 350 ? 400 : ($inherited < 550 ? 700 : 900))
+            : ($inherited < 550 ? 100 : ($inherited < 750 ? 400 : 700)));
     }
 
     private function resolveFontSizeValue(string $raw, float $parentFontSize): ?float

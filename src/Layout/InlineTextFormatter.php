@@ -137,14 +137,21 @@ final class InlineTextFormatter
 
             $isLastLine = $lineIndex === count($lines) - 1;
             $alignment = strtolower($block->style->get('text-align', 'left') ?? 'left');
+            // `text-align-last` (CSS Text 3 §6.2) takes over for the last line and for every line
+            // ended by a forced break; `auto` leaves it to text-align, where justify means start.
+            $alignLast = strtolower(trim($block->style->get('text-align-last', 'auto') ?? 'auto'));
+            if ($alignLast !== 'auto' && ($isLastLine || isset($forcedBreakLines[$lineIndex]))) {
+                $alignment = $alignLast;
+            }
             // `text-align` aligns inline content inside a line box; it never moves a block-level
             // box, which stays at the content edge (only auto margins would move it). A line
             // holding just such a box therefore ignores the alignment entirely.
             $indentForLine = $lineIndex === 0 ? $textIndent : 0.0;
             $roomForLine = $availableWidth - $indentForLine;
             $isBlockLevelBoxLine = count($lineTokens) === 1 && ($lineTokens[0]['blockLevel'] ?? false);
-            $justify = !$isBlockLevelBoxLine && $alignment === 'justify' && !$isLastLine
-                && !isset($forcedBreakLines[$lineIndex]) && $roomForLine > $lineWidth;
+            $justify = !$isBlockLevelBoxLine && $alignment === 'justify'
+                && (($alignLast === 'justify') || (!$isLastLine && !isset($forcedBreakLines[$lineIndex])))
+                && $roomForLine > $lineWidth;
             $spaceCount = $justify ? $this->countSpaceTokens($lineTokens) : 0;
             $extraPerSpace = $spaceCount > 0 ? ($roomForLine - $lineWidth) / $spaceCount : 0.0;
             $offset = ($justify || $isBlockLevelBoxLine) ? 0.0 : $this->alignmentOffset($alignment, $lineWidth, $roomForLine);

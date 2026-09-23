@@ -12,6 +12,7 @@ final class DeclarationParser
         private readonly BoxEdgeShorthandExpander $boxEdgeShorthandExpander = new BoxEdgeShorthandExpander(),
         private readonly TextDecorationShorthandExpander $textDecorationShorthandExpander = new TextDecorationShorthandExpander(),
         private readonly FontShorthandExpander $fontShorthandExpander = new FontShorthandExpander(),
+        private readonly LogicalPropertyMapper $logicalPropertyMapper = new LogicalPropertyMapper(),
     ) {
     }
 
@@ -50,23 +51,30 @@ final class DeclarationParser
             }
 
             $property = strtolower($property);
-            $expanded = $this->borderShorthandExpander->expand($property, $value)
-                ?? $this->backgroundShorthandExpander->expand($property, $value)
-                ?? $this->boxEdgeShorthandExpander->expand($property, $value)
-                ?? $this->textDecorationShorthandExpander->expand($property, $value)
-                ?? $this->fontShorthandExpander->expand($property, $value);
-            if ($expanded !== null) {
-                foreach ($expanded as $expandedProperty => $expandedValue) {
-                    $this->assignDeclaration($declarations, $expandedProperty, $expandedValue, $important);
-                }
-                continue;
+            foreach ($this->logicalPropertyMapper->map($property, $value) ?? [$property => $value] as $physical => $physicalValue) {
+                $this->assignExpanded($declarations, $physical, $physicalValue, $important);
             }
-
-            $this->assignDeclaration($declarations, $property, $value, $important);
         }
 
         ksort($declarations);
         return $declarations;
+    }
+
+    /** @param array<string,array{value:string,important:bool}> $declarations */
+    private function assignExpanded(array &$declarations, string $property, string $value, bool $important): void
+    {
+        $expanded = $this->borderShorthandExpander->expand($property, $value)
+            ?? $this->backgroundShorthandExpander->expand($property, $value)
+            ?? $this->boxEdgeShorthandExpander->expand($property, $value)
+            ?? $this->textDecorationShorthandExpander->expand($property, $value)
+            ?? $this->fontShorthandExpander->expand($property, $value);
+        if ($expanded === null) {
+            $this->assignDeclaration($declarations, $property, $value, $important);
+            return;
+        }
+        foreach ($expanded as $expandedProperty => $expandedValue) {
+            $this->assignDeclaration($declarations, $expandedProperty, $expandedValue, $important);
+        }
     }
 
     /** @param array<string,array{value:string,important:bool}> $declarations */

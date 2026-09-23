@@ -315,6 +315,18 @@ final class BlockLayoutEngine
         $verticalNonContent = $padding->vertical() + $border->vertical();
         if ($this->isAuto($heightValue)) {
             $contentHeight = $autoContentHeight;
+            // `aspect-ratio` (CSS Sizing 4 §7) gives an auto-height block the height its width
+            // calls for; with the default `min-height: auto` the content can still make it
+            // taller. It was unknown, so `<div style="width:100px; aspect-ratio: 2/1">` had no
+            // height at all and its background never showed.
+            $ratio = $this->aspectRatio($styled->style->get('aspect-ratio'));
+            if ($ratio !== null) {
+                $boxSizing = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box';
+                $ratioHeight = $boxSizing
+                    ? max(0.0, ($contentWidth + $horizontalNonContent) / $ratio - $padding->vertical() - $border->vertical())
+                    : $contentWidth / $ratio;
+                $contentHeight = max($contentHeight, $ratioHeight);
+            }
         } else {
             $resolvedHeight = $this->resolveLength($heightValue, $containingHeight, $fontSize, $containingWidth, $containingHeight, 'zero');
             $contentHeight = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedHeight - $verticalNonContent) : max(0.0, $resolvedHeight);
@@ -608,6 +620,18 @@ final class BlockLayoutEngine
             $node->fontSize,
             $this->inlineTextFormatter->translateLines($node->lineBoxes, 0.0, $dy),
         );
+    }
+
+    /** `aspect-ratio` as width / height, or null for `auto`, `none` or anything invalid. */
+    private function aspectRatio(?string $value): ?float
+    {
+        if ($value === null || preg_match('/(\d*\.?\d+)\s*(?:\/\s*(\d*\.?\d+))?\s*$/', trim($value), $m) !== 1) {
+            return null;
+        }
+        $width = (float) $m[1];
+        $height = isset($m[2]) && $m[2] !== '' ? (float) $m[2] : 1.0;
+
+        return $width > 0.0 && $height > 0.0 ? $width / $height : null;
     }
 
     /** How far below the content edge a laid-out box's lines and children actually reach. */
