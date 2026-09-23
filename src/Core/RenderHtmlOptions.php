@@ -44,7 +44,7 @@ final readonly class RenderHtmlOptions
             viewportHeight: self::positiveNumber($options['viewportHeight'] ?? 1123.0, 'viewportHeight'),
             pageWidth: self::positiveNumber($options['pageWidth'] ?? 794.0, 'pageWidth'),
             pageHeight: self::positiveNumber($options['pageHeight'] ?? 1123.0, 'pageHeight'),
-            margins: self::normalizeMargins($options['margins'] ?? []),
+            margins: self::normalizeMargins($options['margins'] ?? null),
             fontConfig: is_array($options['fontConfig'] ?? null) ? $options['fontConfig'] : [],
             resourceBaseDir: $resourceBaseDir,
             contentScale: self::positiveNumber($options['contentScale'] ?? 1.0, 'contentScale'),
@@ -81,12 +81,37 @@ final readonly class RenderHtmlOptions
         );
     }
 
+    /**
+     * The reference types `margins` as a partial object of sides and never sees anything else,
+     * because TypeScript refuses it before it runs. PHP has no such gate, and falling back to the
+     * 48px default for a value of the wrong shape turned a mistyped option into margins nobody
+     * asked for, with no error: a caller passing `'margins' => 37.795` got 12.7mm instead of
+     * 10mm. So the shape is checked here, where the other options already are. A bare number is
+     * accepted for all four sides, like the one-value form of the CSS `margin` shorthand; that
+     * form does not exist in the reference and is the one deliberate extension of it.
+     */
     private static function normalizeMargins(mixed $value): array
     {
-        $defaults = ['top' => 48.0, 'right' => 48.0, 'bottom' => 48.0, 'left' => 48.0];
-        if (!is_array($value)) return $defaults;
-        foreach ($defaults as $side => $default) if (array_key_exists($side, $value)) $defaults[$side] = self::nonNegativeNumber($value[$side], "margins.$side");
-        return $defaults;
+        $margins = ['top' => 48.0, 'right' => 48.0, 'bottom' => 48.0, 'left' => 48.0];
+        if ($value === null) return $margins;
+
+        if (is_int($value) || is_float($value)) {
+            $all = self::nonNegativeNumber($value, 'margins');
+            return ['top' => $all, 'right' => $all, 'bottom' => $all, 'left' => $all];
+        }
+
+        if (!is_array($value)) {
+            throw new \InvalidArgumentException('margins must be a number or an array keyed by top, right, bottom and left');
+        }
+
+        foreach ($value as $side => $sideValue) {
+            if (!array_key_exists($side, $margins)) {
+                throw new \InvalidArgumentException("margins accepts only top, right, bottom and left, got '$side'");
+            }
+            $margins[$side] = self::nonNegativeNumber($sideValue, "margins.$side");
+        }
+
+        return $margins;
     }
 
     private static function positiveNumber(mixed $value, string $name): float
@@ -99,6 +124,7 @@ final readonly class RenderHtmlOptions
     private static function nonNegativeNumber(mixed $value, string $name): float
     {
         if (!is_int($value) && !is_float($value)) throw new \InvalidArgumentException("$name must be numeric");
+        if (!is_finite((float) $value)) throw new \InvalidArgumentException("$name must be finite");
         if ($value < 0) throw new \InvalidArgumentException("$name must be non-negative");
         return (float) $value;
     }
