@@ -430,7 +430,8 @@ final class BlockLayoutEngine
     private function layoutTable(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
     {
         $fontSize = $this->resolveFontSize($styled, $parentFontSize);
-        $margin = $this->resolveEdges($styled, 'margin', $containingWidth, $containingHeight, $fontSize);
+        [$marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw] = $this->edgeRawValues($styled, 'margin');
+        $margin = $this->resolveRawEdges($marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw, $containingWidth, $containingHeight, $fontSize);
         $padding = $this->resolveEdges($styled, 'padding', $containingWidth, $containingHeight, $fontSize);
         $border = $this->resolveBorderEdges($styled, $containingWidth, $containingHeight, $fontSize);
         $available = max(0.0, $containingWidth - $margin->horizontal());
@@ -441,6 +442,11 @@ final class BlockLayoutEngine
         } else {
             $resolvedWidth = $this->resolveLength($widthValue, $containingWidth, $fontSize, $containingWidth, $containingHeight, 'zero');
             $contentWidth = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedWidth - $horizontalNonContent) : max(0.0, $resolvedWidth);
+            // A table narrower than its container is placed by its auto side margins, as any
+            // block is (`margin: 0 auto`, and `<table align="center">` through its hint); they
+            // resolved to zero here, so such a table always sat on the left.
+            $usedMargins = BlockMath::resolveAutoMargins($containingWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
+            $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
         }
         // Captions sit in the table wrapper box, outside the table's border box and as wide as it
         // (CSS 2.1 17.4): the top ones above the grid, the `caption-side: bottom` ones below. They
