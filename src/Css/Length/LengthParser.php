@@ -64,25 +64,9 @@ final readonly class LengthParser
 
     public function parseCalc(string $value): ?CalcLength
     {
-        if (!str_starts_with($value, 'calc(') || !str_ends_with($value, ')')) return null;
-        $inner = trim(substr($value, 5, -1));
-        if ($inner === '') return null;
-        preg_match_all('/([+-]?)\s*(\d+(?:\.\d+)?)\s*(px|pt|cm|mm|q|in|pc|%|em|rem|cqw|cqh|cqi|cqb|cqmin|cqmax)/i', $inner, $matches, PREG_SET_ORDER);
-        if ($matches === []) return null;
+        if (preg_match('/^(?:-webkit-|-moz-)?(?:calc|min|max|clamp)\(/i', trim($value)) !== 1) return null;
+        $expression = MathExpression::parse($value, $this->viewportWidth, $this->viewportHeight);
 
-        $acc = ['px'=>0.0,'percent'=>0.0,'em'=>0.0,'rem'=>0.0,'cqw'=>0.0,'cqh'=>0.0,'cqi'=>0.0,'cqb'=>0.0,'cqmin'=>0.0,'cqmax'=>0.0];
-        foreach ($matches as $m) {
-            $sign = $m[1] === '-' ? -1.0 : 1.0;
-            $n = (float) $m[2] * $sign;
-            $unit = strtolower($m[3]);
-            if ($unit === '%') { $acc['percent'] += $n / 100; continue; }
-            if (str_starts_with($unit, 'cq')) { $acc[$unit] += $n / 100; continue; }
-            if ($unit === 'em' || $unit === 'rem') { $acc[$unit] += $n; continue; }
-            $acc['px'] += match ($unit) {
-                'px' => $n, 'pt' => Units::ptToPx($n), 'cm' => Units::cmToPx($n), 'mm' => Units::mmToPx($n),
-                'q' => Units::qToPx($n), 'in' => Units::inToPx($n), 'pc' => Units::pcToPx($n), default => 0.0,
-            };
-        }
-        return new CalcLength(...$acc);
+        return $expression === null ? null : new CalcLength(expression: $expression);
     }
 }

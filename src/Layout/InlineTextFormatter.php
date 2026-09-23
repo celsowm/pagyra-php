@@ -11,6 +11,7 @@ use Pagyra\Image\ReplacedElementSizingResolver;
 use Pagyra\Style\ComputedStyle;
 use Pagyra\Style\StyledNode;
 use Pagyra\Css\Length\FontSizeKeywords;
+use Pagyra\Css\Length\MathExpression;
 use Pagyra\Units\Units;
 
 final class InlineTextFormatter
@@ -758,6 +759,12 @@ final class InlineTextFormatter
         $floor = static fn (float $value): float => $allowNegative ? $value : max(0.0, $value);
         $raw = strtolower(trim($raw));
         if ($raw === '' || $raw === 'auto') return $fallback;
+        if (preg_match('/^(?:-webkit-|-moz-)?(?:calc|min|max|clamp)\(/', $raw) === 1) {
+            $expression = MathExpression::parse($raw, $referenceWidth, $referenceWidth);
+            return $expression === null
+                ? $fallback
+                : $floor($expression->evaluate($referenceWidth, $fontSize, self::ROOT_FONT_SIZE, $referenceWidth, $referenceWidth));
+        }
         if (preg_match('/^(-?\d+(?:\.\d+)?)px$/', $raw, $m) === 1) return $floor((float) $m[1]);
         if (preg_match('/^(-?\d+(?:\.\d+)?)pt$/', $raw, $m) === 1) return $floor(Units::ptToPx((float) $m[1]));
         if (preg_match('/^(-?\d+(?:\.\d+)?)in$/', $raw, $m) === 1) return $floor(Units::inToPx((float) $m[1]));
