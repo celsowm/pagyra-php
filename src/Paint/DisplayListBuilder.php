@@ -22,6 +22,7 @@ use Pagyra\Pagination\LineFragment;
 use Pagyra\Pagination\PaginationResult;
 use Pagyra\Pagination\PhysicalPageEntry;
 use Pagyra\Style\ComputedStyle;
+use Pagyra\Style\ListMarker;
 
 final class DisplayListBuilder
 {
@@ -171,6 +172,11 @@ final class DisplayListBuilder
 
         $fontSize = $run->fontSize;
         $textStartX = $run->x + $margins['left'];
+        $shape = ListMarker::bulletShape($marker);
+        if ($shape !== null) {
+            $this->appendBulletShape($commands, $shape, $style, $run, $target, $textStartX, $margins);
+            return;
+        }
         $markerWidth = max($this->textMetrics->measure($marker, $style, $fontSize)->inlineSize, 0.0);
         $gap = max($fontSize * 0.5, 6.0);
         $markerX = $textStartX - $gap - $markerWidth;
@@ -201,6 +207,48 @@ final class DisplayListBuilder
             fontWeight: max(100, min(900, $fontWeight)),
             fontStyle: strtolower(trim($style->get('font-style', 'normal') ?? 'normal')),
             color: ColorParser::parse($style->get('color', 'black')),
+        );
+    }
+
+    /**
+     * A disc, circle or square bullet drawn as a shape: 0.3em across, its top 0.45em above the
+     * baseline and its right edge 0.5em before the text, which is where Chrome puts the bullet of
+     * a 40px list item measured pixel by pixel. The circle is a ring of 0.06em.
+     *
+     * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     */
+    private function appendBulletShape(array &$commands, string $shape, ComputedStyle $style, TextRun $run, LineFragment $target, float $textStartX, array $margins): void
+    {
+        $color = ColorParser::parse($style->get('color', 'black'));
+        if ($color === null) return;
+        $fontSize = $run->fontSize;
+        $size = 0.3 * $fontSize;
+        $x = $textStartX - 0.5 * $fontSize - $size;
+        $baseline = $target->pageBaseline + ($run->baseline - $target->line->baseline) + $margins['top'];
+        $y = $baseline - 0.45 * $fontSize;
+        $bullet = new TextRun($x - $margins['left'], $run->y, $size, $run->height, $run->baseline, '', $fontSize, $style);
+        $half = new CornerRadius($size / 2, $size / 2);
+        $round = new BorderRadius($half, $half, $half, $half);
+
+        if ($shape === 'circle') {
+            $stroke = max(0.06 * $fontSize, 0.5);
+            $innerHalf = new CornerRadius(max(0.0, $size / 2 - $stroke), max(0.0, $size / 2 - $stroke));
+            $commands[] = new RoundedBorderPaintCommand(
+                $bullet, $target->pageIndex, $x, $y, $size, $size, $stroke, $color,
+                $round, new BorderRadius($innerHalf, $innerHalf, $innerHalf, $innerHalf),
+            );
+            return;
+        }
+
+        $commands[] = new BoxPaintCommand(
+            node: $bullet,
+            pageIndex: $target->pageIndex,
+            x: $x,
+            y: $y,
+            width: $size,
+            height: $size,
+            backgroundColor: $color,
+            borderRadius: $shape === 'disc' ? $round : new BorderRadius(),
         );
     }
 

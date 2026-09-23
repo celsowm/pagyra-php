@@ -267,6 +267,32 @@ final class StyleComputer
             }
         }
 
+        // Lists (HTML §15.3.8 and the UA sheet's nested-list rules). A list inside another list
+        // has no vertical margin of its own, and an unordered one steps from disc to circle to
+        // square with depth; `type` on <ol>, <ul> and <li> picks the marker. None of it was
+        // applied, so nested lists were double-spaced and every level showed the same bullet.
+        if ($node->isElement('ul') || $node->isElement('ol') || $node->isElement('menu') || $node->isElement('dir')) {
+            $depth = 0;
+            foreach ($ancestors as $ancestor) {
+                if (in_array($ancestor->tagName, ['ul', 'ol', 'menu', 'dir'], true)) {
+                    $depth++;
+                }
+            }
+            if ($depth > 0) {
+                $hints['margin-top'] = '0';
+                $hints['margin-bottom'] = '0';
+                if (!$node->isElement('ol')) {
+                    $hints['list-style-type'] = $depth === 1 ? 'circle' : 'square';
+                }
+            }
+        }
+        if ($node->isElement('ol') || $node->isElement('ul') || $node->isElement('li')) {
+            $type = $this->listTypeAttribute($node->attribute('type'));
+            if ($type !== null) {
+                $hints['list-style-type'] = $type;
+            }
+        }
+
         // `<table align="center">` centres the table with auto side margins (§15.3.8); it does
         // not centre the text of the cells, which is what mapping it to text-align did.
         if ($node->isElement('table') && strtolower(trim($node->attribute('align') ?? '')) === 'center') {
@@ -329,6 +355,24 @@ final class StyleComputer
         }
 
         return $hints;
+    }
+
+    /**
+     * The `type` attribute of a list or list item as a `list-style-type`. The ordered values are
+     * case-sensitive (`a` and `A` differ), the unordered ones are not.
+     */
+    private function listTypeAttribute(?string $raw): ?string
+    {
+        $raw = trim($raw ?? '');
+
+        return match ($raw) {
+            '1' => 'decimal',
+            'a' => 'lower-alpha',
+            'A' => 'upper-alpha',
+            'i' => 'lower-roman',
+            'I' => 'upper-roman',
+            default => in_array(strtolower($raw), ['disc', 'circle', 'square', 'none'], true) ? strtolower($raw) : null,
+        };
     }
 
     /** A presentational colour attribute's value when it parses as a colour, else null. */
@@ -785,10 +829,18 @@ final class StyleComputer
 
     private function computeListItemIndex(Node $li, Node $parent): int
     {
-        $counter = 0;
+        // `<ol reversed>` counts down, from the number of items unless `start` says otherwise
+        // (HTML §4.4.5); it was ignored and such a list numbered upwards.
+        $reversed = $parent->isElement('ol') && $parent->attribute('reversed') !== null;
+        $items = 0;
+        foreach ($parent->children as $child) {
+            if ($child->type === 'element' && $child->tagName === 'li') $items++;
+        }
+        $step = $reversed ? -1 : 1;
+        $counter = $reversed ? $items + 1 : 0;
         $start = trim((string) $parent->attribute('start'));
         if ($start !== '' && preg_match('/^-?\d+$/', $start) === 1) {
-            $counter = (int) $start - 1;
+            $counter = (int) $start - $step;
         }
         foreach ($parent->children as $child) {
             if ($child->type !== 'element' || $child->tagName !== 'li') continue;
@@ -796,7 +848,7 @@ final class StyleComputer
             if ($value !== '' && preg_match('/^-?\d+$/', $value) === 1) {
                 $counter = (int) $value;
             } else {
-                $counter++;
+                $counter += $step;
             }
             if ($child === $li) return $counter;
         }

@@ -27,10 +27,27 @@ final class ListMarkerTest extends TestCase
 
     public function testUnorderedListDrawsABulletBeforeEachItem(): void
     {
-        $pdf = Pagyra::renderHtmlToPdf(['html' => '<ul><li>um</li><li>dois</li></ul>']);
+        $prepared = Pagyra::prepareHtmlRender(['html' => '<ul><li>um</li><li>dois</li></ul>']);
 
-        // WinAnsi 0x95 is the bullet the Base14 encoder writes for U+2022.
-        self::assertSame(["\x95", 'um', "\x95", 'dois'], self::tjStrings($pdf));
+        // The bullet is a filled circle drawn as a shape, left of the item's text, and no longer
+        // a glyph in the text stream.
+        $bullets = [];
+        $texts = [];
+        foreach ($prepared->displayList->pages[0]->commands as $command) {
+            if ($command instanceof \Pagyra\Paint\BoxPaintCommand && $command->node instanceof \Pagyra\Layout\TextRun) {
+                $bullets[] = $command;
+            } elseif ($command instanceof \Pagyra\Paint\TextPaintCommand) {
+                $texts[] = $command;
+            }
+        }
+        self::assertSame(['um', 'dois'], array_map(static fn($t) => $t->text, $texts));
+        self::assertCount(2, $bullets);
+        foreach ($bullets as $i => $bullet) {
+            self::assertEqualsWithDelta(4.8, $bullet->width, 0.001);
+            self::assertFalse($bullet->borderRadius->isZero());
+            self::assertLessThan($texts[$i]->x, $bullet->x + $bullet->width);
+        }
+        self::assertSame([], array_values(array_filter(self::tjStrings(Pagyra::renderHtmlToPdf(['html' => '<ul><li>um</li></ul>'])), static fn($s) => $s !== 'um')));
     }
 
     public function testOrderedListHonoursTheStartAttribute(): void

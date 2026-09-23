@@ -64,6 +64,18 @@ final class ListMarker
         return $own ?? 'disc';
     }
 
+    /**
+     * `disc`, `circle` or `square` when the marker string is one of the bullets, which the paint
+     * layer draws as shapes: `◦` and `▪` are outside WinAnsi and came out as `?` with the Base14
+     * fonts, and even `•` is sized by whatever face the list happens to use.
+     */
+    public static function bulletShape(string $marker): ?string
+    {
+        $shape = array_search($marker, self::BULLETS, true);
+
+        return is_string($shape) ? $shape : null;
+    }
+
     public static function isOrdered(string $type): bool
     {
         return in_array($type, self::ORDERED, true);

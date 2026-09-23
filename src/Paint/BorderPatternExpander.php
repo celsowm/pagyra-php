@@ -328,7 +328,7 @@ final class BorderPatternExpander
         if (!in_array($pageIndex, $pagesByNode[$id], true)) $pagesByNode[$id][] = $pageIndex;
     }
 
-    private function commandKey(LayoutNode|AtomicInlineBox $node, int $pageIndex): string
+    private function commandKey(LayoutNode|AtomicInlineBox|TextRun $node, int $pageIndex): string
     {
         return spl_object_id($node) . ':' . $pageIndex;
     }
