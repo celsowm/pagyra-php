@@ -21,6 +21,11 @@ final readonly class BoxPaintCommand implements \JsonSerializable
         public float $height,
         public ?Rgba $backgroundColor = null,
         public BorderRadius $borderRadius = new BorderRadius(),
+        /**
+         * A box-shadow layer or an outline side: painted like a background, but not the node's
+         * own background, so border handling keyed on the node must leave it alone.
+         */
+        public bool $decorative = false,
     ) {
     }
 

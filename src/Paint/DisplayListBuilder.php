@@ -98,6 +98,7 @@ final class DisplayListBuilder
             $drawBottom,
         );
 
+        $this->appendBoxShadows($commands, $node, $node->source->style, $pageIndex, $x, $y, $width, $height, BorderRadiusResolver::normalize($radius, $width, $height));
         $commands[] = new BoxPaintCommand(
             node: $node,
             pageIndex: $pageIndex,
@@ -109,6 +110,7 @@ final class DisplayListBuilder
             borderRadius: BorderRadiusResolver::normalize($radius, $width, $height),
         );
         $this->appendBorders($commands, $node, $pageIndex, $x, $y, $width, $height, $drawTop, $drawBottom);
+        $this->appendOutline($commands, $node, $node->source->style, $pageIndex, $x, $y, $width, $height);
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
@@ -122,6 +124,7 @@ final class DisplayListBuilder
             $radius = $wholeBox
                 ? BorderRadiusResolver::resolve($block->node->source->style, $border->width, $border->height)
                 : new BorderRadius();
+            $this->appendBoxShadows($commands, $block->node, $block->node->source->style, $block->pageIndex, $x, $y, $border->width, $block->height, BorderRadiusResolver::normalize($radius, $border->width, $block->height));
             $commands[] = new BoxPaintCommand(
                 node: $block->node,
                 pageIndex: $block->pageIndex,
@@ -144,6 +147,7 @@ final class DisplayListBuilder
                 $wholeBox,
                 $wholeBox,
             );
+            $this->appendOutline($commands, $block->node, $block->node->source->style, $block->pageIndex, $x, $y, $border->width, $block->height);
         }
         $this->appendListMarker($commands, $block, $margins);
         $this->appendLines($commands, $block->lines, $margins);
@@ -250,6 +254,159 @@ final class DisplayListBuilder
             backgroundColor: $color,
             borderRadius: $shape === 'disc' ? $round : new BorderRadius(),
         );
+    }
+
+    /**
+     * `box-shadow` (CSS Backgrounds 3 §7.1), outer shadows only: each shadow is the border box
+     * moved by its offsets and grown by its spread, in its colour, painted under the background.
+     * The blur is approximated by stacked layers growing across the blur radius, each carrying an
+     * equal share of the alpha, which gives the soft edge without a raster step. `inset` shadows
+     * are skipped. The property used to be ignored altogether.
+     *
+     * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     */
+    private function appendBoxShadows(array &$commands, LayoutNode|AtomicInlineBox $node, ComputedStyle $style, int $pageIndex, float $x, float $y, float $width, float $height, BorderRadius $radius): void
+    {
+        $raw = trim($style->get('box-shadow') ?? '');
+        if ($raw === '' || strtolower($raw) === 'none') return;
+        $fontSize = $node instanceof LayoutNode ? $node->fontSize : 16.0;
+        foreach (array_reverse(self::splitTopLevel($raw, ',')) as $shadow) {
+            $tokens = self::splitTopLevel($shadow, ' ');
+            $lengths = [];
+            $color = null;
+            $inset = false;
+            foreach ($tokens as $token) {
+                if (strtolower($token) === 'inset') {
+                    $inset = true;
+                } elseif (preg_match('/^-?\d*\.?\d+(px|pt|em|rem|mm|cm|in|pc)?$/i', $token) === 1) {
+                    $lengths[] = $this->shadowLength($token, $fontSize);
+                } else {
+                    $color = strtolower($token) === 'currentcolor' ? ColorParser::parse($style->get('color', 'black')) : ColorParser::parse($token);
+                }
+            }
+            if ($inset || count($lengths) < 2) continue;
+            $color = Opacity::apply($color ?? ColorParser::parse($style->get('color', 'black')), $style);
+            if ($color === null || $color->a <= 0.0) continue;
+            [$dx, $dy] = $lengths;
+            $blur = max(0.0, $lengths[2] ?? 0.0);
+            $spread = $lengths[3] ?? 0.0;
+            $layers = $blur > 0.0 ? max(2, min(8, (int) ceil($blur / 2))) : 1;
+            $alpha = $color->a / $layers;
+            for ($i = 0; $i < $layers; $i++) {
+                $grow = $spread + ($layers === 1 ? 0.0 : -$blur / 2 + $blur * ($i + 0.5) / $layers);
+                $w = $width + 2 * $grow;
+                $h = $height + 2 * $grow;
+                if ($w <= 0.0 || $h <= 0.0) continue;
+                $commands[] = new BoxPaintCommand(
+                    node: $node,
+                    pageIndex: $pageIndex,
+                    x: $x + $dx - $grow,
+                    y: $y + $dy - $grow,
+                    width: $w,
+                    height: $h,
+                    backgroundColor: new \Pagyra\Css\Color\Rgba($color->r, $color->g, $color->b, $alpha),
+                    borderRadius: $this->grownRadius($radius, $grow),
+                    decorative: true,
+                );
+            }
+        }
+    }
+
+    /**
+     * `outline` (CSS UI 4 §5): a line of `outline-width` drawn outside the border box, pushed out
+     * by `outline-offset`, in `outline-color` or the text colour. Every visible style is drawn
+     * solid. It used to be ignored.
+     *
+     * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     */
+    private function appendOutline(array &$commands, LayoutNode|AtomicInlineBox $node, ComputedStyle $style, int $pageIndex, float $x, float $y, float $width, float $height): void
+    {
+        $style_ = strtolower(trim($style->get('outline-style') ?? ''));
+        $widthRaw = $style->get('outline-width');
+        $colorRaw = $style->get('outline-color');
+        foreach (self::splitTopLevel(trim($style->get('outline') ?? ''), ' ') as $token) {
+            $lower = strtolower($token);
+            if (in_array($lower, ['none', 'hidden', 'solid', 'dotted', 'dashed', 'double', 'groove', 'ridge', 'inset', 'outset', 'auto'], true)) {
+                $style_ = $style_ !== '' ? $style_ : $lower;
+            } elseif (preg_match('/^\d*\.?\d+[a-z]*$/i', $token) === 1 || in_array($lower, ['thin', 'medium', 'thick'], true)) {
+                $widthRaw ??= $token;
+            } else {
+                $colorRaw ??= $token;
+            }
+        }
+        if ($style_ === '' || $style_ === 'none' || $style_ === 'hidden') return;
+        $fontSize = $node instanceof LayoutNode ? $node->fontSize : 16.0;
+        $lineWidth = match (strtolower(trim($widthRaw ?? 'medium'))) {
+            'thin' => 1.0,
+            'medium' => 3.0,
+            'thick' => 5.0,
+            default => max(0.0, $this->shadowLength((string) $widthRaw, $fontSize)),
+        };
+        if ($lineWidth <= 0.0) return;
+        $offset = $this->shadowLength((string) ($style->get('outline-offset') ?? '0'), $fontSize);
+        $colorText = strtolower(trim($colorRaw ?? 'currentcolor'));
+        $color = Opacity::apply(ColorParser::parse(in_array($colorText, ['currentcolor', 'invert', 'auto'], true) ? ($style->get('color', 'black') ?? 'black') : $colorText), $style);
+        if ($color === null || $color->a <= 0.0) return;
+
+        $left = $x - $offset - $lineWidth;
+        $top = $y - $offset - $lineWidth;
+        $outerWidth = $width + 2 * ($offset + $lineWidth);
+        $outerHeight = $height + 2 * ($offset + $lineWidth);
+        foreach ([
+            [$left, $top, $outerWidth, $lineWidth],
+            [$left, $top + $outerHeight - $lineWidth, $outerWidth, $lineWidth],
+            [$left, $top + $lineWidth, $lineWidth, $outerHeight - 2 * $lineWidth],
+            [$left + $outerWidth - $lineWidth, $top + $lineWidth, $lineWidth, $outerHeight - 2 * $lineWidth],
+        ] as [$rx, $ry, $rw, $rh]) {
+            if ($rw <= 0.0 || $rh <= 0.0) continue;
+            $commands[] = new BoxPaintCommand(node: $node, pageIndex: $pageIndex, x: $rx, y: $ry, width: $rw, height: $rh, backgroundColor: $color, decorative: true);
+        }
+    }
+
+    private function shadowLength(string $value, float $fontSize): float
+    {
+        if (preg_match('/^(-?\d*\.?\d+)([a-z]*)$/i', trim($value), $m) !== 1) return 0.0;
+        $n = (float) $m[1];
+
+        return match (strtolower($m[2])) {
+            'pt' => \Pagyra\Units\Units::ptToPx($n),
+            'em' => $n * $fontSize,
+            'rem' => $n * 16.0,
+            'mm' => \Pagyra\Units\Units::mmToPx($n),
+            'cm' => \Pagyra\Units\Units::cmToPx($n),
+            'in' => \Pagyra\Units\Units::inToPx($n),
+            'pc' => \Pagyra\Units\Units::pcToPx($n),
+            default => $n,
+        };
+    }
+
+    private function grownRadius(BorderRadius $radius, float $grow): BorderRadius
+    {
+        if ($radius->isZero()) return $radius;
+        $corner = static fn(CornerRadius $c): CornerRadius => new CornerRadius(max(0.0, $c->x + $grow), max(0.0, $c->y + $grow));
+
+        return new BorderRadius($corner($radius->topLeft), $corner($radius->topRight), $corner($radius->bottomRight), $corner($radius->bottomLeft));
+    }
+
+    /** @return list<string> the value split at $separator outside parentheses */
+    private static function splitTopLevel(string $value, string $separator): array
+    {
+        $parts = [];
+        $buffer = '';
+        $depth = 0;
+        foreach (str_split($value) as $ch) {
+            if ($ch === '(') $depth++;
+            if ($ch === ')') $depth = max(0, $depth - 1);
+            if ($depth === 0 && ($separator === ' ' ? ctype_space($ch) : $ch === $separator)) {
+                if (trim($buffer) !== '') $parts[] = trim($buffer);
+                $buffer = '';
+                continue;
+            }
+            $buffer .= $ch;
+        }
+        if (trim($buffer) !== '') $parts[] = trim($buffer);
+
+        return $parts;
     }
 
     private function firstLineFragmentForMarker(BlockFragment $block): ?LineFragment
@@ -490,6 +647,7 @@ final class DisplayListBuilder
 
         if ($borderWidth > 0.0 && $borderHeight > 0.0) {
             $radius = BorderRadiusResolver::resolve($box->style, $borderWidth, $borderHeight);
+            $this->appendBoxShadows($commands, $box, $box->style, $lineFragment->pageIndex, $borderX, $borderY, $borderWidth, $borderHeight, $radius);
             $commands[] = new BoxPaintCommand(
                 node: $box,
                 pageIndex: $lineFragment->pageIndex,
@@ -501,6 +659,7 @@ final class DisplayListBuilder
                 borderRadius: $radius,
             );
             $this->appendAtomicBorders($commands, $box, $lineFragment->pageIndex, $borderX, $borderY, $borderWidth, $borderHeight, $radius);
+            $this->appendOutline($commands, $box, $box->style, $lineFragment->pageIndex, $borderX, $borderY, $borderWidth, $borderHeight);
         }
 
         if ($box->source->node->isElement('img')) {

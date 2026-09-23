@@ -30,7 +30,7 @@ final class BorderPatternExpander
             $skipBorders = [];
 
             foreach ($page->commands as $command) {
-                if ($command instanceof BoxPaintCommand && !$command->node instanceof TextRun && $this->usesStrokeMode($command->node)) {
+                if ($command instanceof BoxPaintCommand && !$command->decorative && !$command->node instanceof TextRun && $this->usesStrokeMode($command->node)) {
                     $commands[] = $command;
                     $key = $this->commandKey($command->node, $command->pageIndex);
                     $skipBorders[$key] = true;
