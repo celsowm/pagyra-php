@@ -343,9 +343,11 @@ final class BlockLayoutEngine
             return $this->layoutBlockReplaced($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize);
         }
 
-        return $this->display($styled) === 'table'
-            ? $this->layoutTable($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize)
-            : $this->layoutBlock($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize);
+        return match ($this->display($styled)) {
+            'table' => $this->layoutTable($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize),
+            'flex' => $this->layoutFlex($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize),
+            default => $this->layoutBlock($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize),
+        };
     }
 
     /**
@@ -607,18 +609,21 @@ final class BlockLayoutEngine
         return $this->wrapWithCaptions($styled, $table, $wrapperMargin, $captionLayouts, $bottomCaptions, $containingHeight, $fontSize);
     }
 
-    /** The laid-out subtree moved down by $dy. */
-    private function translateNode(LayoutNode $node, float $dy): LayoutNode
+    /** The laid-out subtree moved down by $dy (and right by $dx). */
+    private function translateNode(LayoutNode $node, float $dy, float $dx = 0.0): LayoutNode
     {
+        if ($dx == 0.0 && $dy == 0.0) {
+            return $node;
+        }
         $box = $node->box;
         $content = $box->content;
 
         return new LayoutNode(
             $node->source,
-            new LayoutBox(new Rect($content->x, $content->y + $dy, $content->width, $content->height), $box->padding, $box->border, $box->margin),
-            array_map(fn(LayoutNode $child): LayoutNode => $this->translateNode($child, $dy), $node->children),
+            new LayoutBox(new Rect($content->x + $dx, $content->y + $dy, $content->width, $content->height), $box->padding, $box->border, $box->margin),
+            array_map(fn(LayoutNode $child): LayoutNode => $this->translateNode($child, $dy, $dx), $node->children),
             $node->fontSize,
-            $this->inlineTextFormatter->translateLines($node->lineBoxes, 0.0, $dy),
+            $this->inlineTextFormatter->translateLines($node->lineBoxes, $dx, $dy),
         );
     }
 
@@ -647,6 +652,492 @@ final class BlockLayoutEngine
         }
 
         return $bottom - $top;
+    }
+
+    /**
+     * Flexbox layout (CSS Flexible Box Layout 1), following the reference's FlexLayoutStrategy
+     * (pagyra-js `src/layout/strategies/flex.ts` and `flex/*.ts`): items are measured at their
+     * basis — `flex-basis`, else their size, else their preferred width in a row — broken into
+     * lines when `flex-wrap` allows, grown by `flex-grow`, spaced by `justify-content` and `gap`,
+     * and placed on the cross axis by `align-items`/`align-self`, with `align-content` spacing the
+     * lines. Two things the reference leaves out are done here as browsers do them: `flex-shrink`
+     * shrinks items that overflow a line, and `stretch` (the default) makes an item with an auto
+     * cross size fill its line. Auto margins on the main axis take the free space first, `order`
+     * reorders the items, and the `-reverse` directions mirror them.
+     *
+     * `display: flex` used to fall back to a plain block, so a row of items came out as a stack.
+     */
+    private function layoutFlex(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
+    {
+        $fontSize = $this->resolveFontSize($styled, $parentFontSize);
+        [$marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw] = $this->edgeRawValues($styled, 'margin');
+        $margin = $this->resolveRawEdges($marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw, $containingWidth, $containingHeight, $fontSize);
+        $padding = $this->resolveEdges($styled, 'padding', $containingWidth, $containingHeight, $fontSize);
+        $border = $this->resolveBorderEdges($styled, $containingWidth, $containingHeight, $fontSize);
+        $horizontalNonContent = $padding->horizontal() + $border->horizontal();
+        $verticalNonContent = $padding->vertical() + $border->vertical();
+        $borderBox = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box';
+
+        $widthValue = $styled->style->get('width', 'auto') ?? 'auto';
+        if ($this->isAuto($widthValue)) {
+            $contentWidth = max(0.0, $containingWidth - $margin->horizontal() - $horizontalNonContent);
+        } else {
+            $resolved = $this->resolveLength($widthValue, $containingWidth, $fontSize, $containingWidth, $containingHeight, 'zero');
+            $contentWidth = max(0.0, $borderBox ? $resolved - $horizontalNonContent : $resolved);
+        }
+        $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $containingWidth, $containingHeight, $fontSize);
+        if (!$this->isAuto($widthValue)) {
+            $used = BlockMath::resolveAutoMargins($containingWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
+            $margin = new Edges($margin->top, $used['right'], $margin->bottom, $used['left']);
+        }
+        $heightValue = $styled->style->get('height', 'auto') ?? 'auto';
+        $definiteHeight = null;
+        if (!$this->isAuto($heightValue) && !str_ends_with(trim($heightValue), '%')) {
+            $resolved = $this->resolveLength($heightValue, $containingHeight, $fontSize, $containingWidth, $containingHeight, 'zero');
+            $definiteHeight = max(0.0, $borderBox ? $resolved - $verticalNonContent : $resolved);
+        }
+
+        $contentX = $containingX + $margin->left + $border->left + $padding->left;
+        $contentY = $flowY + $margin->top + $border->top + $padding->top;
+
+        [$direction, $wrap] = $this->flexFlow($styled);
+        $isRow = str_starts_with($direction, 'row');
+        [$rowGap, $columnGap] = $this->flexGaps($styled, $contentWidth, $fontSize);
+        $mainGap = $isRow ? $columnGap : $rowGap;
+        $crossGap = $isRow ? $rowGap : $columnGap;
+        $containerMain = $isRow ? $contentWidth : $definiteHeight;
+        $alignItems = strtolower(trim($styled->style->get('align-items') ?? 'stretch'));
+
+        // Items: every in-flow child element, blockified, plus runs of text wrapped in anonymous
+        // items; `order` sorts them, stably.
+        $children = [];
+        $pendingText = [];
+        $flushText = function () use (&$pendingText, &$children, $styled): void {
+            $hasText = false;
+            foreach ($pendingText as $text) {
+                if (trim($text->node->text ?? '') !== '') $hasText = true;
+            }
+            if ($hasText) {
+                $children[] = $this->anonymousFlexItem($styled, $pendingText);
+            }
+            $pendingText = [];
+        };
+        foreach ($styled->children as $child) {
+            if ($child->node->type === 'text') {
+                $pendingText[] = $child;
+                continue;
+            }
+            if ($this->display($child) === 'none') continue;
+            $flushText();
+            $children[] = $this->blockifiedFlexItem($child);
+        }
+        $flushText();
+        $orderIndex = array_keys($children);
+        usort($orderIndex, fn(int $a, int $b): int => [(int) ($children[$a]->style->get('order') ?? 0), $a] <=> [(int) ($children[$b]->style->get('order') ?? 0), $b]);
+        $children = array_map(static fn(int $i): StyledNode => $children[$i], $orderIndex);
+
+        // Measure each item at its hypothetical main size.
+        $items = [];
+        foreach ($children as $child) {
+            $childFont = $this->resolveFontSize($child, $fontSize);
+            [$mt, $mr, $mb, $ml] = $this->edgeRawValues($child, 'margin');
+            $childMargin = $this->resolveRawEdges($mt, $mr, $mb, $ml, $contentWidth, $containingHeight, $childFont);
+            [$grow, $shrink, $basisRaw] = $this->flexFactors($child);
+            $mainMarginStart = $isRow ? $childMargin->left : $childMargin->top;
+            $mainMarginEnd = $isRow ? $childMargin->right : $childMargin->bottom;
+            $autoStart = $this->isAuto(($isRow ? $ml : $mt) ?? '0');
+            $autoEnd = $this->isAuto(($isRow ? $mr : $mb) ?? '0');
+            $childPadding = $this->resolveEdges($child, 'padding', $contentWidth, $containingHeight, $childFont);
+            $childBorder = $this->resolveBorderEdges($child, $contentWidth, $containingHeight, $childFont);
+            $childBorderBox = ($child->style->get('box-sizing') ?? 'content-box') === 'border-box';
+            $extrasMain = $isRow ? $childPadding->horizontal() + $childBorder->horizontal() : $childPadding->vertical() + $childBorder->vertical();
+
+            $basis = null;
+            if ($basisRaw !== null && !in_array(strtolower($basisRaw), ['auto', 'content'], true)) {
+                $basis = $this->resolveLength($basisRaw, $isRow ? $contentWidth : ($definiteHeight ?? 0.0), $childFont, $contentWidth, $containingHeight, 'zero');
+                $basis = max(0.0, $childBorderBox ? $basis : $basis + $extrasMain);
+            }
+
+            if ($isRow) {
+                $width = $basis ?? $this->flexPreferredWidth($child, max(0.0, $contentWidth - $childMargin->horizontal()), $childFont);
+                $layout = $this->layoutFlexItem($child, $contentX, $contentY, $width, $childMargin, null, $containingHeight, $fontSize);
+                $mainSize = $width;
+                $crossSize = $layout->box->borderBox()->height;
+            } else {
+                $stretchCross = $this->flexAlignment($child, $alignItems) === 'stretch' && $this->isAuto($child->style->get('width', 'auto') ?? 'auto');
+                $width = $stretchCross
+                    ? max(0.0, $contentWidth - $childMargin->horizontal())
+                    : $this->flexPreferredWidth($child, max(0.0, $contentWidth - $childMargin->horizontal()), $childFont);
+                $layout = $this->layoutFlexItem($child, $contentX, $contentY, $width, $childMargin, $basis, $containingHeight, $fontSize);
+                $mainSize = $layout->box->borderBox()->height;
+                $crossSize = $layout->box->borderBox()->width;
+            }
+            $items[] = [
+                'styled' => $child, 'layout' => $layout, 'margin' => $childMargin,
+                'grow' => $grow, 'shrink' => $shrink, 'main' => $mainSize, 'cross' => $crossSize,
+                'mainMargins' => $mainMarginStart + $mainMarginEnd,
+                'crossMargins' => $isRow ? $childMargin->vertical() : $childMargin->horizontal(),
+                'autoStart' => $autoStart, 'autoEnd' => $autoEnd, 'width' => $width, 'basis' => $basis,
+            ];
+        }
+
+        // Break into lines.
+        $lines = [];
+        $current = [];
+        $used = 0.0;
+        foreach ($items as $index => $item) {
+            $contribution = $item['main'] + $item['mainMargins'];
+            $addition = $current === [] ? $contribution : $mainGap + $contribution;
+            if ($wrap !== 'nowrap' && $current !== [] && $containerMain !== null && $used + $addition > $containerMain + 0.01) {
+                $lines[] = $current;
+                $current = [];
+                $used = 0.0;
+                $addition = $contribution;
+            }
+            $current[] = $index;
+            $used += $addition;
+        }
+        if ($current !== []) $lines[] = $current;
+
+        // Resolve flexible lengths per line and re-lay out the items whose main size changed.
+        foreach ($lines as $line) {
+            if ($containerMain === null) break;
+            $sum = 0.0;
+            foreach ($line as $i) $sum += $items[$i]['main'] + $items[$i]['mainMargins'];
+            $free = $containerMain - $sum - $mainGap * (count($line) - 1);
+            $hasAutoMargin = false;
+            foreach ($line as $i) $hasAutoMargin = $hasAutoMargin || $items[$i]['autoStart'] || $items[$i]['autoEnd'];
+            if ($free > 0.0 && !$hasAutoMargin) {
+                $totalGrow = array_sum(array_map(static fn(int $i): float => $items[$i]['grow'], $line));
+                if ($totalGrow > 0.0) {
+                    foreach ($line as $i) {
+                        if ($items[$i]['grow'] > 0.0) {
+                            $items[$i]['main'] += $free * $items[$i]['grow'] / $totalGrow;
+                            $items[$i]['resize'] = true;
+                        }
+                    }
+                }
+            } elseif ($free < 0.0) {
+                $totalShrink = array_sum(array_map(static fn(int $i): float => $items[$i]['shrink'] * $items[$i]['main'], $line));
+                if ($totalShrink > 0.0) {
+                    foreach ($line as $i) {
+                        $share = $items[$i]['shrink'] * $items[$i]['main'] / $totalShrink;
+                        if ($share > 0.0) {
+                            $items[$i]['main'] = max(0.0, $items[$i]['main'] + $free * $share);
+                            $items[$i]['resize'] = true;
+                        }
+                    }
+                }
+            }
+            foreach ($line as $i) {
+                if (!($items[$i]['resize'] ?? false)) continue;
+                $item = $items[$i];
+                if ($isRow) {
+                    $items[$i]['width'] = $item['main'];
+                    $items[$i]['layout'] = $this->layoutFlexItem($item['styled'], $contentX, $contentY, $item['main'], $item['margin'], null, $containingHeight, $fontSize);
+                    $items[$i]['cross'] = $items[$i]['layout']->box->borderBox()->height;
+                } else {
+                    $items[$i]['layout'] = $this->layoutFlexItem($item['styled'], $contentX, $contentY, $item['width'], $item['margin'], $item['main'], $containingHeight, $fontSize, true);
+                    $items[$i]['main'] = $items[$i]['layout']->box->borderBox()->height;
+                }
+            }
+        }
+
+        // Cross sizes of the lines and of the container.
+        $lineCross = [];
+        foreach ($lines as $l => $line) {
+            $lineCross[$l] = 0.0;
+            foreach ($line as $i) $lineCross[$l] = max($lineCross[$l], $items[$i]['cross'] + $items[$i]['crossMargins']);
+        }
+        $naturalCross = array_sum($lineCross) + $crossGap * max(0, count($lines) - 1);
+        if ($isRow) {
+            $containerCross = $definiteHeight ?? $naturalCross;
+            if (count($lines) === 1 && $definiteHeight !== null) $lineCross[0] = max($lineCross[0], $definiteHeight);
+        } else {
+            $containerCross = $contentWidth;
+            if (count($lines) === 1) $lineCross[0] = $contentWidth;
+        }
+        [$lineOffset, $lineSpacing] = $this->flexContentDistribution(
+            strtolower(trim($styled->style->get('align-content') ?? 'normal')),
+            max(0.0, $containerCross - $naturalCross),
+            count($lines),
+            $lineCross,
+        );
+        if ($wrap === 'wrap-reverse') {
+            $lines = array_reverse($lines, true);
+        }
+
+        // Place the items.
+        $justify = strtolower(trim($styled->style->get('justify-content') ?? 'flex-start'));
+        $reverse = str_ends_with($direction, '-reverse');
+        $mainExtent = $containerMain ?? 0.0;
+        $placed = [];
+        $crossCursor = $lineOffset;
+        $maxMainEnd = 0.0;
+        foreach ($lines as $l => $line) {
+            $sum = 0.0;
+            foreach ($line as $i) $sum += $items[$i]['main'] + $items[$i]['mainMargins'];
+            $sum += $mainGap * (count($line) - 1);
+            $free = $containerMain === null ? 0.0 : $containerMain - $sum;
+            $autoCount = 0;
+            foreach ($line as $i) $autoCount += ($items[$i]['autoStart'] ? 1 : 0) + ($items[$i]['autoEnd'] ? 1 : 0);
+            $perAuto = $autoCount > 0 && $free > 0.0 ? $free / $autoCount : 0.0;
+            [$offset, $between] = $autoCount > 0 && $free > 0.0 ? [0.0, 0.0] : $this->flexJustify($justify, $free, count($line));
+            $cursor = $offset;
+            foreach ($line as $position => $i) {
+                $item = $items[$i];
+                $start = ($isRow ? ($item['margin']->left) : ($item['margin']->top)) + ($item['autoStart'] ? $perAuto : 0.0);
+                $end = ($isRow ? ($item['margin']->right) : ($item['margin']->bottom)) + ($item['autoEnd'] ? $perAuto : 0.0);
+                $mainPos = $cursor + $start;
+                $cursor += $start + $item['main'] + $end + ($position < count($line) - 1 ? $mainGap + $between : 0.0);
+                $maxMainEnd = max($maxMainEnd, $cursor);
+
+                $alignment = $this->flexAlignment($item['styled'], $alignItems);
+                $crossMarginStart = $isRow ? $item['margin']->top : $item['margin']->left;
+                $crossFree = $lineCross[$l] - $item['cross'] - $item['crossMargins'];
+                $layout = $item['layout'];
+                if ($alignment === 'stretch' && $crossFree > 0.0 && $this->isAuto($item['styled']->style->get($isRow ? 'height' : 'width', 'auto') ?? 'auto')) {
+                    $layout = $isRow ? $this->stretchedHeight($layout, $crossFree) : $layout;
+                    $crossFree = 0.0;
+                }
+                $crossPos = $crossCursor + $crossMarginStart + match ($alignment) {
+                    'center' => max(0.0, $crossFree) / 2,
+                    'flex-end', 'end', 'self-end' => max(0.0, $crossFree),
+                    default => 0.0,
+                };
+                $itemBox = $layout->box->borderBox();
+                if ($isRow) {
+                    $x = $reverse ? $contentX + $mainExtent - $mainPos - $itemBox->width : $contentX + $mainPos;
+                    $placed[] = $this->translateNode($layout, $contentY + $crossPos - $itemBox->y, $x - $itemBox->x);
+                } else {
+                    $y = $reverse && $containerMain !== null ? $contentY + $mainExtent - $mainPos - $itemBox->height : $contentY + $mainPos;
+                    $placed[] = $this->translateNode($layout, $y - $itemBox->y, $contentX + $crossPos - $itemBox->x);
+                }
+            }
+            $crossCursor += $lineCross[$l] + $crossGap + $lineSpacing;
+        }
+
+        $contentHeight = $isRow ? $containerCross : ($definiteHeight ?? $maxMainEnd);
+        $contentHeight = $this->applyVerticalConstraints($styled, $contentHeight, $verticalNonContent, $containingWidth, $containingHeight, $fontSize);
+
+        return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $contentHeight), $padding, $border, $margin), $placed, $fontSize);
+    }
+
+    /** @return array{0:string,1:string} direction and wrap, from the longhands or `flex-flow` */
+    private function flexFlow(StyledNode $styled): array
+    {
+        $direction = strtolower(trim($styled->style->get('flex-direction') ?? ''));
+        $wrap = strtolower(trim($styled->style->get('flex-wrap') ?? ''));
+        foreach (preg_split('/\s+/', strtolower(trim($styled->style->get('flex-flow') ?? ''))) ?: [] as $token) {
+            if ($direction === '' && in_array($token, ['row', 'row-reverse', 'column', 'column-reverse'], true)) $direction = $token;
+            if ($wrap === '' && in_array($token, ['nowrap', 'wrap', 'wrap-reverse'], true)) $wrap = $token;
+        }
+
+        return [
+            in_array($direction, ['row', 'row-reverse', 'column', 'column-reverse'], true) ? $direction : 'row',
+            in_array($wrap, ['wrap', 'wrap-reverse'], true) ? $wrap : 'nowrap',
+        ];
+    }
+
+    /** @return array{0:float,1:float} row-gap and column-gap, from the longhands or `gap` */
+    private function flexGaps(StyledNode $styled, float $width, float $fontSize): array
+    {
+        $parts = preg_split('/\s+/', trim($styled->style->get('gap') ?? '')) ?: [];
+        $row = $styled->style->get('row-gap') ?? (($parts[0] ?? '') !== '' ? $parts[0] : null) ?? $styled->style->get('grid-row-gap');
+        $column = $styled->style->get('column-gap') ?? $parts[1] ?? (($parts[0] ?? '') !== '' ? $parts[0] : null) ?? $styled->style->get('grid-column-gap');
+        $resolve = fn(?string $v): float => $v === null || strtolower(trim($v)) === 'normal' ? 0.0 : max(0.0, $this->resolveLength($v, $width, $fontSize, $width, $this->viewportHeight, 'zero'));
+
+        return [$resolve($row), $resolve($column)];
+    }
+
+    /** @return array{0:float,1:float,2:?string} grow, shrink and basis, from the longhands or `flex` */
+    private function flexFactors(StyledNode $styled): array
+    {
+        $grow = 0.0;
+        $shrink = 1.0;
+        $basis = null;
+        $shorthand = strtolower(trim($styled->style->get('flex') ?? ''));
+        if ($shorthand === 'none') {
+            [$grow, $shrink, $basis] = [0.0, 0.0, 'auto'];
+        } elseif ($shorthand === 'auto') {
+            [$grow, $shrink, $basis] = [1.0, 1.0, 'auto'];
+        } elseif ($shorthand !== '' && $shorthand !== 'initial') {
+            $numbers = [];
+            foreach (preg_split('/\s+/', $shorthand) ?: [] as $token) {
+                if (is_numeric($token) && count($numbers) < 2) {
+                    $numbers[] = (float) $token;
+                } else {
+                    $basis = $token;
+                }
+            }
+            if ($numbers !== []) {
+                $grow = $numbers[0];
+                $shrink = $numbers[1] ?? 1.0;
+                $basis ??= '0%';
+            }
+        }
+        if (($value = $styled->style->get('flex-grow')) !== null && is_numeric(trim($value))) $grow = (float) $value;
+        if (($value = $styled->style->get('flex-shrink')) !== null && is_numeric(trim($value))) $shrink = (float) $value;
+        if (($value = $styled->style->get('flex-basis')) !== null) $basis = trim($value);
+        if ($basis === null || strtolower($basis) === 'auto') {
+            $basis = null;
+        }
+
+        return [max(0.0, $grow), max(0.0, $shrink), $basis];
+    }
+
+    private function flexAlignment(StyledNode $item, string $alignItems): string
+    {
+        $self = strtolower(trim($item->style->get('align-self') ?? 'auto'));
+        $value = $self === 'auto' || $self === '' ? $alignItems : $self;
+
+        return in_array($value, ['normal', 'stretch'], true) ? 'stretch' : $value;
+    }
+
+    /** @return array{0:float,1:float} initial offset and extra space between items */
+    private function flexJustify(string $justify, float $free, int $count): array
+    {
+        $free = max(0.0, $free);
+
+        return match ($justify) {
+            'center' => [$free / 2, 0.0],
+            'flex-end', 'end', 'right' => [$free, 0.0],
+            'space-between' => $count > 1 ? [0.0, $free / ($count - 1)] : [0.0, 0.0],
+            'space-around' => [$free / $count / 2, $free / $count],
+            'space-evenly' => [$free / ($count + 1), $free / ($count + 1)],
+            default => [0.0, 0.0],
+        };
+    }
+
+    /**
+     * `align-content` for the lines of a multi-line container: the initial offset and the extra
+     * space between lines; `stretch` (the default) grows the lines themselves.
+     *
+     * @param list<float> $lineCross
+     * @return array{0:float,1:float}
+     */
+    private function flexContentDistribution(string $alignContent, float $free, int $lines, array &$lineCross): array
+    {
+        if ($lines <= 1 || $free <= 0.0) return [0.0, 0.0];
+
+        return match ($alignContent) {
+            'flex-start', 'start' => [0.0, 0.0],
+            'center' => [$free / 2, 0.0],
+            'flex-end', 'end' => [$free, 0.0],
+            'space-between' => [0.0, $free / ($lines - 1)],
+            'space-around' => [$free / $lines / 2, $free / $lines],
+            'space-evenly' => [$free / ($lines + 1), $free / ($lines + 1)],
+            default => (function () use (&$lineCross, $free, $lines): array {
+                foreach ($lineCross as $index => $size) $lineCross[$index] = $size + $free / $lines;
+                return [0.0, 0.0];
+            })(),
+        };
+    }
+
+    /**
+     * Lays out one flex item with the given border-box width, and optionally a border-box main
+     * height (column containers), at the container's content origin; the caller moves it.
+     */
+    private function layoutFlexItem(StyledNode $item, float $x, float $y, float $borderBoxWidth, Edges $margin, ?float $borderBoxHeight, float $containingHeight, float $fontSize, bool $heightIsFixed = false): LayoutNode
+    {
+        $properties = $item->style->properties;
+        $properties['width'] = max(0.0, $borderBoxWidth) . 'px';
+        $properties['box-sizing'] = 'border-box';
+        if ($borderBoxHeight !== null) {
+            $properties['height'] = max(0.0, $borderBoxHeight) . 'px';
+        }
+        foreach (['margin-left', 'margin-right'] as $side) {
+            if ($this->isAuto($properties[$side] ?? '0')) $properties[$side] = '0';
+        }
+        $sized = new StyledNode($item->node, new ComputedStyle($properties), $item->children);
+
+        return $this->layoutBlockLevelChild($sized, $x, $y, $borderBoxWidth + $margin->horizontal(), $containingHeight, $fontSize);
+    }
+
+    /** A laid-out item whose border box is made taller by $extra, content staying at the top. */
+    private function stretchedHeight(LayoutNode $node, float $extra): LayoutNode
+    {
+        $box = $node->box;
+
+        return new LayoutNode(
+            $node->source,
+            new LayoutBox(new Rect($box->content->x, $box->content->y, $box->content->width, $box->content->height + $extra), $box->padding, $box->border, $box->margin),
+            $node->children,
+            $node->fontSize,
+            $node->lineBoxes,
+        );
+    }
+
+    /** A flex item's display, blockified (CSS Display 3 §2.7): inline-level becomes block-level. */
+    private function blockifiedFlexItem(StyledNode $child): StyledNode
+    {
+        $display = $this->display($child);
+        $blockified = match ($display) {
+            'inline', 'inline-block', 'contents' => 'block',
+            'inline-table' => 'table',
+            'inline-flex' => 'flex',
+            'inline-grid' => 'grid',
+            default => $display,
+        };
+        $properties = $child->style->properties;
+        if ($blockified !== $display) $properties['display'] = $blockified;
+        // Floats do not apply to flex items.
+        unset($properties['float']);
+
+        return new StyledNode($child->node, new ComputedStyle($properties), $child->children);
+    }
+
+    /** @param list<StyledNode> $texts */
+    private function anonymousFlexItem(StyledNode $container, array $texts): StyledNode
+    {
+        $properties = ['display' => 'block'];
+        foreach (StyleComputer::INHERITED as $property) {
+            $value = $container->style->get($property);
+            if ($value !== null) $properties[$property] = $value;
+        }
+
+        return new StyledNode(Node::element(self::ANONYMOUS_TAG, [], []), new ComputedStyle($properties), $texts);
+    }
+
+    /**
+     * The border-box width an item takes when nothing constrains it but the available space:
+     * its declared width, else its max-content width (every line unbroken, every block child at
+     * its own preferred width), capped by what is available.
+     */
+    private function flexPreferredWidth(StyledNode $item, float $available, float $fontSize, int $depth = 0): float
+    {
+        $padding = $this->resolveEdges($item, 'padding', $available, $this->viewportHeight, $fontSize);
+        $border = $this->resolveBorderEdges($item, $available, $this->viewportHeight, $fontSize);
+        $extras = $padding->horizontal() + $border->horizontal();
+        $width = $item->style->get('width', 'auto') ?? 'auto';
+        if (!$this->isAuto($width) && !str_ends_with(trim($width), '%')) {
+            $resolved = $this->resolveLength($width, $available, $fontSize, $available, $this->viewportHeight, 'zero');
+            return ($item->style->get('box-sizing') ?? 'content-box') === 'border-box' ? $resolved : $resolved + $extras;
+        }
+        if ($item->node->isImage() || $item->node->isSvg()) {
+            return min($available, $this->layoutBlockReplaced($item, 0.0, 0.0, $available, $this->viewportHeight, $fontSize)->box->borderBox()->width);
+        }
+        $content = 0.0;
+        foreach ($this->flowSegments($item) as $segment) {
+            if ($segment[0] === 'inline') {
+                $probe = $this->inlineTextFormatter->layout(new StyledNode($item->node, $item->style, $segment[1]), 0.0, 0.0, 1.0e6, $fontSize);
+                foreach ($probe->lines as $line) $content = max($content, $line->width);
+                continue;
+            }
+            $child = $segment[1];
+            $childFont = $this->resolveFontSize($child, $fontSize);
+            [$mt, $mr, $mb, $ml] = $this->edgeRawValues($child, 'margin');
+            $childMargin = $this->resolveRawEdges($mt, $mr, $mb, $ml, $available, $this->viewportHeight, $childFont);
+            $childWidth = $depth >= 24 ? $available : $this->flexPreferredWidth($child, max(0.0, $available - $extras), $childFont, $depth + 1);
+            $content = max($content, $childWidth + $childMargin->horizontal());
+        }
+        $min = $item->style->get('min-width');
+        $result = min($available, $content + $extras);
+        if ($min !== null && !$this->isAuto($min)) {
+            $result = max($result, $this->resolveLength($min, $available, $fontSize, $available, $this->viewportHeight, 'zero'));
+        }
+
+        return $result;
     }
 
     /**

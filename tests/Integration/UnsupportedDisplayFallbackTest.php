@@ -38,12 +38,10 @@ final class UnsupportedDisplayFallbackTest extends TestCase
         self::assertGreaterThan(0.0, $outer->children[0]->box->content->height);
     }
 
-    public function testFlexChildrenStillLayOutVerticallyAsPlainBlocksSinceFlexItselfIsNotImplemented(): void
+    public function testFlexChildrenAreLaidOutInARowNowThatFlexIsImplemented(): void
     {
-        // Falling back to block means the container's content survives, but flex distribution
-        // (row placement, justify-content, gap...) is not honored: children still stack like
-        // any other block-level siblings. That is a known, documented limitation, not a bug
-        // this fallback tries to hide.
+        // Flex used to fall back to block, which stacked the children; FlexLayoutTest covers the
+        // layout itself, this only pins that the fallback is gone for flex (grid keeps it).
         $prepared = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;display:flex">'
@@ -57,6 +55,7 @@ final class UnsupportedDisplayFallbackTest extends TestCase
         $flexContainer = $prepared->layoutRoot->children[0];
         self::assertCount(2, $flexContainer->children);
         self::assertSame(0.0, $flexContainer->children[0]->box->content->y);
-        self::assertSame(10.0, $flexContainer->children[1]->box->content->y);
+        self::assertSame(0.0, $flexContainer->children[1]->box->content->y);
+        self::assertGreaterThan($flexContainer->children[0]->box->content->x, $flexContainer->children[1]->box->content->x);
     }
 }
