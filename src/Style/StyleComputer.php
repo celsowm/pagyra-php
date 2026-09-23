@@ -31,6 +31,9 @@ final class StyleComputer
         'text-transform', 'letter-spacing', 'word-spacing', 'word-break', 'overflow-wrap', 'word-wrap',
         'font-variant', 'orphans', 'widows', 'quotes', 'text-align-last',
         'x-link-href',
+        // Not a real property: the product of the element's and its ancestors' `opacity`, carried
+        // down so that everything inside a faded element is painted faded (see Paint\Opacity).
+        'x-opacity',
     ];
 
     /**
@@ -917,6 +920,7 @@ final class StyleComputer
         if ($node->type === 'element') {
             $this->absolutizeFontRelativeLengths($properties, $parent);
             $this->absolutizeFontWeight($properties, $parent);
+            $this->foldOpacity($properties);
         }
 
         if ($node->isElement('li')) {
@@ -1029,6 +1033,23 @@ final class StyleComputer
         $properties['font-weight'] = (string) ($value === 'bolder'
             ? ($inherited < 350 ? 400 : ($inherited < 550 ? 700 : 900))
             : ($inherited < 550 ? 100 : ($inherited < 750 ? 400 : 700)));
+    }
+
+    /** @param array<string,string> $properties x-opacity already holds the inherited product */
+    private function foldOpacity(array &$properties): void
+    {
+        $inherited = isset($properties['x-opacity']) ? (float) $properties['x-opacity'] : 1.0;
+        $own = 1.0;
+        $raw = strtolower(trim($properties['opacity'] ?? ''));
+        if (preg_match('/^(\d*\.?\d+)(%)?$/', $raw, $m) === 1) {
+            $own = max(0.0, min(1.0, (float) $m[1] / (isset($m[2]) ? 100.0 : 1.0)));
+        }
+        $effective = $inherited * $own;
+        if ($effective < 1.0) {
+            $properties['x-opacity'] = rtrim(rtrim(sprintf('%.6F', $effective), '0'), '.');
+        } else {
+            unset($properties['x-opacity']);
+        }
     }
 
     private function resolveFontSizeValue(string $raw, float $parentFontSize): ?float

@@ -269,7 +269,7 @@ final class BorderPatternExpander
         if ($raw === '' || strtolower($raw) === 'currentcolor') {
             $raw = $style->get('color', 'black') ?? 'black';
         }
-        return ColorParser::parse($raw);
+        return Opacity::apply(ColorParser::parse($raw), $style);
     }
 
     /** @return list<string> */

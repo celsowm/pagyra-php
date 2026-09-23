@@ -21,6 +21,8 @@ final readonly class ImagePaintCommand implements \JsonSerializable
     public string $source;
     public ?Rect $clipRect;
     public ?BorderRadius $clipRadius;
+    /** The element's effective `opacity` (see Opacity). */
+    public float $opacity;
 
     public function __construct(
         AtomicInlineBox $box,
@@ -34,7 +36,9 @@ final readonly class ImagePaintCommand implements \JsonSerializable
         string $source,
         ?Rect $clipRect = null,
         ?BorderRadius $clipRadius = null,
+        float $opacity = 1.0,
     ) {
+        $this->opacity = max(0.0, min(1.0, $opacity));
         $this->box = $box;
         $this->pageIndex = $pageIndex;
         $this->x = $x;

@@ -75,7 +75,7 @@ final class PdfSerializer
                     $resource = $imageResources[$key] ?? null;
                     if ($resource !== null) {
                         $usedImages[$resource['name']] = $resource['id'];
-                        $content .= $this->serializeImage($command, $page->height, $resource['name']);
+                        $content .= $this->serializeImage($command, $page->height, $resource['name'], $this->graphicsStateName(new Rgba(0, 0, 0, $command->opacity), $extGStateResources));
                     }
                     continue;
                 }
@@ -263,6 +263,7 @@ final class PdfSerializer
                     $command instanceof RoundedBorderPaintCommand => $command->color,
                     $command instanceof BorderPaintCommand => $command->color,
                     $command instanceof TextPaintCommand => $command->color,
+                    $command instanceof ImagePaintCommand => new Rgba(0, 0, 0, $command->opacity),
                     default => null,
                 };
                 if (!$color instanceof Rgba || $color->a <= 0.0 || $color->a >= 1.0) continue;
@@ -619,14 +620,14 @@ final class PdfSerializer
             . $this->number(Units::pxToPt($heightPx)) . " re f\nQ\n";
     }
 
-    private function serializeImage(ImagePaintCommand $command, float $pageHeightPx, string $resourceName): string
+    private function serializeImage(ImagePaintCommand $command, float $pageHeightPx, string $resourceName, ?string $graphicsState = null): string
     {
-        if ($command->width <= 0.0 || $command->height <= 0.0) return '';
+        if ($command->width <= 0.0 || $command->height <= 0.0 || $command->opacity <= 0.0) return '';
         $width = Units::pxToPt($command->width);
         $height = Units::pxToPt($command->height);
         $x = Units::pxToPt($command->x);
         $y = Units::pxToPt($pageHeightPx - $command->y - $command->height);
-        $content = "q\n";
+        $content = "q\n" . ($graphicsState !== null ? '/' . $graphicsState . " gs\n" : '');
         if ($command->clipRect !== null) {
             if ($command->clipRadius !== null && !$command->clipRadius->isZero()) {
                 $clipGeometry = RoundedRectPdfPath::build(

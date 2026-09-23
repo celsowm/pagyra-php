@@ -105,7 +105,7 @@ final class DisplayListBuilder
             y: $y,
             width: $width,
             height: $height,
-            backgroundColor: ColorParser::parse($node->source->style->get('background-color')),
+            backgroundColor: Opacity::apply(ColorParser::parse($node->source->style->get('background-color')), $node->source->style),
             borderRadius: BorderRadiusResolver::normalize($radius, $width, $height),
         );
         $this->appendBorders($commands, $node, $pageIndex, $x, $y, $width, $height, $drawTop, $drawBottom);
@@ -129,7 +129,7 @@ final class DisplayListBuilder
                 y: $y,
                 width: $border->width,
                 height: $block->height,
-                backgroundColor: ColorParser::parse($block->node->source->style->get('background-color')),
+                backgroundColor: Opacity::apply(ColorParser::parse($block->node->source->style->get('background-color')), $block->node->source->style),
                 borderRadius: BorderRadiusResolver::normalize($radius, $border->width, $block->height),
             );
 
@@ -206,7 +206,7 @@ final class DisplayListBuilder
             fontFamily: $style->get('font-family'),
             fontWeight: max(100, min(900, $fontWeight)),
             fontStyle: strtolower(trim($style->get('font-style', 'normal') ?? 'normal')),
-            color: ColorParser::parse($style->get('color', 'black')),
+            color: Opacity::apply(ColorParser::parse($style->get('color', 'black')), $style),
         );
     }
 
@@ -219,7 +219,7 @@ final class DisplayListBuilder
      */
     private function appendBulletShape(array &$commands, string $shape, ComputedStyle $style, TextRun $run, LineFragment $target, float $textStartX, array $margins): void
     {
-        $color = ColorParser::parse($style->get('color', 'black'));
+        $color = Opacity::apply(ColorParser::parse($style->get('color', 'black')), $style);
         if ($color === null) return;
         $fontSize = $run->fontSize;
         $size = 0.3 * $fontSize;
@@ -424,7 +424,7 @@ final class DisplayListBuilder
         [$underline, $lineThrough, $overline] = $this->resolveTextDecorationLines($run->style);
         $decorationStyle = strtolower(trim($run->style->get('text-decoration-style') ?? 'solid'));
         $decorationColorRaw = strtolower(trim($run->style->get('text-decoration-color') ?? 'currentcolor'));
-        $decorationColor = $decorationColorRaw === 'currentcolor' ? null : ColorParser::parse($decorationColorRaw);
+        $decorationColor = $decorationColorRaw === 'currentcolor' ? null : Opacity::apply(ColorParser::parse($decorationColorRaw), $run->style);
         $baseline = $lineFragment->pageBaseline + ($run->baseline - $line->baseline) + $margins['top'];
         if ($run->inlineBackground !== null) {
             // CSS paints an inline box's background over its content area, which is the font's
@@ -439,7 +439,7 @@ final class DisplayListBuilder
                 y: $baseline - self::INLINE_BACKGROUND_ASCENT * $run->fontSize,
                 width: $run->width,
                 height: (self::INLINE_BACKGROUND_ASCENT + self::INLINE_BACKGROUND_DESCENT) * $run->fontSize,
-                backgroundColor: ColorParser::parse($run->inlineBackground),
+                backgroundColor: Opacity::apply(ColorParser::parse($run->inlineBackground), $run->style),
             );
         }
         $commands[] = new TextPaintCommand(
@@ -453,7 +453,7 @@ final class DisplayListBuilder
             fontFamily: $run->style->get('font-family'),
             fontWeight: max(100, min(900, $fontWeight)),
             fontStyle: strtolower(trim($run->style->get('font-style', 'normal') ?? 'normal')),
-            color: ColorParser::parse($run->style->get('color', 'black')),
+            color: Opacity::apply(ColorParser::parse($run->style->get('color', 'black')), $run->style),
             underline: $underline,
             lineThrough: $lineThrough,
             linkHref: $run->style->get('x-link-href'),
@@ -497,7 +497,7 @@ final class DisplayListBuilder
                 y: $borderY,
                 width: $borderWidth,
                 height: $borderHeight,
-                backgroundColor: ColorParser::parse($box->style->get('background-color')),
+                backgroundColor: Opacity::apply(ColorParser::parse($box->style->get('background-color')), $box->style),
                 borderRadius: $radius,
             );
             $this->appendAtomicBorders($commands, $box, $lineFragment->pageIndex, $borderX, $borderY, $borderWidth, $borderHeight, $radius);
@@ -624,6 +624,7 @@ final class DisplayListBuilder
             metadata: $metadata,
             source: $source,
             clipRect: $clipRect,
+            opacity: Opacity::of($box->style),
         );
     }
 
@@ -649,7 +650,7 @@ final class DisplayListBuilder
             }
         }
         if ($raw === '' || strtolower($raw) === 'currentcolor') $raw = $style->get('color', 'black') ?? 'black';
-        return ColorParser::parse($raw);
+        return Opacity::apply(ColorParser::parse($raw), $style);
     }
 
     /** @param array<string,mixed> $profile @return array{top:float,right:float,bottom:float,left:float} */
