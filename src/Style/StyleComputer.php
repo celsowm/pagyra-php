@@ -62,6 +62,9 @@ final class StyleComputer
         'widows' => '2',
     ];
 
+    /** Tag of the anonymous inline box that carries the text of a `display: contents` element. */
+    public const CONTENTS_TEXT_TAG = '#contents-text';
+
     /** The computed font-size of the root element, which is what `rem` means. */
     private float $rootFontSize = FontSizeKeywords::MEDIUM_PX;
 
@@ -108,7 +111,7 @@ final class StyleComputer
 
         $children = [];
         foreach ($root->children as $child) {
-            $children[] = $this->computeNode($child, $rules, $rootStyle, $ancestors, $variables);
+            $this->appendStyledChild($children, $this->computeNode($child, $rules, $rootStyle, $ancestors, $variables));
         }
 
         return new StyledNode($root, $rootStyle, $children);
@@ -493,10 +496,38 @@ final class StyleComputer
             $nextAncestors[] = $node;
         }
         foreach ($this->renderedChildren($node) as $child) {
-            $children[] = $this->computeNode($child, $rules, $style, $nextAncestors, $variables);
+            $this->appendStyledChild($children, $this->computeNode($child, $rules, $style, $nextAncestors, $variables));
         }
 
         return new StyledNode($node, $style, $children);
+    }
+
+    /**
+     * An element with `display: contents` generates no box of its own: its children take its
+     * place in the parent (CSS Display 3 §2.5). They were computed with it as their parent, so
+     * they already inherit from it. A text child is wrapped in an anonymous inline element that
+     * carries the text's inherited style, because the inline formatter styles text by the element
+     * that contains it and would otherwise use the grandparent's. Whitespace-only text is moved
+     * as is, so it cannot turn into a line of its own.
+     *
+     * The element used to reach the inline formatter as an unknown inline box, which drops every
+     * block-level child: `<div style="display:contents"><p>...</p></div>` rendered nothing.
+     *
+     * @param list<StyledNode> $children
+     */
+    private function appendStyledChild(array &$children, StyledNode $child): void
+    {
+        if ($child->node->type !== 'element' || strtolower(trim($child->style->get('display') ?? '')) !== 'contents') {
+            $children[] = $child;
+            return;
+        }
+        foreach ($child->children as $grandchild) {
+            if ($grandchild->node->type === 'text' && trim($grandchild->node->text ?? '') !== '') {
+                $children[] = new StyledNode(Node::element(self::CONTENTS_TEXT_TAG, [], [$grandchild->node]), $grandchild->style, [$grandchild]);
+                continue;
+            }
+            $children[] = $grandchild;
+        }
     }
 
     /**

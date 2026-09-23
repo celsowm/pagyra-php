@@ -442,13 +442,39 @@ final class BlockLayoutEngine
             $resolvedWidth = $this->resolveLength($widthValue, $containingWidth, $fontSize, $containingWidth, $containingHeight, 'zero');
             $contentWidth = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedWidth - $horizontalNonContent) : max(0.0, $resolvedWidth);
         }
+        // Captions sit in the table wrapper box, outside the table's border box and as wide as it
+        // (CSS 2.1 17.4): the top ones above the grid, the `caption-side: bottom` ones below. They
+        // were skipped outright, so a <caption> and all of its text never reached the page. With
+        // captions present the table is laid out without its margins and handed back inside an
+        // anonymous wrapper block that carries them, which is the box CSS describes; margin
+        // collapsing around the table then works on the wrapper exactly as it did on the table.
+        [$topCaptions, $bottomCaptions] = $this->tableCaptions($styled);
+        $captionLayouts = [];
+        $wrapperMargin = null;
+        if ($topCaptions !== [] || $bottomCaptions !== []) {
+            $wrapperMargin = $margin;
+            $captionX = $containingX + $margin->left;
+            $captionWidth = $contentWidth + $horizontalNonContent;
+            $wrapperY = $flowY + $margin->top;
+            foreach ($topCaptions as $caption) {
+                $layout = $this->layoutBlock($caption, $captionX, $flowY + $margin->top, $captionWidth, $containingHeight, $fontSize);
+                $captionLayouts[] = $layout;
+                $flowY = $layout->box->marginBox()->bottom() - $margin->top;
+            }
+            $zero = new Edges(0.0, 0.0, 0.0, 0.0);
+            $flowY += $margin->top;
+            $containingX += $margin->left;
+            $margin = $zero;
+        }
+
         $contentX = $containingX + $margin->left + $border->left + $padding->left;
         $contentY = $flowY + $margin->top + $border->top + $padding->top;
 
         $rows = $this->collectTableRows($styled);
         [$placements, $columnCount] = $this->buildTableGrid($rows);
         if ($columnCount === 0) {
-            return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, 0.0), $padding, $border, $margin), [], $fontSize);
+            $table = new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, 0.0), $padding, $border, $margin), [], $fontSize);
+            return $this->wrapWithCaptions($styled, $table, $wrapperMargin, $captionLayouts, $bottomCaptions, $containingHeight, $fontSize);
         }
 
         if ($this->isBorderCollapse($styled)) {
@@ -535,7 +561,69 @@ final class BlockLayoutEngine
             $rowLayouts[] = new LayoutNode($tr, new LayoutBox(new Rect($contentX, $rowY[$r], $contentWidth, $rowHeights[$r])), $cellLayouts, $this->resolveFontSize($tr, $fontSize));
         }
 
-        return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $rowY[$rowCount] - $contentY), $padding, $border, $margin), $rowLayouts, $fontSize);
+        $table = new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $rowY[$rowCount] - $contentY), $padding, $border, $margin), $rowLayouts, $fontSize);
+
+        return $this->wrapWithCaptions($styled, $table, $wrapperMargin, $captionLayouts, $bottomCaptions, $containingHeight, $fontSize);
+    }
+
+    /**
+     * The table's captions, split by `caption-side` (`top` unless it says `bottom`).
+     *
+     * @return array{0:list<StyledNode>,1:list<StyledNode>}
+     */
+    private function tableCaptions(StyledNode $table): array
+    {
+        $top = [];
+        $bottom = [];
+        foreach ($table->children as $child) {
+            if ($child->node->type !== 'element' || $this->display($child) !== 'table-caption') {
+                continue;
+            }
+            if (strtolower(trim($child->style->get('caption-side') ?? 'top')) === 'bottom') {
+                $bottom[] = $child;
+            } else {
+                $top[] = $child;
+            }
+        }
+
+        return [$top, $bottom];
+    }
+
+    /**
+     * The table wrapper box around a table that has captions: an anonymous block carrying the
+     * table's margins, holding the top captions, the table and the bottom captions laid out
+     * below it. A table without captions is returned as is.
+     *
+     * @param list<LayoutNode> $topCaptionLayouts
+     * @param list<StyledNode> $bottomCaptions
+     */
+    private function wrapWithCaptions(StyledNode $styled, LayoutNode $table, ?Edges $margin, array $topCaptionLayouts, array $bottomCaptions, float $containingHeight, float $fontSize): LayoutNode
+    {
+        if ($margin === null) {
+            return $table;
+        }
+        $border = $table->box->borderBox();
+        $x = $border->x;
+        $width = $border->width;
+        $top = $topCaptionLayouts === [] ? $border->y : $topCaptionLayouts[0]->box->marginBox()->y;
+        $children = $topCaptionLayouts;
+        $children[] = $table;
+        $cursor = $border->bottom();
+        foreach ($bottomCaptions as $caption) {
+            $layout = $this->layoutBlock($caption, $x, $cursor, $width, $containingHeight, $fontSize);
+            $children[] = $layout;
+            $cursor = $layout->box->marginBox()->bottom();
+        }
+
+        $properties = ['display' => 'block'];
+        foreach (StyleComputer::INHERITED as $property) {
+            $value = $styled->style->get($property);
+            if ($value !== null) $properties[$property] = $value;
+        }
+        $wrapper = new StyledNode(Node::element(self::ANONYMOUS_TAG, [], []), new ComputedStyle($properties));
+        $zero = new Edges(0.0, 0.0, 0.0, 0.0);
+
+        return new LayoutNode($wrapper, new LayoutBox(new Rect($x, $top, $width, $cursor - $top), $zero, $zero, $margin), $children, $fontSize);
     }
 
     /**

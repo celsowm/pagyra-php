@@ -117,6 +117,7 @@ final class UserAgentStyles
             'dd' => ['margin-left' => '40px'],
             'address' => ['font-style' => 'italic'],
             'center' => ['text-align' => 'center'],
+            'caption' => ['text-align' => 'center'],
             default => [],
         };
     }
