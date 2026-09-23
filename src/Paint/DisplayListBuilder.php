@@ -63,9 +63,10 @@ final class DisplayListBuilder
     {
         $node = $entry->placement->node;
         $pageIndex = $entry->fragment->pageIndex;
-        $this->appendTopLevelBox($commands, $node, $pageIndex, $entry->placement->offsetY, $pagination, $margins);
+        $clip = $this->appendTopLevelBox($commands, $node, $pageIndex, $entry->placement->offsetY, $pagination, $margins);
         $this->appendLines($commands, $entry->fragment->lines, $margins);
         foreach ($entry->fragment->blocks as $block) $this->appendBlock($commands, $block, $margins);
+        if ($clip) $commands[] = new ClipPaintCommand($pageIndex);
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
@@ -76,7 +77,7 @@ final class DisplayListBuilder
         float $offsetY,
         PaginationResult $pagination,
         array $margins,
-    ): void {
+    ): bool {
         $border = $node->box->borderBox();
         $continuousStart = $border->y + $offsetY;
         $continuousEnd = $border->bottom() + $offsetY;
@@ -84,7 +85,7 @@ final class DisplayListBuilder
         $pageEnd = $pageStart + $pagination->flow->usableHeightForPage($pageIndex);
         $start = max($continuousStart, $pageStart);
         $end = min($continuousEnd, $pageEnd);
-        if ($end <= $start) return;
+        if ($end <= $start) return false;
 
         $x = $border->x + $margins['left'];
         $y = ($start - $pageStart) + $margins['top'];
@@ -111,6 +112,48 @@ final class DisplayListBuilder
         );
         $this->appendBorders($commands, $node, $pageIndex, $x, $y, $width, $height, $drawTop, $drawBottom);
         $this->appendOutline($commands, $node, $node->source->style, $pageIndex, $x, $y, $width, $height);
+
+        return $this->openOverflowClip($commands, $node, $pageIndex, $x, $y, $width, $height, $drawTop, $drawBottom);
+    }
+
+    /**
+     * `overflow: hidden` (or `clip`) on a box clips everything painted inside it to its padding
+     * box (CSS Overflow 3 §3); the content of a box with a fixed height used to spill over the
+     * boxes below it. Returns whether a clip was opened, which the caller closes after the
+     * content.
+     *
+     * @param list<object> $commands
+     */
+    private function openOverflowClip(array &$commands, LayoutNode $node, int $pageIndex, float $x, float $y, float $width, float $height, bool $drawTop, bool $drawBottom): bool
+    {
+        $overflow = strtolower(trim($node->source->style->get('overflow') ?? 'visible'));
+        $parts = preg_split('/\s+/', $overflow) ?: [];
+        $clipX = in_array($parts[0] ?? '', ['hidden', 'clip', 'scroll', 'auto'], true);
+        $clipY = in_array($parts[1] ?? $parts[0] ?? '', ['hidden', 'clip', 'scroll', 'auto'], true);
+        foreach (['overflow-x' => &$clipX, 'overflow-y' => &$clipY] as $property => &$flag) {
+            $value = strtolower(trim($node->source->style->get($property) ?? ''));
+            if ($value !== '') $flag = in_array($value, ['hidden', 'clip', 'scroll', 'auto'], true);
+        }
+        unset($flag);
+        if (!$clipX && !$clipY) return false;
+        // A box split across pages is not clipped: pagination can push a line or a child past
+        // the end of the fragment it belongs to, and clipping the fragment would hide that
+        // content instead of the overflow the author meant to hide.
+        if (!$drawTop || !$drawBottom) return false;
+
+        $box = $node->box;
+        $top = $drawTop ? $box->border->top : 0.0;
+        $bottom = $drawBottom ? $box->border->bottom : 0.0;
+        $unbounded = 1.0e5;
+        $commands[] = new ClipPaintCommand(
+            $pageIndex,
+            $clipX ? $x + $box->border->left : $x - $unbounded,
+            $clipY ? $y + $top : $y - $unbounded,
+            $clipX ? max(0.0, $width - $box->border->horizontal()) : $width + 2 * $unbounded,
+            $clipY ? max(0.0, $height - $top - $bottom) : $height + 2 * $unbounded,
+        );
+
+        return true;
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
@@ -148,10 +191,12 @@ final class DisplayListBuilder
                 $wholeBox,
             );
             $this->appendOutline($commands, $block->node, $block->node->source->style, $block->pageIndex, $x, $y, $border->width, $block->height);
+            $clip = $this->openOverflowClip($commands, $block->node, $block->pageIndex, $x, $y, $border->width, $block->height, $wholeBox, $wholeBox);
         }
         $this->appendListMarker($commands, $block, $margins);
         $this->appendLines($commands, $block->lines, $margins);
         foreach ($block->children as $child) $this->appendBlock($commands, $child, $margins);
+        if ($clip ?? false) $commands[] = new ClipPaintCommand($block->pageIndex);
     }
 
     /**

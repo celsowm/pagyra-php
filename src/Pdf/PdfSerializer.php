@@ -11,6 +11,7 @@ use Pagyra\Fonts\WinAnsiEncoding;
 use Pagyra\Fonts\Ttf\TtfSubsetter;
 use Pagyra\Paint\BorderPaintCommand;
 use Pagyra\Paint\BoxPaintCommand;
+use Pagyra\Paint\ClipPaintCommand;
 use Pagyra\Paint\DisplayList;
 use Pagyra\Paint\ImagePaintCommand;
 use Pagyra\Paint\RoundedBorderPaintCommand;
@@ -46,6 +47,15 @@ final class PdfSerializer
             $usedImages = [];
             $linkAnnotations = [];
             foreach ($page->commands as $command) {
+                if ($command instanceof ClipPaintCommand) {
+                    $content .= $command->opens()
+                        ? "q\n" . $this->number(Units::pxToPt($command->x)) . ' '
+                            . $this->number(Units::pxToPt($page->height - $command->y - $command->height)) . ' '
+                            . $this->number(Units::pxToPt($command->width)) . ' '
+                            . $this->number(Units::pxToPt($command->height)) . " re W n\n"
+                        : "Q\n";
+                    continue;
+                }
                 if ($command instanceof BoxPaintCommand) {
                     $content .= $this->serializeBox(
                         $command,
