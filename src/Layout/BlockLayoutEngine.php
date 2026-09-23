@@ -406,6 +406,7 @@ final class BlockLayoutEngine
         return match ($this->display($styled)) {
             'table' => $this->layoutTable($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize),
             'flex' => $this->layoutFlex($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize),
+            'grid' => $this->layoutGrid($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize),
             default => $this->layoutBlock($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize),
         };
     }
@@ -1198,6 +1199,362 @@ final class BlockLayoutEngine
         }
 
         return $result;
+    }
+
+    /**
+     * CSS Grid layout (CSS Grid 1), beyond the reference's row-by-row auto placement (pagyra-js
+     * `src/layout/strategies/grid.ts`): column tracks from `grid-template-columns` in px, %,
+     * `fr`, `auto`, `minmax()` and `repeat()` (with `auto-fill`/`auto-fit`), items placed by
+     * `grid-column`/`grid-row`/`grid-area` line numbers and spans or else auto-placed in row
+     * order, rows from `grid-template-rows` and `grid-auto-rows` or sized to their content, `gap`,
+     * and `align-items`/`justify-items` with their `-self` overrides (`stretch` by default).
+     * `auto` columns take their items' preferred widths, and `fr` columns share what is left.
+     * Named lines and `grid-template-areas` are not implemented.
+     *
+     * `display: grid` used to fall back to a plain block, stacking the cells.
+     */
+    private function layoutGrid(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
+    {
+        $fontSize = $this->resolveFontSize($styled, $parentFontSize);
+        [$marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw] = $this->edgeRawValues($styled, 'margin');
+        $margin = $this->resolveRawEdges($marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw, $containingWidth, $containingHeight, $fontSize);
+        $padding = $this->resolveEdges($styled, 'padding', $containingWidth, $containingHeight, $fontSize);
+        $border = $this->resolveBorderEdges($styled, $containingWidth, $containingHeight, $fontSize);
+        $horizontalNonContent = $padding->horizontal() + $border->horizontal();
+        $verticalNonContent = $padding->vertical() + $border->vertical();
+        $borderBox = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box';
+        $widthValue = $styled->style->get('width', 'auto') ?? 'auto';
+        if ($this->isAuto($widthValue)) {
+            $contentWidth = max(0.0, $containingWidth - $margin->horizontal() - $horizontalNonContent);
+        } else {
+            $resolved = $this->resolveLength($widthValue, $containingWidth, $fontSize, $containingWidth, $containingHeight, 'zero');
+            $contentWidth = max(0.0, $borderBox ? $resolved - $horizontalNonContent : $resolved);
+        }
+        $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $containingWidth, $containingHeight, $fontSize);
+        if (!$this->isAuto($widthValue)) {
+            $used = BlockMath::resolveAutoMargins($containingWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
+            $margin = new Edges($margin->top, $used['right'], $margin->bottom, $used['left']);
+        }
+        $contentX = $containingX + $margin->left + $border->left + $padding->left;
+        $contentY = $flowY + $margin->top + $border->top + $padding->top;
+        [$rowGap, $columnGap] = $this->flexGaps($styled, $contentWidth, $fontSize);
+
+        // Items: in-flow children, blockified; text runs become anonymous items.
+        $children = [];
+        $pendingText = [];
+        $flush = function () use (&$pendingText, &$children, $styled): void {
+            foreach ($pendingText as $text) {
+                if (trim($text->node->text ?? '') !== '') {
+                    $children[] = $this->anonymousFlexItem($styled, $pendingText);
+                    break;
+                }
+            }
+            $pendingText = [];
+        };
+        foreach ($styled->children as $child) {
+            if ($child->node->type === 'text') { $pendingText[] = $child; continue; }
+            if ($this->display($child) === 'none') continue;
+            $flush();
+            $children[] = $this->blockifiedFlexItem($child);
+        }
+        $flush();
+
+        $columns = $this->gridTracks($styled->style->get('grid-template-columns') ?? 'none', $contentWidth, $columnGap, $fontSize);
+        if ($columns === []) $columns = [['kind' => 'auto', 'size' => 0.0, 'min' => 0.0]];
+
+        // Placement: explicit positions first, then auto placement in row order, sparse.
+        $placements = [];
+        $occupied = [];
+        $columnCount = count($columns);
+        $pending = [];
+        foreach ($children as $index => $child) {
+            [$colStart, $colSpan] = $this->gridLine($child, 'column');
+            [$rowStart, $rowSpan] = $this->gridLine($child, 'row');
+            if ($colStart !== null) $columnCount = max($columnCount, $colStart + $colSpan);
+            $placements[$index] = ['col' => $colStart, 'colSpan' => $colSpan, 'row' => $rowStart, 'rowSpan' => $rowSpan];
+            if ($colStart === null || $rowStart === null) $pending[] = $index;
+        }
+        while (count($columns) < $columnCount) $columns[] = ['kind' => 'auto', 'size' => 0.0, 'min' => 0.0];
+        $mark = function (int $row, int $col, int $rowSpan, int $colSpan) use (&$occupied): void {
+            for ($r = $row; $r < $row + $rowSpan; $r++) for ($c = $col; $c < $col + $colSpan; $c++) $occupied[$r][$c] = true;
+        };
+        $free = function (int $row, int $col, int $rowSpan, int $colSpan) use (&$occupied, $columnCount): bool {
+            if ($col + $colSpan > $columnCount) return false;
+            for ($r = $row; $r < $row + $rowSpan; $r++) for ($c = $col; $c < $col + $colSpan; $c++) if (isset($occupied[$r][$c])) return false;
+            return true;
+        };
+        foreach ($placements as $index => $p) {
+            if ($p['col'] !== null && $p['row'] !== null) $mark($p['row'], $p['col'], $p['rowSpan'], $p['colSpan']);
+        }
+        $cursorRow = 0;
+        $cursorCol = 0;
+        foreach ($pending as $index) {
+            $p = $placements[$index];
+            $colSpan = min($p['colSpan'], $columnCount);
+            if ($p['row'] !== null) {
+                $col = 0;
+                while (!$free($p['row'], $col, $p['rowSpan'], $colSpan)) $col++;
+                $placements[$index]['col'] = $col;
+                $placements[$index]['colSpan'] = $colSpan;
+                $mark($p['row'], $col, $p['rowSpan'], $colSpan);
+                continue;
+            }
+            $row = $cursorRow;
+            $col = $p['col'] ?? $cursorCol;
+            if ($p['col'] !== null && $col < $cursorCol) $row++;
+            while (true) {
+                if ($free($row, $col, $p['rowSpan'], $colSpan)) break;
+                if ($p['col'] !== null) { $row++; continue; }
+                $col++;
+                if ($col + $colSpan > $columnCount) { $col = 0; $row++; }
+            }
+            $placements[$index] = ['col' => $col, 'colSpan' => $colSpan, 'row' => $row, 'rowSpan' => $p['rowSpan']];
+            $mark($row, $col, $p['rowSpan'], $colSpan);
+            $cursorRow = $row;
+            $cursorCol = $col + $colSpan;
+        }
+
+        // Column sizes: fixed, then auto from the items' preferred widths, then fr.
+        $widths = [];
+        $available = $contentWidth - $columnGap * ($columnCount - 1);
+        foreach ($columns as $c => $track) {
+            $widths[$c] = $track['kind'] === 'fixed' ? $track['size'] : $track['min'];
+        }
+        foreach ($columns as $c => $track) {
+            if ($track['kind'] !== 'auto') continue;
+            foreach ($placements as $index => $p) {
+                if ($p['col'] === $c && $p['colSpan'] === 1) {
+                    $widths[$c] = max($widths[$c], $this->flexPreferredWidth($children[$index], $available, $this->resolveFontSize($children[$index], $fontSize)));
+                }
+            }
+        }
+        $fr = array_sum(array_map(static fn(array $t): float => $t['kind'] === 'fr' ? $t['size'] : 0.0, $columns));
+        $remaining = $available - array_sum($widths);
+        if ($fr > 0.0) {
+            // CSS Grid 1 §12.7.1 "find the size of an fr": share the leftover space by flex
+            // factor, and freeze at its minimum any track whose share would fall below it.
+            $flexible = array_keys(array_filter($columns, static fn(array $t): bool => $t['kind'] === 'fr'));
+            $leftover = $available - array_sum(array_map(static fn(int $c): float => $widths[$c], array_diff(array_keys($widths), $flexible)));
+            $frozen = [];
+            do {
+                $active = array_diff($flexible, $frozen);
+                $factor = array_sum(array_map(static fn(int $c): float => $columns[$c]['size'], $active));
+                $space = $leftover - array_sum(array_map(static fn(int $c): float => $columns[$c]['min'], $frozen));
+                $unit = $factor > 0.0 ? max(0.0, $space) / $factor : 0.0;
+                $changed = false;
+                foreach ($active as $c) {
+                    if ($columns[$c]['size'] * $unit < $columns[$c]['min']) { $frozen[] = $c; $changed = true; }
+                }
+            } while ($changed);
+            foreach ($flexible as $c) {
+                $widths[$c] = in_array($c, $frozen, true) ? $columns[$c]['min'] : $columns[$c]['size'] * $unit;
+            }
+        } elseif ($remaining > 0.0) {
+            $autos = array_keys(array_filter($columns, static fn(array $t): bool => $t['kind'] === 'auto'));
+            foreach ($autos as $c) $widths[$c] += $remaining / count($autos);
+        }
+        $columnX = [];
+        $x = $contentX;
+        foreach ($widths as $c => $w) { $columnX[$c] = $x; $x += $w + $columnGap; }
+
+        // Lay out the items and size the rows.
+        $rowTracks = $this->gridTracks($styled->style->get('grid-template-rows') ?? 'none', 0.0, $rowGap, $fontSize);
+        $autoRow = $this->gridTracks($styled->style->get('grid-auto-rows') ?? 'auto', 0.0, $rowGap, $fontSize)[0] ?? ['kind' => 'auto', 'size' => 0.0, 'min' => 0.0];
+        $rowCount = 0;
+        foreach ($placements as $p) $rowCount = max($rowCount, $p['row'] + $p['rowSpan']);
+        $heights = [];
+        for ($r = 0; $r < $rowCount; $r++) {
+            $track = $rowTracks[$r] ?? $autoRow;
+            $heights[$r] = $track['kind'] === 'fixed' ? $track['size'] : $track['min'];
+        }
+        $layouts = [];
+        $itemMargins = [];
+        foreach ($placements as $index => $p) {
+            $child = $children[$index];
+            $childFont = $this->resolveFontSize($child, $fontSize);
+            [$mt, $mr, $mb, $ml] = $this->edgeRawValues($child, 'margin');
+            $itemMargins[$index] = $this->resolveRawEdges($mt, $mr, $mb, $ml, $contentWidth, $containingHeight, $childFont);
+            $areaWidth = array_sum(array_slice($widths, $p['col'], $p['colSpan'])) + $columnGap * ($p['colSpan'] - 1);
+            $justify = $this->gridAlignment($child, $styled, 'justify');
+            $width = $justify === 'stretch' && $this->isAuto($child->style->get('width', 'auto') ?? 'auto')
+                ? max(0.0, $areaWidth - $itemMargins[$index]->horizontal())
+                : $this->flexPreferredWidth($child, max(0.0, $areaWidth - $itemMargins[$index]->horizontal()), $childFont);
+            $layouts[$index] = $this->layoutFlexItem($child, $contentX, $contentY, $width, $itemMargins[$index], null, $containingHeight, $fontSize);
+            if ($p['rowSpan'] === 1 && ($rowTracks[$p['row']] ?? $autoRow)['kind'] !== 'fixed') {
+                $heights[$p['row']] = max($heights[$p['row']], $layouts[$index]->box->borderBox()->height + $itemMargins[$index]->vertical());
+            }
+        }
+        foreach ($placements as $index => $p) {
+            if ($p['rowSpan'] === 1) continue;
+            $need = $layouts[$index]->box->borderBox()->height + $itemMargins[$index]->vertical();
+            $have = array_sum(array_slice($heights, $p['row'], $p['rowSpan'])) + $rowGap * ($p['rowSpan'] - 1);
+            if ($need > $have) $heights[$p['row'] + $p['rowSpan'] - 1] += $need - $have;
+        }
+        $rowY = [];
+        $y = $contentY;
+        for ($r = 0; $r < $rowCount; $r++) { $rowY[$r] = $y; $y += $heights[$r] + ($r < $rowCount - 1 ? $rowGap : 0.0); }
+
+        // Place the items in their areas.
+        $placed = [];
+        foreach ($placements as $index => $p) {
+            $layout = $layouts[$index];
+            $m = $itemMargins[$index];
+            $areaWidth = array_sum(array_slice($widths, $p['col'], $p['colSpan'])) + $columnGap * ($p['colSpan'] - 1);
+            $areaHeight = array_sum(array_slice($heights, $p['row'], $p['rowSpan'])) + $rowGap * ($p['rowSpan'] - 1);
+            $box = $layout->box->borderBox();
+            $freeY = $areaHeight - $box->height - $m->vertical();
+            $align = $this->gridAlignment($children[$index], $styled, 'align');
+            if ($align === 'stretch' && $freeY > 0.0 && $this->isAuto($children[$index]->style->get('height', 'auto') ?? 'auto')) {
+                $layout = $this->stretchedHeight($layout, $freeY);
+                $freeY = 0.0;
+            }
+            $freeX = $areaWidth - $box->width - $m->horizontal();
+            $justify = $this->gridAlignment($children[$index], $styled, 'justify');
+            $dx = $columnX[$p['col']] + $m->left + match ($justify) { 'center' => max(0.0, $freeX) / 2, 'end', 'flex-end', 'right' => max(0.0, $freeX), default => 0.0 };
+            $dy = $rowY[$p['row']] + $m->top + match ($align) { 'center' => max(0.0, $freeY) / 2, 'end', 'flex-end' => max(0.0, $freeY), default => 0.0 };
+            $placed[] = $this->translateNode($layout, $dy - $box->y, $dx - $box->x);
+        }
+        usort($placed, static fn(LayoutNode $a, LayoutNode $b): int => [$a->box->borderBox()->y, $a->box->borderBox()->x] <=> [$b->box->borderBox()->y, $b->box->borderBox()->x]);
+
+        $contentHeight = $rowCount === 0 ? 0.0 : $y - $contentY;
+        $heightValue = $styled->style->get('height', 'auto') ?? 'auto';
+        if (!$this->isAuto($heightValue) && !str_ends_with(trim($heightValue), '%')) {
+            $resolved = $this->resolveLength($heightValue, $containingHeight, $fontSize, $containingWidth, $containingHeight, 'zero');
+            $contentHeight = max(0.0, $borderBox ? $resolved - $verticalNonContent : $resolved);
+        }
+        $contentHeight = $this->applyVerticalConstraints($styled, $contentHeight, $verticalNonContent, $containingWidth, $containingHeight, $fontSize);
+
+        return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $contentHeight), $padding, $border, $margin), $placed, $fontSize);
+    }
+
+    /**
+     * A track list as `fixed` (px), `fr` (flex factor) and `auto` tracks, each with the minimum it
+     * keeps. `minmax(min, max)` is a fixed track of `max`, an `fr` track with a minimum, or an
+     * auto track with a minimum; `min-content`/`max-content`/`fit-content()` are auto.
+     *
+     * @return list<array{kind:string,size:float,min:float}>
+     */
+    private function gridTracks(string $value, float $reference, float $gap, float $fontSize): array
+    {
+        $value = trim($value);
+        if ($value === '' || in_array(strtolower($value), ['none', 'initial', 'inherit'], true)) return [];
+        $tracks = [];
+        foreach ($this->gridTokens($value) as $token) {
+            $lower = strtolower($token);
+            if (preg_match('/^repeat\(\s*([^,]+),(.*)\)$/s', $token, $m) === 1) {
+                $inner = $this->gridTracks(trim($m[2]), $reference, $gap, $fontSize);
+                $count = strtolower(trim($m[1]));
+                if ($count === 'auto-fill' || $count === 'auto-fit') {
+                    $size = array_sum(array_map(static fn(array $t): float => $t['kind'] === 'fixed' ? $t['size'] : $t['min'], $inner));
+                    $n = $size > 0.0 && $reference > 0.0 ? max(1, (int) floor(($reference + $gap) / ($size + $gap * count($inner)))) : 1;
+                } else {
+                    $n = max(1, (int) $count);
+                }
+                for ($i = 0; $i < $n; $i++) array_push($tracks, ...$inner);
+                continue;
+            }
+            $tracks[] = $this->gridTrack($lower, $reference, $fontSize);
+        }
+
+        return $tracks;
+    }
+
+    /** @return array{kind:string,size:float,min:float} */
+    private function gridTrack(string $token, float $reference, float $fontSize): array
+    {
+        if (preg_match('/^minmax\((.*),(.*)\)$/s', $token, $m) === 1) {
+            $min = $this->gridTrack(trim($m[1]), $reference, $fontSize);
+            $max = $this->gridTrack(trim($m[2]), $reference, $fontSize);
+            $floor = $min['kind'] === 'fixed' ? $min['size'] : 0.0;
+            return match ($max['kind']) {
+                'fr' => ['kind' => 'fr', 'size' => $max['size'], 'min' => $floor],
+                'fixed' => ['kind' => 'fixed', 'size' => max($floor, $max['size']), 'min' => $floor],
+                default => ['kind' => 'auto', 'size' => 0.0, 'min' => $floor],
+            };
+        }
+        if (preg_match('/^(\d*\.?\d+)fr$/', $token, $m) === 1) return ['kind' => 'fr', 'size' => (float) $m[1], 'min' => 0.0];
+        if (in_array($token, ['auto', 'min-content', 'max-content'], true) || str_starts_with($token, 'fit-content')) {
+            return ['kind' => 'auto', 'size' => 0.0, 'min' => 0.0];
+        }
+        $size = max(0.0, $this->resolveLength($token, $reference, $fontSize, $reference, $this->viewportHeight, 'zero'));
+
+        return ['kind' => 'fixed', 'size' => $size, 'min' => $size];
+    }
+
+    /** @return list<string> a track list split at top-level whitespace, line names dropped */
+    private function gridTokens(string $value): array
+    {
+        $tokens = [];
+        $buffer = '';
+        $depth = 0;
+        foreach (str_split($value) as $ch) {
+            if ($ch === '(' ) $depth++;
+            if ($ch === ')') $depth--;
+            if ($ch === '[' && $depth === 0) { $depth += 100; continue; }
+            if ($ch === ']' && $depth >= 100) { $depth -= 100; continue; }
+            if ($depth >= 100) continue;
+            if ($depth === 0 && ctype_space($ch)) {
+                if ($buffer !== '') $tokens[] = $buffer;
+                $buffer = '';
+                continue;
+            }
+            $buffer .= $ch;
+        }
+        if ($buffer !== '') $tokens[] = $buffer;
+
+        return $tokens;
+    }
+
+    /**
+     * An item's 0-based start line and span on one axis, from `grid-<axis>`, its `-start`/`-end`
+     * longhands or `grid-area`; null start means auto-placed.
+     *
+     * @return array{0:?int,1:int}
+     */
+    private function gridLine(StyledNode $item, string $axis): array
+    {
+        $start = $item->style->get('grid-' . $axis . '-start');
+        $end = $item->style->get('grid-' . $axis . '-end');
+        $shorthand = $item->style->get('grid-' . $axis);
+        if ($shorthand !== null) {
+            $parts = array_map('trim', explode('/', $shorthand, 2));
+            $start ??= $parts[0];
+            $end ??= $parts[1] ?? null;
+        }
+        $area = $item->style->get('grid-area');
+        if ($area !== null) {
+            $parts = array_map('trim', explode('/', $area));
+            $start ??= $parts[$axis === 'row' ? 0 : 1] ?? null;
+            $end ??= $parts[$axis === 'row' ? 2 : 3] ?? null;
+        }
+        $parse = static function (?string $value): array {
+            $value = strtolower(trim($value ?? 'auto'));
+            if (preg_match('/^span\s+(\d+)$/', $value, $m) === 1) return ['span', max(1, (int) $m[1])];
+            if (preg_match('/^-?\d+$/', $value) === 1 && (int) $value > 0) return ['line', (int) $value];
+            return ['auto', 1];
+        };
+        [$startKind, $startValue] = $parse($start);
+        [$endKind, $endValue] = $parse($end);
+        if ($startKind === 'line') {
+            $span = match ($endKind) {
+                'line' => max(1, $endValue - $startValue),
+                'span' => $endValue,
+                default => 1,
+            };
+            return [$startValue - 1, $span];
+        }
+        if ($startKind === 'span') return [$endKind === 'line' ? max(0, $endValue - 1 - $startValue) : null, $startValue];
+        if ($endKind === 'line') return [max(0, $endValue - 2), 1];
+
+        return [null, $endKind === 'span' ? $endValue : 1];
+    }
+
+    private function gridAlignment(StyledNode $item, StyledNode $container, string $axis): string
+    {
+        $self = strtolower(trim($item->style->get($axis . '-self') ?? 'auto'));
+        $value = $self === 'auto' || $self === '' ? strtolower(trim($container->style->get($axis . '-items') ?? 'stretch')) : $self;
+
+        return in_array($value, ['normal', 'stretch', 'legacy'], true) ? 'stretch' : $value;
     }
 
     /**
