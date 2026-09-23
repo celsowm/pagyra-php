@@ -8,6 +8,7 @@ use Pagyra\Css\Color\ColorParser;
 use Pagyra\Css\Color\Rgba;
 use Pagyra\Layout\AtomicInlineBox;
 use Pagyra\Layout\LayoutNode;
+use Pagyra\Layout\TextRun;
 use Pagyra\Pagination\BlockFragment;
 use Pagyra\Pagination\PaginationResult;
 use Pagyra\Style\ComputedStyle;
@@ -29,7 +30,7 @@ final class BorderPatternExpander
             $skipBorders = [];
 
             foreach ($page->commands as $command) {
-                if ($command instanceof BoxPaintCommand && $this->usesStrokeMode($command->node)) {
+                if ($command instanceof BoxPaintCommand && !$command->node instanceof TextRun && $this->usesStrokeMode($command->node)) {
                     $commands[] = $command;
                     $key = $this->commandKey($command->node, $command->pageIndex);
                     $skipBorders[$key] = true;

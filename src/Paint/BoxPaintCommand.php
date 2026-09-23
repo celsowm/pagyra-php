@@ -7,11 +7,13 @@ namespace Pagyra\Paint;
 use Pagyra\Css\Color\Rgba;
 use Pagyra\Layout\AtomicInlineBox;
 use Pagyra\Layout\LayoutNode;
+use Pagyra\Layout\TextRun;
 
 final readonly class BoxPaintCommand implements \JsonSerializable
 {
     public function __construct(
-        public LayoutNode|AtomicInlineBox $node,
+        /** A TextRun is the background of an inline element behind that run's glyphs. */
+        public LayoutNode|AtomicInlineBox|TextRun $node,
         public int $pageIndex,
         public float $x,
         public float $y,

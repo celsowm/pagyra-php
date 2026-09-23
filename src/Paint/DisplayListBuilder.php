@@ -26,6 +26,8 @@ use Pagyra\Style\ComputedStyle;
 final class DisplayListBuilder
 {
     private const EPSILON = 0.000001;
+    private const INLINE_BACKGROUND_ASCENT = 0.9;
+    private const INLINE_BACKGROUND_DESCENT = 0.22;
 
     private readonly ImageMetadataReader $imageMetadata;
 
@@ -372,12 +374,29 @@ final class DisplayListBuilder
         $weightRaw = strtolower(trim($run->style->get('font-weight', '400') ?? '400'));
         $fontWeight = $weightRaw === 'bold' ? 700 : ($weightRaw === 'normal' ? 400 : (is_numeric($weightRaw) ? (int) $weightRaw : 400));
         [$underline, $lineThrough] = $this->resolveTextDecorationLines($run->style);
+        $baseline = $lineFragment->pageBaseline + ($run->baseline - $line->baseline) + $margins['top'];
+        if ($run->inlineBackground !== null) {
+            // CSS paints an inline box's background over its content area, which is the font's
+            // ascent plus descent around the baseline, not the line box: a highlighted word in a
+            // paragraph with line-height: 2 gets a band hugging the glyphs, not a double-height
+            // slab. The 0.9/0.22 em split is the hhea ascent/descent of the Liberation and URW
+            // faces that stand in for the Base14 families, which is what WebKit draws with.
+            $commands[] = new BoxPaintCommand(
+                node: $run,
+                pageIndex: $lineFragment->pageIndex,
+                x: $run->x + $margins['left'],
+                y: $baseline - self::INLINE_BACKGROUND_ASCENT * $run->fontSize,
+                width: $run->width,
+                height: (self::INLINE_BACKGROUND_ASCENT + self::INLINE_BACKGROUND_DESCENT) * $run->fontSize,
+                backgroundColor: ColorParser::parse($run->inlineBackground),
+            );
+        }
         $commands[] = new TextPaintCommand(
             run: $run,
             pageIndex: $lineFragment->pageIndex,
             x: $run->x + $margins['left'],
             y: $lineFragment->pageY + ($run->y - $line->y) + $margins['top'],
-            baseline: $lineFragment->pageBaseline + ($run->baseline - $line->baseline) + $margins['top'],
+            baseline: $baseline,
             text: $run->text,
             fontSize: $run->fontSize,
             fontFamily: $run->style->get('font-family'),

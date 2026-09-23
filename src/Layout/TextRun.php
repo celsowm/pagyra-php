@@ -23,6 +23,13 @@ final readonly class TextRun implements \JsonSerializable
          * or as a TJ adjustment for embedded fonts) or the drawn line falls short of the margin.
          */
         public float $justificationWordSpacing = 0.0,
+        /**
+         * The `background-color` of the innermost inline element (`<span>`, `<mark>`...) this
+         * text sits in, if any. The run's own style is the text node's, which only receives
+         * inherited properties, so a non-inherited background has to be carried here for
+         * DisplayListBuilder to paint it behind the glyphs.
+         */
+        public ?string $inlineBackground = null,
     ) {
     }
 
@@ -38,6 +45,7 @@ final readonly class TextRun implements \JsonSerializable
             'fontSize' => $this->fontSize,
             'style' => $this->style,
             'justificationWordSpacing' => $this->justificationWordSpacing,
+            'inlineBackground' => $this->inlineBackground,
         ];
     }
 }

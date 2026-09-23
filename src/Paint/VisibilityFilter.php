@@ -6,6 +6,7 @@ namespace Pagyra\Paint;
 
 use Pagyra\Layout\AtomicInlineBox;
 use Pagyra\Layout\LayoutNode;
+use Pagyra\Layout\TextRun;
 use Pagyra\Style\ComputedStyle;
 
 final class VisibilityFilter
@@ -39,6 +40,7 @@ final class VisibilityFilter
             $node = $command->node;
             if ($node instanceof LayoutNode) return $node->source->style;
             if ($node instanceof AtomicInlineBox) return $node->style;
+            if ($node instanceof TextRun) return $node->style;
         }
         return null;
     }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Layout;
 
+use Pagyra\Css\Color\ColorParser;
 use Pagyra\Fonts\HeuristicTextMetrics;
 use Pagyra\Fonts\TextMetrics;
 use Pagyra\Image\ReplacedElementSizingResolver;
@@ -218,6 +219,7 @@ final class InlineTextFormatter
                         $token['fontSize'],
                         $token['style'],
                         $justify ? $extraPerSpace : 0.0,
+                        $token['inlineBackground'] ?? null,
                     ));
                 }
 
@@ -233,14 +235,19 @@ final class InlineTextFormatter
         return new InlineTextLayout($lineBoxes, $cursorY - $y);
     }
 
-    private function collectTokens(StyledNode $node, float $nodeFontSize, float $referenceWidth): array
+    private function collectTokens(StyledNode $node, float $nodeFontSize, float $referenceWidth, ?string $inlineBackground = null): array
     {
         $tokens = [];
         $children = $node->children;
         foreach ($children as $index => $child) {
             if ($child->node->type === 'text') {
                 $text = $this->applyTextTransform($child->node->text ?? '', $node->style);
-                array_push($tokens, ...$this->tokenizeText($text, $node->style, $nodeFontSize));
+                foreach ($this->tokenizeText($text, $node->style, $nodeFontSize) as $token) {
+                    if ($inlineBackground !== null) {
+                        $token['inlineBackground'] = $inlineBackground;
+                    }
+                    $tokens[] = $token;
+                }
                 continue;
             }
 
@@ -292,9 +299,24 @@ final class InlineTextFormatter
                 continue;
             }
 
-            array_push($tokens, ...$this->collectTokens($child, $fontSize, $referenceWidth));
+            array_push($tokens, ...$this->collectTokens($child, $fontSize, $referenceWidth, $this->inlineBackground($child->style) ?? $inlineBackground));
         }
         return $tokens;
+    }
+
+    /**
+     * An inline element's own `background-color`, or null when it paints none. The innermost one
+     * wins: it is painted over its ancestors' anyway, and a run only ever sits in one element.
+     */
+    private function inlineBackground(ComputedStyle $style): ?string
+    {
+        $raw = trim($style->get('background-color') ?? '');
+        if ($raw === '') {
+            return null;
+        }
+        $color = ColorParser::parse($raw);
+
+        return $color !== null && $color->a > 0.0 ? $raw : null;
     }
 
     /** @param list<StyledNode> $children */
@@ -780,7 +802,7 @@ final class InlineTextFormatter
         foreach ($lines as $line) {
             $runs = [];
             foreach ($line->runs as $run) {
-                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing);
+                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground);
             }
             $boxes = [];
             foreach ($line->atomicBoxes as $box) {
@@ -828,8 +850,9 @@ final class InlineTextFormatter
             && abs($last->fontSize - $run->fontSize) < 1e-9
             && abs(($last->x + $last->width) - $run->x) < 1e-9
             && abs($last->baseline - $run->baseline) < 1e-9
-            && abs($last->justificationWordSpacing - $run->justificationWordSpacing) < 1e-9) {
-            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing);
+            && abs($last->justificationWordSpacing - $run->justificationWordSpacing) < 1e-9
+            && $last->inlineBackground === $run->inlineBackground) {
+            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground);
             return;
         }
         $runs[] = $run;
