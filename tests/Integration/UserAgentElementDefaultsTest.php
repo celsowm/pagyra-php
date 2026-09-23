@@ -99,9 +99,10 @@ final class UserAgentElementDefaultsTest extends TestCase
     public function testRemainingHeadingLevelsGetTheReferenceSizesAndWeight(): void
     {
         self::assertSame('bold', $this->styleOf('<h4>x</h4>', 'h4', 'font-weight'));
-        self::assertSame('1em', $this->styleOf('<h4>x</h4>', 'h4', 'font-size'));
-        self::assertSame('0.83em', $this->styleOf('<h5>x</h5>', 'h5', 'font-size'));
-        self::assertSame('0.67em', $this->styleOf('<h6>x</h6>', 'h6', 'font-size'));
+        // font-size is the computed value: the UA's 1em/0.83em/0.67em against the 16px default.
+        self::assertSame('16px', $this->styleOf('<h4>x</h4>', 'h4', 'font-size'));
+        self::assertSame('13.28px', $this->styleOf('<h5>x</h5>', 'h5', 'font-size'));
+        self::assertSame('10.72px', $this->styleOf('<h6>x</h6>', 'h6', 'font-size'));
         self::assertSame('2.33em', $this->styleOf('<h6>x</h6>', 'h6', 'margin-top'));
     }
 

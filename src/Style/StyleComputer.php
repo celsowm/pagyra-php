@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Pagyra\Style;
 
 use Pagyra\Css\DeclarationParser;
+use Pagyra\Css\Length\FontSizeKeywords;
 use Pagyra\Css\SelectorMatcher;
 use Pagyra\Css\StyleRule;
 use Pagyra\Dom\Node;
+use Pagyra\Units\Units;
 
 final class StyleComputer
 {
@@ -415,6 +417,10 @@ final class StyleComputer
             }
         }
 
+        if ($node->type === 'element') {
+            $this->absolutizeFontRelativeLengths($properties, $parent);
+        }
+
         if ($node->isElement('li')) {
             $parentNode = $ancestors === [] ? null : $ancestors[array_key_last($ancestors)];
             $marker = $this->computeListMarker($node, $parentNode, $properties, $parent);
@@ -438,6 +444,104 @@ final class StyleComputer
         }
 
         return new StyledNode($node, $style, $children);
+    }
+
+    /**
+     * Turns `font-size` into its computed value, an absolute length, and does the same for the
+     * inherited lengths that are relative to it (`line-height`, `letter-spacing`, `word-spacing`,
+     * `text-indent` in `em`/`rem`/`ex`, and `line-height` in `%`).
+     *
+     * CSS inherits the *computed* value, and for these properties the computed value is absolute.
+     * Here the declared text was inherited instead and resolved again at every level against that
+     * level's parent, so relative sizes compounded down the tree: `<div style="font-size:2em">
+     * <p>x</p></div>` drew "x" at 64px instead of 32px, `font-size: 90%` shrank again inside every
+     * nested element, and a `line-height: 1.2em` declared on a 13pt paragraph was recomputed
+     * against each child's own font-size. The reference computes `font-size` to a number when it
+     * builds the style (pagyra-js `src/css/compute-style.ts`), so this is parity, not an extension.
+     *
+     * Anything this cannot resolve (`calc()`, viewport units, garbage) is left as declared, which
+     * is what the layout engines received before.
+     *
+     * @param array<string,string> $properties
+     */
+    private function absolutizeFontRelativeLengths(array &$properties, ?ComputedStyle $parent): void
+    {
+        $parentFontSize = self::pxValue($parent?->get('font-size')) ?? FontSizeKeywords::MEDIUM_PX;
+        $fontSize = $parentFontSize;
+        if (isset($properties['font-size'])) {
+            $resolved = $this->resolveFontSizeValue($properties['font-size'], $parentFontSize);
+            if ($resolved !== null) {
+                $properties['font-size'] = self::px($resolved);
+                $fontSize = $resolved;
+            } else {
+                $fontSize = self::pxValue($properties['font-size']) ?? $parentFontSize;
+            }
+        }
+
+        foreach (['line-height', 'letter-spacing', 'word-spacing', 'text-indent'] as $property) {
+            if (!isset($properties[$property])) {
+                continue;
+            }
+            $value = strtolower(trim((string) preg_replace('/!\s*important\s*$/i', '', $properties[$property])));
+            if (preg_match('/^(-?\d*\.?\d+)(em|rem|ex|%)$/', $value, $m) !== 1) {
+                continue;
+            }
+            // `%` means the containing block's width for text-indent, and nothing for the
+            // spacing properties; only line-height takes it against the font-size.
+            if ($m[2] === '%' && $property !== 'line-height') {
+                continue;
+            }
+            $number = (float) $m[1];
+            $properties[$property] = self::px(match ($m[2]) {
+                'em' => $number * $fontSize,
+                'rem' => $number * FontSizeKeywords::MEDIUM_PX,
+                'ex' => $number * $fontSize * 0.5,
+                '%' => $number / 100.0 * $fontSize,
+            });
+        }
+    }
+
+    private function resolveFontSizeValue(string $raw, float $parentFontSize): ?float
+    {
+        $value = strtolower(trim((string) preg_replace('/!\s*important\s*$/i', '', $raw)));
+        $keyword = FontSizeKeywords::resolve($value, $parentFontSize);
+        if ($keyword !== null) {
+            return $keyword;
+        }
+        if (preg_match('/^(\d*\.?\d+)(px|pt|pc|in|cm|mm|q|em|rem|ex|%)?$/', $value, $m) !== 1) {
+            return null;
+        }
+        $number = (float) $m[1];
+
+        return match ($m[2] ?? 'px') {
+            'px' => $number,
+            'pt' => Units::ptToPx($number),
+            'pc' => Units::pcToPx($number),
+            'in' => Units::inToPx($number),
+            'cm' => Units::cmToPx($number),
+            'mm' => Units::mmToPx($number),
+            'q' => Units::qToPx($number),
+            'em' => $number * $parentFontSize,
+            'rem' => $number * FontSizeKeywords::MEDIUM_PX,
+            'ex' => $number * $parentFontSize * 0.5,
+            '%' => $number / 100.0 * $parentFontSize,
+        };
+    }
+
+    private static function pxValue(?string $value): ?float
+    {
+        if ($value !== null && preg_match('/^\s*(-?\d*\.?\d+)px\s*$/i', $value, $m) === 1) {
+            return (float) $m[1];
+        }
+
+        return null;
+    }
+
+    private static function px(float $value): string
+    {
+        $formatted = rtrim(rtrim(sprintf('%.4F', $value), '0'), '.');
+
+        return ($formatted === '-0' ? '0' : $formatted) . 'px';
     }
 
     /** @param array<string,string> $properties */
