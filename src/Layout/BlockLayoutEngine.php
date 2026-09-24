@@ -46,7 +46,11 @@ final class BlockLayoutEngine
 
     public function layout(StyledNode $root): LayoutNode
     {
-        return $this->applyRelativeOffsets($this->layoutDocument($root), $this->viewportWidth, $this->viewportHeight);
+        $viewport = new Rect(0.0, 0.0, $this->viewportWidth, $this->viewportHeight);
+        return $this->applyOutOfFlowOffsets(
+            $this->applyRelativeOffsets($this->layoutDocument($root), $this->viewportWidth, $this->viewportHeight),
+            $viewport,
+        );
     }
 
     /**
@@ -110,6 +114,74 @@ final class BlockLayoutEngine
     }
 
     /**
+     * `position: absolute`/`fixed` (CSS 2.1 §10.1, §9.6): once the flow (and `position: relative`)
+     * has settled, each absolutely or fixed positioned box is moved to sit against its containing
+     * block — the padding-relative content box of its nearest positioned ancestor (`relative`,
+     * `absolute` or `fixed`), or the page for `fixed` and for `absolute` with no positioned
+     * ancestor — placed by `left`/`top`/`right`/`bottom`. Like pagyra-js, the box is not removed
+     * from the flow it was laid out in, so it still opens a gap in its siblings; and when both
+     * insets on an axis are `auto` it is pinned to the containing block's own top-left corner
+     * rather than kept at its flow position, which is the same simplification pagyra-js makes.
+     * The property used to be ignored entirely, so a stamp or watermark positioned this way ended
+     * up wherever its flow position happened to put it.
+     */
+    private function applyOutOfFlowOffsets(LayoutNode $node, Rect $ancestorBox): LayoutNode
+    {
+        $position = strtolower(trim($node->source->style->get('position') ?? 'static'));
+        $isPositioned = in_array($position, ['relative', 'absolute', 'fixed'], true);
+        if ($position === 'absolute' || $position === 'fixed') {
+            $containingBlock = $position === 'fixed'
+                ? new Rect(0.0, 0.0, $this->viewportWidth, $this->viewportHeight)
+                : $ancestorBox;
+            [$dx, $dy] = $this->outOfFlowOffset($node, $containingBlock);
+            $node = $this->translateNode($node, $dy, $dx);
+        }
+        $childAncestorBox = $isPositioned ? $node->box->content : $ancestorBox;
+
+        $children = [];
+        $changed = false;
+        foreach ($node->children as $child) {
+            $moved = $this->applyOutOfFlowOffsets($child, $childAncestorBox);
+            $changed = $changed || $moved !== $child;
+            $children[] = $moved;
+        }
+        if ($changed) {
+            $node = new LayoutNode($node->source, $node->box, $children, $node->fontSize, $node->lineBoxes);
+        }
+
+        return $node;
+    }
+
+    /** @return array{0:float,1:float} the delta to move the node's content-box origin by */
+    private function outOfFlowOffset(LayoutNode $node, Rect $containingBlock): array
+    {
+        $style = $node->source->style;
+        $fontSize = $node->fontSize;
+        $resolve = function (string $side, float $reference) use ($style, $fontSize): ?float {
+            $value = $style->get($side);
+            return $value === null || $this->isAuto($value) ? null : $this->resolveLength($value, $reference, $fontSize, $reference, $this->viewportHeight, 'zero');
+        };
+        $left = $resolve('left', $containingBlock->width);
+        $right = $resolve('right', $containingBlock->width);
+        $top = $resolve('top', $containingBlock->height);
+        $bottom = $resolve('bottom', $containingBlock->height);
+
+        $marginBox = $node->box->marginBox();
+        $marginX = $left !== null
+            ? $containingBlock->x + $left
+            : ($right !== null ? $containingBlock->x + $containingBlock->width - $marginBox->width - $right : $containingBlock->x);
+        $marginY = $top !== null
+            ? $containingBlock->y + $top
+            : ($bottom !== null ? $containingBlock->y + $containingBlock->height - $marginBox->height - $bottom : $containingBlock->y);
+
+        $box = $node->box;
+        $contentX = $marginX + $box->margin->left + $box->border->left + $box->padding->left;
+        $contentY = $marginY + $box->margin->top + $box->border->top + $box->padding->top;
+
+        return [$contentX - $box->content->x, $contentY - $box->content->y];
+    }
+
+    /**
      * The root runs its children through the same flow segmentation the block path uses, so
      * inline content sitting directly at the top level lands in an anonymous block instead of
      * being skipped. It used to be skipped: the loop below only accepted block-level children,
@@ -140,7 +212,7 @@ final class BlockLayoutEngine
         }
         $autoWidthBeforeConstraints = $contentWidth;
         $contentWidth = $this->applyHorizontalConstraints($root, $contentWidth, $horizontalNonContent, $this->viewportWidth, $this->viewportHeight, $fontSize);
-        if (!$this->isAuto($widthValue) || $contentWidth !== $autoWidthBeforeConstraints) {
+        if ((!$this->isAuto($widthValue) || $contentWidth !== $autoWidthBeforeConstraints) && !$this->isOutOfFlow($root)) {
             $usedMargins = BlockMath::resolveAutoMargins($this->viewportWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
             $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
         }
@@ -268,7 +340,7 @@ final class BlockLayoutEngine
         }
         $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $containingWidth, $containingHeight, $fontSize);
 
-        if (!$this->isAuto($widthValue)) {
+        if (!$this->isAuto($widthValue) && !$this->isOutOfFlow($styled)) {
             $usedMargins = BlockMath::resolveAutoMargins($containingWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
             $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
         }
@@ -461,15 +533,17 @@ final class BlockLayoutEngine
         [$contentWidth, $contentHeight] = $this->inlineTextFormatter->replacedContentSize($styled, $containingWidth, $fontSize);
 
         $horizontalNonContent = $padding->horizontal() + $border->horizontal();
-        $usedMargins = BlockMath::resolveAutoMargins(
-            $containingWidth,
-            $contentWidth + $horizontalNonContent,
-            $margin->left,
-            $margin->right,
-            $this->isAuto($marginLeftRaw ?? '0'),
-            $this->isAuto($marginRightRaw ?? '0'),
-        );
-        $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
+        if (!$this->isOutOfFlow($styled)) {
+            $usedMargins = BlockMath::resolveAutoMargins(
+                $containingWidth,
+                $contentWidth + $horizontalNonContent,
+                $margin->left,
+                $margin->right,
+                $this->isAuto($marginLeftRaw ?? '0'),
+                $this->isAuto($marginRightRaw ?? '0'),
+            );
+            $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
+        }
 
         $contentX = $containingX + $margin->left + $border->left + $padding->left;
         $contentY = $flowY + $margin->top + $border->top + $padding->top;
@@ -545,8 +619,10 @@ final class BlockLayoutEngine
             // A table narrower than its container is placed by its auto side margins, as any
             // block is (`margin: 0 auto`, and `<table align="center">` through its hint); they
             // resolved to zero here, so such a table always sat on the left.
-            $usedMargins = BlockMath::resolveAutoMargins($containingWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
-            $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
+            if (!$this->isOutOfFlow($styled)) {
+                $usedMargins = BlockMath::resolveAutoMargins($containingWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
+                $margin = new Edges($margin->top, $usedMargins['right'], $margin->bottom, $usedMargins['left']);
+            }
         }
         // Captions sit in the table wrapper box, outside the table's border box and as wide as it
         // (CSS 2.1 17.4): the top ones above the grid, the `caption-side: bottom` ones below. They
@@ -772,7 +848,7 @@ final class BlockLayoutEngine
             $contentWidth = max(0.0, $borderBox ? $resolved - $horizontalNonContent : $resolved);
         }
         $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $containingWidth, $containingHeight, $fontSize);
-        if (!$this->isAuto($widthValue)) {
+        if (!$this->isAuto($widthValue) && !$this->isOutOfFlow($styled)) {
             $used = BlockMath::resolveAutoMargins($containingWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
             $margin = new Edges($margin->top, $used['right'], $margin->bottom, $used['left']);
         }
@@ -1256,7 +1332,7 @@ final class BlockLayoutEngine
             $contentWidth = max(0.0, $borderBox ? $resolved - $horizontalNonContent : $resolved);
         }
         $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $containingWidth, $containingHeight, $fontSize);
-        if (!$this->isAuto($widthValue)) {
+        if (!$this->isAuto($widthValue) && !$this->isOutOfFlow($styled)) {
             $used = BlockMath::resolveAutoMargins($containingWidth, $contentWidth + $horizontalNonContent, $margin->left, $margin->right, $this->isAuto($marginLeftRaw ?? '0'), $this->isAuto($marginRightRaw ?? '0'));
             $margin = new Edges($margin->top, $used['right'], $margin->bottom, $used['left']);
         }
@@ -2263,6 +2339,20 @@ final class BlockLayoutEngine
     }
 
     private function isAuto(string $value): bool { return strtolower(trim($value)) === 'auto'; }
+
+    /**
+     * `position: absolute`/`fixed` boxes are not laid out by the normal-flow width/margin
+     * equation (CSS 2.1 §10.3.7 has its own, involving `left`/`right`, that this engine does not
+     * solve): the auto-margin fill/over-constraint step below is for a box that must span its
+     * containing block's width, which an out-of-flow box never has to. Without this guard, a
+     * `<div style="position:absolute;width:50px">` had its unset (0) right margin silently
+     * stretched to fill the rest of the page, so `outOfFlowOffset`'s `right`/`auto` math worked
+     * off a margin box as wide as the page instead of the declared 50px.
+     */
+    private function isOutOfFlow(StyledNode $styled): bool
+    {
+        return in_array(strtolower(trim($styled->style->get('position') ?? 'static')), ['absolute', 'fixed'], true);
+    }
 
     private function resolveLength(string $value, float $reference, float $fontSize, float $containerWidth, float $containerHeight, string $auto): float
     {

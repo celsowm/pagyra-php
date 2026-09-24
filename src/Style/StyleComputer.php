@@ -921,6 +921,7 @@ final class StyleComputer
             $this->absolutizeFontRelativeLengths($properties, $parent);
             $this->absolutizeFontWeight($properties, $parent);
             $this->foldOpacity($properties);
+            $this->blockifyPositioned($properties);
         }
 
         if ($node->isElement('li')) {
@@ -1049,6 +1050,34 @@ final class StyleComputer
             $properties['x-opacity'] = rtrim(rtrim(sprintf('%.6F', $effective), '0'), '.');
         } else {
             unset($properties['x-opacity']);
+        }
+    }
+
+    /**
+     * `position: absolute`/`fixed` blockifies an inline-level `display` (CSS Display 3 §2.7, CSS
+     * 2.1 §9.7): the box is taken out of the flow it was declared in, so an inline box makes no
+     * more sense for it than it would for a float. Without this, `<span style="position:absolute">`
+     * stayed `display: inline` and was laid out as ordinary text inside its parent's line box —
+     * BlockLayoutEngine's positioning pass only moves elements that got a box of their own, so the
+     * span was never a candidate for it and the declaration did nothing.
+     *
+     * @param array<string,string> $properties
+     */
+    private function blockifyPositioned(array &$properties): void
+    {
+        if (!in_array(strtolower(trim($properties['position'] ?? 'static')), ['absolute', 'fixed'], true)) {
+            return;
+        }
+        $display = strtolower(trim($properties['display'] ?? 'inline'));
+        $blockified = match ($display) {
+            'inline', 'inline-block' => 'block',
+            'inline-table' => 'table',
+            'inline-flex' => 'flex',
+            'inline-grid' => 'grid',
+            default => $display,
+        };
+        if ($blockified !== $display) {
+            $properties['display'] = $blockified;
         }
     }
 
