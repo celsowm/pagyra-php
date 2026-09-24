@@ -231,9 +231,19 @@ final class StyleComputer
         $hints = [];
 
         // `align` maps to `text-align` on a block container, and the two edge values are the
-        // ones the spec spells out; `middle` is `center`. On <img> it is a float instead, which
-        // is left alone here: no corpus document depends on it and floating an image is a much
-        // larger behavioural change than aligning text.
+        // ones the spec spells out; `middle` is `center`. On <img> it is a float instead (HTML
+        // Standard "rendering" §the `img` element): `left`/`right` wrap the surrounding text
+        // around the image the same way `style="float:left"` does, which the layout engine has
+        // supported since floats gained text wrapping. The other legal values (`top`, `texttop`,
+        // `middle`, `bottom`, `baseline`...) are `vertical-align` hints, not float ones, and are
+        // left alone: no corpus document needs them, and misreading one as a float would be worse
+        // than leaving it unstyled.
+        if ($node->isElement('img')) {
+            $align = strtolower(trim($node->attribute('align') ?? ''));
+            if ($align === 'left' || $align === 'right') {
+                $hints['float'] = $align;
+            }
+        }
         if (!$node->isElement('img') && !$node->isElement('table') && !$node->isElement('hr')) {
             $align = strtolower(trim($node->attribute('align') ?? ''));
             $textAlign = match ($align) {
@@ -1054,18 +1064,22 @@ final class StyleComputer
     }
 
     /**
-     * `position: absolute`/`fixed` blockifies an inline-level `display` (CSS Display 3 §2.7, CSS
-     * 2.1 §9.7): the box is taken out of the flow it was declared in, so an inline box makes no
-     * more sense for it than it would for a float. Without this, `<span style="position:absolute">`
-     * stayed `display: inline` and was laid out as ordinary text inside its parent's line box —
-     * BlockLayoutEngine's positioning pass only moves elements that got a box of their own, so the
-     * span was never a candidate for it and the declaration did nothing.
+     * `position: absolute`/`fixed` and `float: left`/`right` both blockify an inline-level
+     * `display` (CSS Display 3 §2.7, CSS 2.1 §9.7): a box taken out of the flow it was declared in
+     * — whether to be positioned or to have text wrap around it — makes no more sense as an inline
+     * box than a table row would. Without this, `<span style="position:absolute">` and
+     * `<img align="left">` (an inline replaced element) both stayed `display: inline` and were
+     * laid out as ordinary content inside their parent's line box: BlockLayoutEngine's flow
+     * segmentation (`isBlockLevel`) only gives a block-level element its own box and a chance at
+     * `floatSide()`/the positioning pass, so neither declaration did anything.
      *
      * @param array<string,string> $properties
      */
     private function blockifyPositioned(array &$properties): void
     {
-        if (!in_array(strtolower(trim($properties['position'] ?? 'static')), ['absolute', 'fixed'], true)) {
+        $isPositioned = in_array(strtolower(trim($properties['position'] ?? 'static')), ['absolute', 'fixed'], true);
+        $isFloated = in_array(strtolower(trim($properties['float'] ?? 'none')), ['left', 'right'], true);
+        if (!$isPositioned && !$isFloated) {
             return;
         }
         $display = strtolower(trim($properties['display'] ?? 'inline'));

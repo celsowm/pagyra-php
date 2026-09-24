@@ -548,6 +548,20 @@ final class BlockLayoutEngine
         $contentX = $containingX + $margin->left + $border->left + $padding->left;
         $contentY = $flowY + $margin->top + $border->top + $padding->top;
 
+        return $this->buildReplacedLayoutNode($styled, $contentX, $contentY, $contentWidth, $contentHeight, $padding, $border, $margin, $fontSize);
+    }
+
+    /**
+     * The box a replaced element (an image or inline SVG) lays out to: a single line holding one
+     * atomic box the size of its resolved content box, with no children of its own since a
+     * replaced element's "content" is the image, not markup this engine lays out. Shared by
+     * layoutBlockReplaced() and the float path (layoutFloatChild()), which both resolve their own
+     * margin/padding/border and content size first — a float's come from its own shrink-to-fit
+     * and float-edge placement rather than the ordinary block box model — and only need this last
+     * step of turning the resolved geometry into a LayoutNode.
+     */
+    private function buildReplacedLayoutNode(StyledNode $styled, float $contentX, float $contentY, float $contentWidth, float $contentHeight, Edges $padding, Edges $border, Edges $margin, float $fontSize): LayoutNode
+    {
         $box = new AtomicInlineBox(
             source: $styled,
             x: $contentX,
@@ -2057,18 +2071,32 @@ final class BlockLayoutEngine
         $border = $this->resolveBorderEdges($styled, $available, $containingHeight, $fontSize);
         $horizontalNonContent = $margin->horizontal() + $padding->horizontal() + $border->horizontal();
 
-        $widthValue = $styled->style->get('width', 'auto') ?? 'auto';
-        if ($this->isAuto($widthValue)) {
-            $contentWidth = $this->shrinkToFitWidth($styled, max(0.0, $available - $horizontalNonContent), $fontSize);
+        $isReplaced = $styled->node->isImage() || $styled->node->isSvg();
+        if ($isReplaced) {
+            // An <img align="left"> has no markup content for the ordinary block box model to
+            // measure, so width:auto and height:auto (below) resolved to the full available
+            // width and zero height instead of the image's own intrinsic size.
+            [$contentWidth, $contentHeight] = $this->inlineTextFormatter->replacedContentSize($styled, $available, $fontSize);
         } else {
-            $resolvedWidth = $this->resolveLength($widthValue, $available, $fontSize, $available, $containingHeight, 'zero');
-            $contentWidth = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedWidth - $horizontalNonContent) : max(0.0, $resolvedWidth);
+            $widthValue = $styled->style->get('width', 'auto') ?? 'auto';
+            if ($this->isAuto($widthValue)) {
+                $contentWidth = $this->shrinkToFitWidth($styled, max(0.0, $available - $horizontalNonContent), $fontSize);
+            } else {
+                $resolvedWidth = $this->resolveLength($widthValue, $available, $fontSize, $available, $containingHeight, 'zero');
+                $contentWidth = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedWidth - $horizontalNonContent) : max(0.0, $resolvedWidth);
+            }
+            $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $available, $containingHeight, $fontSize);
         }
-        $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $available, $containingHeight, $fontSize);
         $marginBoxWidth = $contentWidth + $horizontalNonContent;
 
         $containingX = $side === 'left' ? $float->leftX : $float->rightX - $marginBoxWidth;
-        $layout = $this->layoutBlock($styled, $containingX, $runY, $marginBoxWidth, $containingHeight, $parentFontSize);
+        if ($isReplaced) {
+            $contentX = $containingX + $margin->left + $border->left + $padding->left;
+            $contentY = $runY + $margin->top + $border->top + $padding->top;
+            $layout = $this->buildReplacedLayoutNode($styled, $contentX, $contentY, $contentWidth, $contentHeight, $padding, $border, $margin, $fontSize);
+        } else {
+            $layout = $this->layoutBlock($styled, $containingX, $runY, $marginBoxWidth, $containingHeight, $parentFontSize);
+        }
         $bottom = $layout->box->borderBox()->bottom();
         $nextFloat = $side === 'left' ? $float->withLeft($float->leftX + $marginBoxWidth, $bottom, $runY) : $float->withRight($float->rightX - $marginBoxWidth, $bottom, $runY);
 
