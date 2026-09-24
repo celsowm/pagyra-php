@@ -926,7 +926,7 @@ final class DisplayListBuilder
             x: $run->x + $margins['left'],
             y: $lineFragment->pageY + ($run->y - $line->y) + $margins['top'],
             baseline: $baseline,
-            text: $run->text,
+            text: $this->applyFontVariant($run->text, $run->style),
             fontSize: $run->fontSize,
             fontFamily: $run->style->get('font-family'),
             fontWeight: max(100, min(900, $fontWeight)),
@@ -948,6 +948,22 @@ final class DisplayListBuilder
      *
      * @return array{0:bool,1:bool,2:bool} underline, line-through, overline
      */
+    /**
+     * `font-variant: small-caps` is a rendering feature, not a text transform (CSS Fonts 3 §5.2):
+     * it must not change the string a PDF viewer extracts on copy, only which glyphs are drawn.
+     * Without small-caps glyphs of our own, pagyra-js's approximation is to upper-case the text
+     * actually painted while leaving `TextRun::$text` (and the width measured from it during line
+     * breaking) untouched, so a small-caps word is measured at its lowercase width but drawn
+     * upper-case — the same mismatch the reference implementation accepts.
+     */
+    private function applyFontVariant(string $text, ComputedStyle $style): string
+    {
+        if (strtolower(trim($style->get('font-variant', 'normal') ?? 'normal')) !== 'small-caps') {
+            return $text;
+        }
+        return function_exists('mb_strtoupper') ? mb_strtoupper($text, 'UTF-8') : strtoupper($text);
+    }
+
     private function resolveTextDecorationLines(ComputedStyle $style): array
     {
         $raw = $style->get('text-decoration-line') ?? $style->get('text-decoration');
