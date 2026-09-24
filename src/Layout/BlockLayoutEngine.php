@@ -25,6 +25,9 @@ final class BlockLayoutEngine
      */
     public const ANONYMOUS_TAG = '#anonymous';
 
+    /** @var list<array{top:float,bottom:float,left:float,right:float}> floats that lines wrap around */
+    private array $exclusions = [];
+
     private const ROOT_FONT_SIZE = 16.0;
 
     private readonly LengthParser $lengthParser;
@@ -115,6 +118,7 @@ final class BlockLayoutEngine
      */
     private function layoutDocument(StyledNode $root): LayoutNode
     {
+        $this->exclusions = [];
         // The root carries the body's computed style (StyleComputer::computeTree), and the body is
         // a block box like any other: its margin (8px from the UA sheet), border and padding
         // inset the content, `width`/`max-width` narrow it and auto side margins centre it. The
@@ -163,8 +167,7 @@ final class BlockLayoutEngine
         foreach ($segments as $segment) {
             if ($segment[0] === 'inline') {
                 if ($float->active) {
-                    $cursorY = max($cursorY, $float->bottom);
-                    $float = $float->reset($contentX, $contentRight);
+                    $this->excludeFloat($float);
                 }
                 $run = $this->inlineTextFormatter->layout(
                     new StyledNode($root->node, $root->style, $segment[1]),
@@ -172,6 +175,7 @@ final class BlockLayoutEngine
                     $cursorY,
                     $contentWidth,
                     $fontSize,
+                    $this->exclusions,
                 );
                 // Always an anonymous block here, never lines on the root itself: the pagination
                 // walk starts at the root's children, so anything left on the root node was laid
@@ -195,7 +199,9 @@ final class BlockLayoutEngine
                 $children[] = $layout;
                 continue;
             }
-            if ($float->active) {
+            if ($float->active && $this->wrapsAroundFloats($child)) {
+                $this->excludeFloat($float);
+            } elseif ($float->active) {
                 $cursorY = max($cursorY, $float->bottom);
                 $previousBorderBottom = null;
                 $previousBottomMargin = 0.0;
@@ -228,6 +234,22 @@ final class BlockLayoutEngine
      *        pagination drops everything past the first page because no fragment claims it.
      */
     private function layoutBlock(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize, bool $heightIsMinimum = false): LayoutNode
+    {
+        // Floats placed inside this block stop mattering to lines once the block is done.
+        $outerExclusions = $this->exclusions;
+        // A block that starts a new formatting context (overflow other than visible, and the
+        // table cells, flex and grid items laid out through here) keeps outside floats out.
+        if (!$this->wrapsAroundFloats($styled)) {
+            $this->exclusions = [];
+        }
+        try {
+            return $this->layoutBlockContent($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize, $heightIsMinimum);
+        } finally {
+            $this->exclusions = $outerExclusions;
+        }
+    }
+
+    private function layoutBlockContent(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize, bool $heightIsMinimum): LayoutNode
     {
         $fontSize = $this->resolveFontSize($styled, $parentFontSize);
         [$marginTopRaw, $marginRightRaw, $marginBottomRaw, $marginLeftRaw] = $this->edgeRawValues($styled, 'margin');
@@ -286,8 +308,7 @@ final class BlockLayoutEngine
         foreach ($segments as $segment) {
             if ($segment[0] === 'inline') {
                 if ($float->active) {
-                    $cursorY = max($cursorY, $float->bottom);
-                    $float = $float->reset($contentX, $contentX + $contentWidth);
+                    $this->excludeFloat($float);
                 }
                 $run = $this->inlineTextFormatter->layout(
                     new StyledNode($styled->node, $styled->style, $segment[1]),
@@ -295,6 +316,7 @@ final class BlockLayoutEngine
                     $cursorY,
                     $contentWidth,
                     $fontSize,
+                    $this->exclusions,
                 );
                 if ($wrapsInlineInAnonymousBlocks) {
                     $children[] = $this->anonymousBlockOfLines($styled, $run->lines, $contentX, $cursorY, $contentWidth, $run->height, $fontSize);
@@ -326,7 +348,10 @@ final class BlockLayoutEngine
                 $firstInFlowChild = false;
                 continue;
             }
-            if ($float->active) {
+            if ($float->active && $this->wrapsAroundFloats($child)) {
+                $this->excludeFloat($float);
+                $firstInFlowChild = false;
+            } elseif ($float->active) {
                 $cursorY = max($cursorY, $float->bottom);
                 $previousBorderBottom = null;
                 $previousBottomMargin = 0.0;
@@ -1555,6 +1580,31 @@ final class BlockLayoutEngine
         $value = $self === 'auto' || $self === '' ? strtolower(trim($container->style->get($axis . '-items') ?? 'stretch')) : $self;
 
         return in_array($value, ['normal', 'stretch', 'legacy'], true) ? 'stretch' : $value;
+    }
+
+    /** Registers the band a run of floats occupies, for the lines that follow to go around. */
+    private function excludeFloat(FloatRun $float): void
+    {
+        $exclusion = ['top' => $float->startY, 'bottom' => $float->bottom, 'left' => $float->leftX, 'right' => $float->rightX];
+        if (!in_array($exclusion, $this->exclusions, true)) {
+            $this->exclusions[] = $exclusion;
+        }
+    }
+
+    /**
+     * Whether a block lets the lines inside it flow around outside floats: an ordinary block in
+     * normal flow does; one that clears, and one that establishes a formatting context of its
+     * own (table, flex, grid, inline-block, overflow other than visible), does not.
+     */
+    private function wrapsAroundFloats(StyledNode $node): bool
+    {
+        if ($node->node->isImage() || $node->node->isSvg()) return false;
+        if (!in_array($this->display($node), ['block', 'list-item'], true)) return false;
+        if (!in_array(strtolower(trim($node->style->get('clear') ?? 'none')), ['', 'none'], true)) return false;
+        if ($this->floatSide($node) !== null) return false;
+        $overflow = strtolower(trim($node->style->get('overflow') ?? 'visible'));
+
+        return in_array($overflow, ['', 'visible', 'clip'], true);
     }
 
     /**

@@ -26,7 +26,12 @@ final class InlineTextFormatter
         $this->replacedElementSizing = new ReplacedElementSizingResolver();
     }
 
-    public function layout(StyledNode $block, float $x, float $y, float $availableWidth, float $fontSize): InlineTextLayout
+    /**
+     * @param list<array{top:float,bottom:float,left:float,right:float}> $exclusions float areas
+     *        the lines must go around: a line whose band crosses one starts right of `left` and
+     *        ends left of `right` (CSS 2.1 §9.5: line boxes next to a float are shortened).
+     */
+    public function layout(StyledNode $block, float $x, float $y, float $availableWidth, float $fontSize, array $exclusions = []): InlineTextLayout
     {
         $tokens = $this->collectTokens($block, $fontSize, $availableWidth);
         if ($tokens === []) {
@@ -59,6 +64,20 @@ final class InlineTextFormatter
         $forcedBreakLines = [];
         $current = [];
         $currentWidth = 0.0;
+        // Where each line sits is only known after breaking, so the float insets of line k are
+        // taken at the position k nominal lines down, the same estimate for breaking and placing.
+        $nominalLine = max(1.0, $this->metrics->lineHeight($block->style, $fontSize));
+        $insets = function (int $line) use ($exclusions, $x, $y, $availableWidth, $nominalLine): array {
+            $top = $y + $line * $nominalLine;
+            $left = 0.0;
+            $right = 0.0;
+            foreach ($exclusions as $exclusion) {
+                if ($exclusion['bottom'] <= $top + 0.01 || $exclusion['top'] >= $top + $nominalLine - 0.01) continue;
+                $left = max($left, $exclusion['left'] - $x);
+                $right = max($right, $x + $availableWidth - $exclusion['right']);
+            }
+            return [$left, $right];
+        };
 
         foreach ($tokens as $token) {
             if ($token['kind'] === 'newline') {
@@ -77,8 +96,9 @@ final class InlineTextFormatter
                 $token['width'] = $this->metrics->measure(' ', $token['style'], $token['fontSize'])->inlineSize;
             }
 
-            // `text-indent` narrows the first line only.
-            $lineRoom = $availableWidth - ($lines === [] ? max(0.0, $textIndent) : 0.0);
+            // `text-indent` narrows the first line only, and a float beside the line narrows it too.
+            [$insetLeft, $insetRight] = $exclusions === [] ? [0.0, 0.0] : $insets(count($lines));
+            $lineRoom = $availableWidth - ($lines === [] ? max(0.0, $textIndent) : 0.0) - $insetLeft - $insetRight;
 
             if ($allowSoftWrap && $lineRoom > 0.0 && $current !== [] && $currentWidth + $token['width'] > $lineRoom) {
                 if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
@@ -90,7 +110,8 @@ final class InlineTextFormatter
                 $lines[] = $current;
                 $current = [];
                 $currentWidth = 0.0;
-                $lineRoom = $availableWidth;
+                [$insetLeft, $insetRight] = $exclusions === [] ? [0.0, 0.0] : $insets(count($lines));
+                $lineRoom = $availableWidth - $insetLeft - $insetRight;
             }
 
             if ($allowSoftWrap && $lineRoom > 0.0 && $token['kind'] === 'word' && $token['width'] > $lineRoom && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
@@ -146,8 +167,9 @@ final class InlineTextFormatter
             // `text-align` aligns inline content inside a line box; it never moves a block-level
             // box, which stays at the content edge (only auto margins would move it). A line
             // holding just such a box therefore ignores the alignment entirely.
-            $indentForLine = $lineIndex === 0 ? $textIndent : 0.0;
-            $roomForLine = $availableWidth - $indentForLine;
+            [$insetLeft, $insetRight] = $exclusions === [] ? [0.0, 0.0] : $insets($lineIndex);
+            $indentForLine = ($lineIndex === 0 ? $textIndent : 0.0) + $insetLeft;
+            $roomForLine = $availableWidth - $indentForLine - $insetRight;
             $isBlockLevelBoxLine = count($lineTokens) === 1 && ($lineTokens[0]['blockLevel'] ?? false);
             $justify = !$isBlockLevelBoxLine && $alignment === 'justify'
                 && (($alignLast === 'justify') || (!$isLastLine && !isset($forcedBreakLines[$lineIndex])))

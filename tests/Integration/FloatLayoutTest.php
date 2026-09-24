@@ -48,12 +48,14 @@ final class FloatLayoutTest extends TestCase
         self::assertSame(40.0, $container->box->content->height);
     }
 
-    public function testNormalFlowSiblingAfterAFloatRunClearsBelowIt(): void
+    public function testNormalFlowSiblingAfterAFloatWrapsItsLinesBesideIt(): void
     {
+        // CSS 2.1 9.5: the paragraph's box ignores the float and starts at the top; its line
+        // boxes are shortened to go around it.
         $prepared = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
             'html' => '<div style="margin:0;width:400px">'
-                . '<div style="float:left;height:30px"><span>a</span></div>'
+                . '<div style="float:left;height:30px;width:50px"><span>a</span></div>'
                 . '<p style="margin:0">depois</p>'
                 . '</div>',
             'viewportWidth' => 400,
@@ -63,6 +65,23 @@ final class FloatLayoutTest extends TestCase
         $container = $prepared->layoutRoot->children[0];
         [$float, $after] = $container->children;
         self::assertSame(0.0, $float->box->content->y);
+        self::assertSame(0.0, $after->box->content->y);
+        self::assertGreaterThanOrEqual(50.0, $after->lineBoxes[0]->x);
+    }
+
+    public function testClearedSiblingAfterAFloatRunGoesBelowIt(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<div style="margin:0;width:400px">'
+                . '<div style="float:left;height:30px"><span>a</span></div>'
+                . '<p style="margin:0;clear:left">depois</p>'
+                . '</div>',
+            'viewportWidth' => 400,
+            'viewportHeight' => 200,
+        ]);
+
+        [, $after] = $prepared->layoutRoot->children[0]->children;
         self::assertGreaterThanOrEqual(30.0, $after->box->content->y);
     }
 
