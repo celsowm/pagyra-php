@@ -180,7 +180,11 @@
                                                 "margin-top": "1em"
                                             },
                                             "justificationWordSpacing": 0,
-                                            "inlineBackground": null
+                                            "inlineBackground": null,
+                                            "inlineBorderColor": null,
+                                            "inlineBorderWidth": 0,
+                                            "inlinePaddingLeft": 0,
+                                            "inlinePaddingRight": 0
                                         }
                                     ],
                                     "atomicBoxes": [],
@@ -199,7 +203,11 @@
                                                 "margin-top": "1em"
                                             },
                                             "justificationWordSpacing": 0,
-                                            "inlineBackground": null
+                                            "inlineBackground": null,
+                                            "inlineBorderColor": null,
+                                            "inlineBorderWidth": 0,
+                                            "inlinePaddingLeft": 0,
+                                            "inlinePaddingRight": 0
                                         }
                                     ]
                                 }
@@ -292,7 +300,11 @@
                                         "margin-top": "1em"
                                     },
                                     "justificationWordSpacing": 0,
-                                    "inlineBackground": null
+                                    "inlineBackground": null,
+                                    "inlineBorderColor": null,
+                                    "inlineBorderWidth": 0,
+                                    "inlinePaddingLeft": 0,
+                                    "inlinePaddingRight": 0
                                 }
                             ],
                             "atomicBoxes": [],
@@ -311,7 +323,11 @@
                                         "margin-top": "1em"
                                     },
                                     "justificationWordSpacing": 0,
-                                    "inlineBackground": null
+                                    "inlineBackground": null,
+                                    "inlineBorderColor": null,
+                                    "inlineBorderWidth": 0,
+                                    "inlinePaddingLeft": 0,
+                                    "inlinePaddingRight": 0
                                 }
                             ]
                         }
@@ -369,7 +385,11 @@
                                                             "margin-top": "1em"
                                                         },
                                                         "justificationWordSpacing": 0,
-                                                        "inlineBackground": null
+                                                        "inlineBackground": null,
+                                                        "inlineBorderColor": null,
+                                                        "inlineBorderWidth": 0,
+                                                        "inlinePaddingLeft": 0,
+                                                        "inlinePaddingRight": 0
                                                     }
                                                 ],
                                                 "atomicBoxes": [],
@@ -388,7 +408,11 @@
                                                             "margin-top": "1em"
                                                         },
                                                         "justificationWordSpacing": 0,
-                                                        "inlineBackground": null
+                                                        "inlineBackground": null,
+                                                        "inlineBorderColor": null,
+                                                        "inlineBorderWidth": 0,
+                                                        "inlinePaddingLeft": 0,
+                                                        "inlinePaddingRight": 0
                                                     }
                                                 ]
                                             }
@@ -481,7 +505,11 @@
                                                     "margin-top": "1em"
                                                 },
                                                 "justificationWordSpacing": 0,
-                                                "inlineBackground": null
+                                                "inlineBackground": null,
+                                                "inlineBorderColor": null,
+                                                "inlineBorderWidth": 0,
+                                                "inlinePaddingLeft": 0,
+                                                "inlinePaddingRight": 0
                                             }
                                         ],
                                         "atomicBoxes": [],
@@ -500,7 +528,11 @@
                                                     "margin-top": "1em"
                                                 },
                                                 "justificationWordSpacing": 0,
-                                                "inlineBackground": null
+                                                "inlineBackground": null,
+                                                "inlineBorderColor": null,
+                                                "inlineBorderWidth": 0,
+                                                "inlinePaddingLeft": 0,
+                                                "inlinePaddingRight": 0
                                             }
                                         ]
                                     }
@@ -544,7 +576,11 @@
                                                     "margin-top": "1em"
                                                 },
                                                 "justificationWordSpacing": 0,
-                                                "inlineBackground": null
+                                                "inlineBackground": null,
+                                                "inlineBorderColor": null,
+                                                "inlineBorderWidth": 0,
+                                                "inlinePaddingLeft": 0,
+                                                "inlinePaddingRight": 0
                                             }
                                         ],
                                         "atomicBoxes": [],
@@ -563,7 +599,11 @@
                                                     "margin-top": "1em"
                                                 },
                                                 "justificationWordSpacing": 0,
-                                                "inlineBackground": null
+                                                "inlineBackground": null,
+                                                "inlineBorderColor": null,
+                                                "inlineBorderWidth": 0,
+                                                "inlinePaddingLeft": 0,
+                                                "inlinePaddingRight": 0
                                             }
                                         ]
                                     }
@@ -693,7 +733,11 @@
                                                 "margin-top": "1em"
                                             },
                                             "justificationWordSpacing": 0,
-                                            "inlineBackground": null
+                                            "inlineBackground": null,
+                                            "inlineBorderColor": null,
+                                            "inlineBorderWidth": 0,
+                                            "inlinePaddingLeft": 0,
+                                            "inlinePaddingRight": 0
                                         }
                                     ],
                                     "atomicBoxes": [],
@@ -712,7 +756,11 @@
                                                 "margin-top": "1em"
                                             },
                                             "justificationWordSpacing": 0,
-                                            "inlineBackground": null
+                                            "inlineBackground": null,
+                                            "inlineBorderColor": null,
+                                            "inlineBorderWidth": 0,
+                                            "inlinePaddingLeft": 0,
+                                            "inlinePaddingRight": 0
                                         }
                                     ]
                                 }
@@ -754,7 +802,11 @@
                                 "margin-top": "1em"
                             },
                             "justificationWordSpacing": 0,
-                            "inlineBackground": null
+                            "inlineBackground": null,
+                            "inlineBorderColor": null,
+                            "inlineBorderWidth": 0,
+                            "inlinePaddingLeft": 0,
+                            "inlinePaddingRight": 0
                         }
                     }
                 ]

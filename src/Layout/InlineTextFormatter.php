@@ -250,6 +250,10 @@ final class InlineTextFormatter
                         $token['style'],
                         $justify ? $extraPerSpace : 0.0,
                         $token['inlineBackground'] ?? null,
+                        $token['inlineBorder']['color'] ?? null,
+                        $token['inlineBorder']['width'] ?? 0.0,
+                        $token['inlineBorder']['paddingLeft'] ?? 0.0,
+                        $token['inlineBorder']['paddingRight'] ?? 0.0,
                     ));
                 }
 
@@ -329,7 +333,7 @@ final class InlineTextFormatter
             $fitted = $this->fitTextWithinWidth($run->text, $run->style, $run->fontSize, $remaining);
             if ($fitted !== '') {
                 $fittedWidth = $this->metrics->measure($fitted, $run->style, $run->fontSize)->inlineSize;
-                $runs[] = new TextRun($run->x, $run->y, $fittedWidth, $run->height, $run->baseline, $fitted, $run->fontSize, $run->style, 0.0, $run->inlineBackground);
+                $runs[] = new TextRun($run->x, $run->y, $fittedWidth, $run->height, $run->baseline, $fitted, $run->fontSize, $run->style, 0.0, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
                 $cursorX = $run->x + $fittedWidth;
                 $usedWidth += $fittedWidth;
             }
@@ -363,7 +367,8 @@ final class InlineTextFormatter
         return $buffer;
     }
 
-    private function collectTokens(StyledNode $node, float $nodeFontSize, float $referenceWidth, ?string $inlineBackground = null): array
+    /** @param array{color:?string,width:float,paddingLeft:float,paddingRight:float}|null $inlineBorder */
+    private function collectTokens(StyledNode $node, float $nodeFontSize, float $referenceWidth, ?string $inlineBackground = null, ?array $inlineBorder = null): array
     {
         $tokens = [];
         $children = $node->children;
@@ -373,6 +378,9 @@ final class InlineTextFormatter
                 foreach ($this->tokenizeText($text, $node->style, $nodeFontSize) as $token) {
                     if ($inlineBackground !== null) {
                         $token['inlineBackground'] = $inlineBackground;
+                    }
+                    if ($inlineBorder !== null) {
+                        $token['inlineBorder'] = $inlineBorder;
                     }
                     $tokens[] = $token;
                 }
@@ -427,7 +435,13 @@ final class InlineTextFormatter
                 continue;
             }
 
-            array_push($tokens, ...$this->collectTokens($child, $fontSize, $referenceWidth, $this->inlineBackground($child->style) ?? $inlineBackground));
+            array_push($tokens, ...$this->collectTokens(
+                $child,
+                $fontSize,
+                $referenceWidth,
+                $this->inlineBackground($child->style) ?? $inlineBackground,
+                $this->inlineBorderDecoration($child->style, $fontSize, $referenceWidth) ?? $inlineBorder,
+            ));
         }
         return $tokens;
     }
@@ -445,6 +459,45 @@ final class InlineTextFormatter
         $color = ColorParser::parse($raw);
 
         return $color !== null && $color->a > 0.0 ? $raw : null;
+    }
+
+    /**
+     * An inline element's own border and horizontal padding, or null when it has neither. Like
+     * inlineBackground(), the innermost element wins and every side of the border is treated as
+     * one (its top side stands for all four, which the corpus's actual usage — a uniform border
+     * around a badge-like `<span>` — never notices) rather than resolving all four independently
+     * the way a block element's border does.
+     *
+     * @return array{color:?string,width:float,paddingLeft:float,paddingRight:float}|null
+     */
+    private function inlineBorderDecoration(ComputedStyle $style, float $fontSize, float $referenceWidth): ?array
+    {
+        $borderStyle = strtolower(trim($style->get('border-top-style') ?? $style->get('border-style') ?? 'none'));
+        $borderWidth = 0.0;
+        $borderColor = null;
+        if ($borderStyle !== 'none' && $borderStyle !== 'hidden') {
+            $rawWidth = trim($style->get('border-top-width') ?? $style->get('border-width') ?? '0');
+            $borderWidth = max(0.0, $this->resolveSimpleLength($rawWidth, $referenceWidth, $fontSize, 0.0));
+            if ($borderWidth > 0.0) {
+                $rawColor = trim($style->get('border-top-color') ?? $style->get('border-color') ?? 'currentcolor');
+                if ($rawColor === '' || strtolower($rawColor) === 'currentcolor') {
+                    $rawColor = trim($style->get('color') ?? '#000000');
+                }
+                $parsedColor = ColorParser::parse($rawColor);
+                if ($parsedColor !== null && $parsedColor->a > 0.0) {
+                    $borderColor = $rawColor;
+                } else {
+                    $borderWidth = 0.0;
+                }
+            }
+        }
+        $paddingLeft = max(0.0, $this->resolveSimpleLength(trim($style->get('padding-left') ?? '0'), $referenceWidth, $fontSize, 0.0));
+        $paddingRight = max(0.0, $this->resolveSimpleLength(trim($style->get('padding-right') ?? '0'), $referenceWidth, $fontSize, 0.0));
+        if ($borderWidth <= 0.0 && $paddingLeft <= 0.0 && $paddingRight <= 0.0) {
+            return null;
+        }
+
+        return ['color' => $borderColor, 'width' => $borderWidth, 'paddingLeft' => $paddingLeft, 'paddingRight' => $paddingRight];
     }
 
     /** @param list<StyledNode> $children */
@@ -949,7 +1002,7 @@ final class InlineTextFormatter
         foreach ($lines as $line) {
             $runs = [];
             foreach ($line->runs as $run) {
-                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground);
+                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
             }
             $boxes = [];
             foreach ($line->atomicBoxes as $box) {
@@ -998,8 +1051,12 @@ final class InlineTextFormatter
             && abs(($last->x + $last->width) - $run->x) < 1e-9
             && abs($last->baseline - $run->baseline) < 1e-9
             && abs($last->justificationWordSpacing - $run->justificationWordSpacing) < 1e-9
-            && $last->inlineBackground === $run->inlineBackground) {
-            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground);
+            && $last->inlineBackground === $run->inlineBackground
+            && $last->inlineBorderColor === $run->inlineBorderColor
+            && abs($last->inlineBorderWidth - $run->inlineBorderWidth) < 1e-9
+            && abs($last->inlinePaddingLeft - $run->inlinePaddingLeft) < 1e-9
+            && abs($last->inlinePaddingRight - $run->inlinePaddingRight) < 1e-9) {
+            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
             return;
         }
         $runs[] = $run;

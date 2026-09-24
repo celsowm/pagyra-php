@@ -79,7 +79,7 @@ final class BlockLayoutEngine
                 $inline = strtolower(trim($run->style->get('display', 'inline') ?? 'inline')) === 'inline';
                 [$dx, $dy] = $inline ? $this->relativeOffset($run->style, $node->box->content->width, $node->box->content->height, $run->fontSize) : [0.0, 0.0];
                 if ($dx != 0.0 || $dy != 0.0) {
-                    $run = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground);
+                    $run = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
                     $lineChanged = true;
                 }
                 $runs[] = $run;
