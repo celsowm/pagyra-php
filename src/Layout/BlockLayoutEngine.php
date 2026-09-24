@@ -1339,7 +1339,8 @@ final class BlockLayoutEngine
      * order, rows from `grid-template-rows` and `grid-auto-rows` or sized to their content, `gap`,
      * and `align-items`/`justify-items` with their `-self` overrides (`stretch` by default).
      * `auto` columns take their items' preferred widths, and `fr` columns share what is left.
-     * Named lines and `grid-template-areas` are not implemented.
+     * `grid-template-areas` places a `grid-area: <name>` item at the name's cells (gridTemplateAreas()/
+     * gridLine()); named lines from either property are not implemented.
      *
      * `display: grid` used to fall back to a plain block, stacking the cells.
      */
@@ -1391,6 +1392,7 @@ final class BlockLayoutEngine
 
         $columns = $this->gridTracks($styled->style->get('grid-template-columns') ?? 'none', $contentWidth, $columnGap, $fontSize);
         if ($columns === []) $columns = [['kind' => 'auto', 'size' => 0.0, 'min' => 0.0]];
+        $areas = $this->gridTemplateAreas($styled->style->get('grid-template-areas'));
 
         // Placement: explicit positions first, then auto placement in row order, sparse.
         $placements = [];
@@ -1398,8 +1400,8 @@ final class BlockLayoutEngine
         $columnCount = count($columns);
         $pending = [];
         foreach ($children as $index => $child) {
-            [$colStart, $colSpan] = $this->gridLine($child, 'column');
-            [$rowStart, $rowSpan] = $this->gridLine($child, 'row');
+            [$colStart, $colSpan] = $this->gridLine($child, 'column', $areas);
+            [$rowStart, $rowSpan] = $this->gridLine($child, 'row', $areas);
             if ($colStart !== null) $columnCount = max($columnCount, $colStart + $colSpan);
             $placements[$index] = ['col' => $colStart, 'colSpan' => $colSpan, 'row' => $rowStart, 'rowSpan' => $rowSpan];
             if ($colStart === null || $rowStart === null) $pending[] = $index;
@@ -1636,12 +1638,56 @@ final class BlockLayoutEngine
     }
 
     /**
+     * `grid-template-areas` (CSS Grid 1 §8.3): each quoted string is one row, tokenized on
+     * whitespace into one name per column; `.` is an empty cell. A name spanning several rows
+     * and/or columns is one rectangular run of matching cells — the only shape real stylesheets
+     * give it, so this takes the bounding box of every cell that carries the name rather than
+     * verifying every cell in between actually repeats it. Named lines (`header-start` etc.),
+     * which this areas map would also imply, are not produced or matched anywhere.
+     *
+     * @return array<string,array{row:int,rowSpan:int,col:int,colSpan:int}>
+     */
+    private function gridTemplateAreas(?string $value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+        $matched = preg_match_all('/"([^"]*)"|\'([^\']*)\'/', $value, $matches);
+        if ($matched === false || $matched === 0) {
+            return [];
+        }
+        $bounds = [];
+        foreach ($matches[0] as $index => $whole) {
+            $content = $matches[1][$index] !== '' ? $matches[1][$index] : $matches[2][$index];
+            $tokens = preg_split('/\s+/', trim($content), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            foreach ($tokens as $col => $name) {
+                if ($name === '.') continue;
+                if (!isset($bounds[$name])) {
+                    $bounds[$name] = ['minRow' => $index, 'maxRow' => $index, 'minCol' => $col, 'maxCol' => $col];
+                    continue;
+                }
+                $bounds[$name]['minRow'] = min($bounds[$name]['minRow'], $index);
+                $bounds[$name]['maxRow'] = max($bounds[$name]['maxRow'], $index);
+                $bounds[$name]['minCol'] = min($bounds[$name]['minCol'], $col);
+                $bounds[$name]['maxCol'] = max($bounds[$name]['maxCol'], $col);
+            }
+        }
+        $areas = [];
+        foreach ($bounds as $name => $b) {
+            $areas[$name] = ['row' => $b['minRow'], 'rowSpan' => $b['maxRow'] - $b['minRow'] + 1, 'col' => $b['minCol'], 'colSpan' => $b['maxCol'] - $b['minCol'] + 1];
+        }
+
+        return $areas;
+    }
+
+    /**
      * An item's 0-based start line and span on one axis, from `grid-<axis>`, its `-start`/`-end`
      * longhands or `grid-area`; null start means auto-placed.
      *
      * @return array{0:?int,1:int}
      */
-    private function gridLine(StyledNode $item, string $axis): array
+    /** @param array<string,array{row:int,rowSpan:int,col:int,colSpan:int}> $areas */
+    private function gridLine(StyledNode $item, string $axis, array $areas = []): array
     {
         $start = $item->style->get('grid-' . $axis . '-start');
         $end = $item->style->get('grid-' . $axis . '-end');
@@ -1653,6 +1699,15 @@ final class BlockLayoutEngine
         }
         $area = $item->style->get('grid-area');
         if ($area !== null) {
+            $name = trim($area);
+            // A bare identifier names a `grid-template-areas` cell (or run of cells) rather than
+            // a numbered line: `grid-area: header` used to fall through to the line parser below,
+            // which treats anything that is not `span N` or a bare integer as `auto` — so a named
+            // area placed the item exactly where an unplaced one would have gone instead of where
+            // its name says, silently discarding the association with `grid-template-areas`.
+            if (!str_contains($name, '/') && isset($areas[$name])) {
+                return $axis === 'row' ? [$areas[$name]['row'], $areas[$name]['rowSpan']] : [$areas[$name]['col'], $areas[$name]['colSpan']];
+            }
             $parts = array_map('trim', explode('/', $area));
             $start ??= $parts[$axis === 'row' ? 0 : 1] ?? null;
             $end ??= $parts[$axis === 'row' ? 2 : 3] ?? null;
