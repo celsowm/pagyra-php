@@ -262,7 +262,105 @@ final class InlineTextFormatter
             $cursorY += $lineHeight;
         }
 
+        if ($whiteSpace === 'nowrap' && $this->needsTextOverflowEllipsis($block->style)) {
+            $lineBoxes = array_map(fn(LineBox $line): LineBox => $this->applyTextOverflowEllipsis($line, $availableWidth), $lineBoxes);
+        }
+
         return new InlineTextLayout($lineBoxes, $cursorY - $y);
+    }
+
+    /**
+     * `text-overflow: ellipsis` (CSS Overflow 3 §5) only takes effect on a line that cannot grow
+     * the box to fit it and is clipped instead (an `overflow-x`/`overflow` of anything but
+     * `visible`); without an actual line to overflow — the normal case, where the box grows or
+     * the line wraps — it does nothing, which is why `white-space: nowrap` gates it here too:
+     * that is what forces a single line past the box's width instead of wrapping.
+     */
+    private function needsTextOverflowEllipsis(ComputedStyle $style): bool
+    {
+        if (strtolower(trim($style->get('text-overflow', 'clip') ?? 'clip')) !== 'ellipsis') {
+            return false;
+        }
+        $overflow = strtolower(trim($style->get('overflow') ?? 'visible'));
+        $parts = preg_split('/\s+/', $overflow) ?: [];
+        $clipX = in_array($parts[0] ?? '', ['hidden', 'clip', 'scroll', 'auto'], true);
+        $overflowX = strtolower(trim($style->get('overflow-x') ?? ''));
+        if ($overflowX !== '') {
+            $clipX = in_array($overflowX, ['hidden', 'clip', 'scroll', 'auto'], true);
+        }
+
+        return $clipX;
+    }
+
+    /**
+     * Truncates a line that overflows `$availableWidth` and appends "…" in its place, the same
+     * greedy character-by-character fit `splitWordToken()` uses for a mid-word break. It was
+     * simply left to spill past the box (CSS `overflow: visible`'s behaviour, `text-overflow`'s
+     * own initial value being `clip`), so a badge or a table cell meant to truncate a long value
+     * instead pushed its neighbours aside or bled into them.
+     *
+     * A line holding an atomic inline box (an image, a nested block) is left alone: fitting an
+     * ellipsis around a box that is not text is a different, unhandled problem.
+     */
+    private function applyTextOverflowEllipsis(LineBox $line, float $availableWidth): LineBox
+    {
+        if ($line->atomicBoxes !== [] || $line->runs === [] || $line->width <= $availableWidth + 0.01) {
+            return $line;
+        }
+        $lastRun = $line->runs[array_key_last($line->runs)];
+        $ellipsis = "\u{2026}";
+        $ellipsisWidth = $this->metrics->measure($ellipsis, $lastRun->style, $lastRun->fontSize)->inlineSize;
+        $targetWidth = max(0.0, $availableWidth - $ellipsisWidth);
+
+        $runs = [];
+        $cursorX = $line->x;
+        $usedWidth = 0.0;
+        foreach ($line->runs as $run) {
+            if ($usedWidth >= $targetWidth) {
+                break;
+            }
+            $remaining = $targetWidth - $usedWidth;
+            if ($run->width <= $remaining) {
+                $runs[] = $run;
+                $cursorX = $run->x + $run->width;
+                $usedWidth += $run->width;
+                continue;
+            }
+            $fitted = $this->fitTextWithinWidth($run->text, $run->style, $run->fontSize, $remaining);
+            if ($fitted !== '') {
+                $fittedWidth = $this->metrics->measure($fitted, $run->style, $run->fontSize)->inlineSize;
+                $runs[] = new TextRun($run->x, $run->y, $fittedWidth, $run->height, $run->baseline, $fitted, $run->fontSize, $run->style, 0.0, $run->inlineBackground);
+                $cursorX = $run->x + $fittedWidth;
+                $usedWidth += $fittedWidth;
+            }
+            break;
+        }
+        // appendRun() merges this into the last kept run when it shares its style (the common
+        // case: one run truncated, the ellipsis glued right onto it), so the pair still reaches
+        // the paint layer as the single text-paint command a whole, unbroken line would be.
+        $this->appendRun($runs, new TextRun($cursorX, $lastRun->y, $ellipsisWidth, $lastRun->height, $lastRun->baseline, $ellipsis, $lastRun->fontSize, $lastRun->style, 0.0, $lastRun->inlineBackground));
+        $text = implode('', array_map(static fn(TextRun $r): string => $r->text, $runs));
+
+        return new LineBox($line->x, $line->y, ($cursorX + $ellipsisWidth) - $line->x, $line->height, $line->baseline, $text, $runs, []);
+    }
+
+    /** The longest prefix of $text, measured character by character, that fits within $maxWidth. */
+    private function fitTextWithinWidth(string $text, ComputedStyle $style, float $fontSize, float $maxWidth): string
+    {
+        if ($maxWidth <= 0.0) {
+            return '';
+        }
+        $chars = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $buffer = '';
+        foreach ($chars as $char) {
+            $candidate = $buffer . $char;
+            if ($this->metrics->measure($candidate, $style, $fontSize)->inlineSize > $maxWidth) {
+                break;
+            }
+            $buffer = $candidate;
+        }
+
+        return $buffer;
     }
 
     private function collectTokens(StyledNode $node, float $nodeFontSize, float $referenceWidth, ?string $inlineBackground = null): array
