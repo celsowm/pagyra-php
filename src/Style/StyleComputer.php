@@ -113,7 +113,7 @@ final class StyleComputer
             $pseudo = $this->selectorMatcher->pseudoElement($rule->selector);
             if ($pseudo === null) {
                 $elementRules[] = $rule;
-            } elseif ($pseudo === 'before' || $pseudo === 'after') {
+            } elseif (in_array($pseudo, ['before', 'after', 'first-letter', 'first-line'], true)) {
                 $this->pseudoRules[] = ['rule' => $rule, 'pseudo' => $pseudo];
             }
         }
@@ -606,6 +606,7 @@ final class StyleComputer
             if ($after !== null) {
                 $children[] = $after;
             }
+            $children = $this->applyFirstLetter($children, $node, $style, $ancestors);
         }
         $this->counters->closeScopesFrom($depth + 1);
         $this->outsideRendering = $wasOutside;
@@ -696,6 +697,104 @@ final class StyleComputer
             $style,
             [new StyledNode($textNode, new ComputedStyle($textProperties))],
         );
+    }
+
+    /**
+     * `::first-letter` (CSS Pseudo 4 §5) restyles the element's own first character, split off
+     * into a text node of its own so the tokenizer measures and paints it under the pseudo-
+     * element's style (its own `font-size` included) rather than the element's. It only looks at
+     * `$children[0]`: real CSS descends into the first inline descendant too
+     * (`<p><b>Bold</b> text</p>`'s first letter is inside the `<b>`), which this does not attempt,
+     * and it does not skip leading punctuation the way the spec's "first typographic letter unit"
+     * does either — both narrower than the spec for a pseudo-element the corpus this port targets
+     * does not use at all yet. It was dropped outright before, so `p::first-letter { font-size:
+     * 200% }` (a drop cap) changed nothing.
+     *
+     * @param list<StyledNode> $children
+     * @param list<Node> $ancestors
+     * @return list<StyledNode>
+     */
+    private function applyFirstLetter(array $children, Node $node, ComputedStyle $elementStyle, array $ancestors): array
+    {
+        if ($children === [] || $children[0]->node->type !== 'text') {
+            return $children;
+        }
+        $text = $children[0]->node->text ?? '';
+        if (trim($text) === '') {
+            return $children;
+        }
+        $pseudoStyle = $this->firstLetterStyle($node, $elementStyle, $ancestors);
+        if ($pseudoStyle === null) {
+            return $children;
+        }
+        $chars = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($chars === []) {
+            return $children;
+        }
+        $letter = array_shift($chars);
+        $rest = implode('', $chars);
+        // A direct text child's own `->style` is not what tokenizes it — collectTokens() reads
+        // the *containing element's* style for a text node, the same way an ordinary `<p>Text</p>`
+        // has no per-text-node style of its own — so the letter has to be wrapped in a synthetic
+        // element carrying $pseudoStyle, exactly as generatedBox() wraps `::before`/`::after`
+        // content, or collectTokens() would tokenize it as plain text under the paragraph's own
+        // style and the split would have no visible effect at all.
+        $letterTextNode = Node::text($letter);
+        $letterTextProperties = [];
+        foreach (self::INHERITED as $property) {
+            $value = $pseudoStyle->get($property);
+            if ($value !== null) {
+                $letterTextProperties[$property] = $value;
+            }
+        }
+        $split = [new StyledNode(
+            Node::element('::first-letter', [], [$letterTextNode]),
+            $pseudoStyle,
+            [new StyledNode($letterTextNode, new ComputedStyle($letterTextProperties))],
+        )];
+        if ($rest !== '') {
+            $split[] = new StyledNode(Node::text($rest), $children[0]->style);
+        }
+        array_splice($children, 0, 1, $split);
+
+        return $children;
+    }
+
+    /** @param list<Node> $ancestors */
+    private function firstLetterStyle(Node $node, ComputedStyle $elementStyle, array $ancestors): ?ComputedStyle
+    {
+        $winners = [];
+        foreach ($this->pseudoRules as ['rule' => $rule, 'pseudo' => $rulePseudo]) {
+            if ($rulePseudo !== 'first-letter' || !$this->selectorMatcher->matchesOriginating($node, $rule->selector, $ancestors)) {
+                continue;
+            }
+            foreach ($rule->declarations as $property => $rawValue) {
+                [$value, $important] = $this->extractImportant($rawValue);
+                $this->considerWinner($winners, $property, $value, $important, $rule->specificity, $rule->sourceOrder, false);
+            }
+        }
+        if ($winners === []) {
+            return null;
+        }
+        $properties = [];
+        foreach (self::INHERITED as $property) {
+            $value = $elementStyle->get($property);
+            if ($value !== null) {
+                $properties[$property] = $value;
+            }
+        }
+        foreach ($winners as $property => $winner) {
+            if (str_starts_with($property, '--')) {
+                continue;
+            }
+            if (!$this->applyCssWideKeyword($properties, $property, $winner['value'], $elementStyle)) {
+                $properties[$property] = $winner['value'];
+            }
+        }
+        $this->absolutizeFontRelativeLengths($properties, $elementStyle);
+        $this->absolutizeFontWeight($properties, $elementStyle);
+
+        return new ComputedStyle($properties);
     }
 
     /**
@@ -933,6 +1032,7 @@ final class StyleComputer
             $this->absolutizeFontWeight($properties, $parent);
             $this->foldOpacity($properties);
             $this->blockifyPositioned($properties);
+            $this->applyFirstLineOverrides($properties, $node, $ancestors);
         }
 
         if ($node->isElement('li')) {
@@ -1093,6 +1193,38 @@ final class StyleComputer
         };
         if ($blockified !== $display) {
             $properties['display'] = $blockified;
+        }
+    }
+
+    /**
+     * `::first-line` (CSS Pseudo 4 §4) restyles whichever line ends up first once the box is laid
+     * out — something only the layout engine knows, not this cascade — so its declarations cannot
+     * become the element's own computed properties the way an ordinary rule's do. They are cascaded
+     * here (same specificity/order/`!important` rules `generatedBox()` uses for `::before`) and
+     * smuggled onto the element as `x-first-line-<property>` entries, not real CSS properties,
+     * for InlineTextFormatter to pick up: they were dropped outright before, so
+     * `p::first-line { font-weight: bold }` changed nothing.
+     *
+     * @param array<string,string> $properties
+     * @param list<Node> $ancestors
+     */
+    private function applyFirstLineOverrides(array &$properties, Node $node, array $ancestors): void
+    {
+        $winners = [];
+        foreach ($this->pseudoRules as ['rule' => $rule, 'pseudo' => $rulePseudo]) {
+            if ($rulePseudo !== 'first-line' || !$this->selectorMatcher->matchesOriginating($node, $rule->selector, $ancestors)) {
+                continue;
+            }
+            foreach ($rule->declarations as $property => $rawValue) {
+                [$value, $important] = $this->extractImportant($rawValue);
+                $this->considerWinner($winners, $property, $value, $important, $rule->specificity, $rule->sourceOrder, false);
+            }
+        }
+        foreach ($winners as $property => $winner) {
+            if (str_starts_with($property, '--')) {
+                continue;
+            }
+            $properties['x-first-line-' . $property] = $winner['value'];
         }
     }
 

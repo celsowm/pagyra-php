@@ -270,7 +270,58 @@ final class InlineTextFormatter
             $lineBoxes = array_map(fn(LineBox $line): LineBox => $this->applyTextOverflowEllipsis($line, $availableWidth), $lineBoxes);
         }
 
+        $firstLineOverrides = $this->firstLineOverrides($block->style);
+        if ($firstLineOverrides !== [] && $lineBoxes !== []) {
+            $lineBoxes[0] = $this->applyFirstLineOverrides($lineBoxes[0], $firstLineOverrides);
+        }
+
         return new InlineTextLayout($lineBoxes, $cursorY - $y);
+    }
+
+    /**
+     * `::first-line`'s declarations, smuggled onto the block's own style as `x-first-line-*`
+     * entries by StyleComputer::applyFirstLineOverrides() (only the layout engine — here — knows
+     * which line ends up first once the box wraps, so the cascade could not turn them into real
+     * computed properties the way an ordinary rule's declarations become).
+     *
+     * @return array<string,string>
+     */
+    private function firstLineOverrides(ComputedStyle $style): array
+    {
+        $overrides = [];
+        foreach ($style->properties as $property => $value) {
+            if (str_starts_with($property, 'x-first-line-')) {
+                $overrides[substr($property, strlen('x-first-line-'))] = $value;
+            }
+        }
+
+        return $overrides;
+    }
+
+    /**
+     * Applies `::first-line`'s declarations to every run on the line by merging them into each
+     * run's own style, its properties winning over whatever the run already had (the same
+     * precedence order a nested `<span>` styled by an ordinary, more specific rule would get).
+     * A property this changes that also affects measurement — `font-size` foremost — does not
+     * reflow the line: the run keeps the width and position `layout()` already measured it at
+     * under its original style, which is a mismatch real usage of `::first-line` rarely triggers
+     * (color, font-weight, letter-spacing, all of which do not resize the glyphs) but a drop-cap-
+     * sized first line would.
+     *
+     * @param array<string,string> $overrides
+     */
+    private function applyFirstLineOverrides(LineBox $line, array $overrides): LineBox
+    {
+        $runs = array_map(function (TextRun $run) use ($overrides): TextRun {
+            $properties = $run->style->properties;
+            foreach ($overrides as $property => $value) {
+                $properties[$property] = $value;
+            }
+
+            return new TextRun($run->x, $run->y, $run->width, $run->height, $run->baseline, $run->text, $run->fontSize, new ComputedStyle($properties), $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
+        }, $line->runs);
+
+        return new LineBox($line->x, $line->y, $line->width, $line->height, $line->baseline, $line->text, $runs, $line->atomicBoxes);
     }
 
     /**
