@@ -376,14 +376,27 @@ final class BlockLayoutEngine
         // order of the drawing operations was not, which is what anyone copying text out of the
         // decision gets. A block whose content is all inline keeps its lines on itself, as before.
         $wrapsInlineInAnonymousBlocks = $this->hasMixedFlow($segments);
+        $insideMarker = $this->insideListMarker($styled);
+        // Cleared from the returned node's style once the marker becomes a real text run below,
+        // so DisplayListBuilder's own (paint-only, `outside`-shaped) marker naturally has nothing
+        // left to draw and the two do not double up. It stays set — and that fallback still
+        // draws it — for the rarer `<li><p>text</p></li>` shape, where the item's own content is
+        // a block and there is no first inline segment here to weave the marker into.
+        $insideMarkerConsumed = false;
 
         foreach ($segments as $segment) {
             if ($segment[0] === 'inline') {
                 if ($float->active) {
                     $this->excludeFloat($float);
                 }
+                $inlineChildren = $segment[1];
+                if ($insideMarker !== null) {
+                    array_unshift($inlineChildren, $this->listMarkerStyledNode($styled, $insideMarker));
+                    $insideMarker = null;
+                    $insideMarkerConsumed = true;
+                }
                 $run = $this->inlineTextFormatter->layout(
-                    new StyledNode($styled->node, $styled->style, $segment[1]),
+                    new StyledNode($styled->node, $styled->style, $inlineChildren),
                     $contentX,
                     $cursorY,
                     $contentWidth,
@@ -491,7 +504,9 @@ final class BlockLayoutEngine
         }
         $contentHeight = $this->applyVerticalConstraints($styled, $contentHeight, $verticalNonContent, $containingWidth, $containingHeight, $fontSize);
 
-        return new LayoutNode($styled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $contentHeight), $padding, $border, $margin), $children, $fontSize, $inlineLayout->lines);
+        $returnedStyled = $insideMarkerConsumed ? $this->withoutListMarker($styled) : $styled;
+
+        return new LayoutNode($returnedStyled, new LayoutBox(new Rect($contentX, $contentY, $contentWidth, $contentHeight), $padding, $border, $margin), $children, $fontSize, $inlineLayout->lines);
     }
 
     private function layoutBlockLevelChild(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize): LayoutNode
@@ -2380,6 +2395,47 @@ final class BlockLayoutEngine
     private function isOutOfFlow(StyledNode $styled): bool
     {
         return in_array(strtolower(trim($styled->style->get('position') ?? 'static')), ['absolute', 'fixed'], true);
+    }
+
+    /**
+     * `list-style-position: inside` (CSS Lists 3 §7.1): the marker is the first inline box of the
+     * list item's own content, in the flow with the text that follows it, rather than sitting in
+     * the item's padding to the left of it (`outside`, the default, which DisplayListBuilder
+     * paints without reserving any layout space for it). It was painted the same way regardless
+     * of `list-style-position`, so an `inside` marker overlapped the first word instead of
+     * pushing it aside.
+     *
+     * Only the marker string itself is returned; layoutBlockContent() below turns it into a real
+     * leading text run and, once it has, strips `x-list-marker` from the returned node's style so
+     * DisplayListBuilder's own paint-only marker has nothing left to draw.
+     */
+    private function insideListMarker(StyledNode $styled): ?string
+    {
+        $marker = $styled->style->get('x-list-marker');
+        if ($marker === null || $marker === '') {
+            return null;
+        }
+
+        return strtolower(trim($styled->style->get('list-style-position', 'outside') ?? 'outside')) === 'inside' ? $marker : null;
+    }
+
+    /**
+     * The marker plus a thin trailing gap, as a synthetic text child sharing the list item's own
+     * style (color, font, weight...) the way the marker inherits from it in every browser. A
+     * plain space is what CSS itself uses for the gap between an `inside` marker and the text
+     * that follows (no browser reserves the exact width DisplayListBuilder's `outside` gap does).
+     */
+    private function listMarkerStyledNode(StyledNode $styled, string $marker): StyledNode
+    {
+        return new StyledNode(Node::text($marker . ' '), $styled->style, []);
+    }
+
+    private function withoutListMarker(StyledNode $styled): StyledNode
+    {
+        $properties = $styled->style->properties;
+        unset($properties['x-list-marker']);
+
+        return new StyledNode($styled->node, new ComputedStyle($properties), $styled->children);
     }
 
     private function resolveLength(string $value, float $reference, float $fontSize, float $containerWidth, float $containerHeight, string $auto): float

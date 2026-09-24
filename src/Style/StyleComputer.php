@@ -29,7 +29,7 @@ final class StyleComputer
         // only receives what is listed here, so `<p style="text-transform:uppercase">` upper-cased
         // its own text but not a `<b>` inside it.
         'text-transform', 'letter-spacing', 'word-spacing', 'word-break', 'overflow-wrap', 'word-wrap',
-        'font-variant', 'orphans', 'widows', 'quotes', 'text-align-last',
+        'font-variant', 'orphans', 'widows', 'quotes', 'text-align-last', 'list-style-position',
         'x-link-href',
         // Not a real property: the product of the element's and its ancestors' `opacity`, carried
         // down so that everything inside a faded element is painted faded (see Paint\Opacity).
@@ -66,6 +66,7 @@ final class StyleComputer
         'font-variant' => 'normal',
         'orphans' => '2',
         'widows' => '2',
+        'list-style-position' => 'outside',
     ];
 
     /** Tag of the anonymous inline box that carries the text of a `display: contents` element. */

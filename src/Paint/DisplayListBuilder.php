@@ -208,6 +208,16 @@ final class DisplayListBuilder
      * `list-style-position: outside` only; the marker is paint-only and adds no box,
      * mirroring pagyra-js's createListMarkerRun.
      *
+     * `list-style-position: inside` puts the marker in the flow instead, as a real leading text
+     * run BlockLayoutEngine's insideListMarker()/listMarkerStyledNode() weave into the item's
+     * first line — and that same code strips `x-list-marker` from the style once it has done so,
+     * which is what keeps this method from also painting it and doubling it up. The one shape it
+     * cannot weave the marker into is an item whose own content is a block
+     * (`<li><p>texto</p></li>`, common in the corpus this port targets), since there the item has
+     * no first inline segment of its own; `x-list-marker` is left in place for that case, so an
+     * `inside` marker on one of those still falls back to this `outside` placement rather than
+     * vanishing outright.
+     *
      * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
      */
     private function appendListMarker(array &$commands, BlockFragment $block, array $margins): void
