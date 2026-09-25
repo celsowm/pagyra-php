@@ -17,6 +17,7 @@ use Pagyra\Paint\DisplayList;
 use Pagyra\Paint\ImagePaintCommand;
 use Pagyra\Paint\RoundedBorderPaintCommand;
 use Pagyra\Paint\TextPaintCommand;
+use Pagyra\Paint\TransformPaintCommand;
 use Pagyra\Units\Units;
 
 final class PdfSerializer
@@ -53,6 +54,12 @@ final class PdfSerializer
                     $name = 'Sh' . (count($usedShadings) + 1);
                     $usedShadings[$name] = $this->buildShading($command, $page->height, $objects, $reserve);
                     $content .= $this->serializeGradient($command, $page->height, $name);
+                    continue;
+                }
+                if ($command instanceof TransformPaintCommand) {
+                    $content .= $command->opens()
+                        ? $this->serializeTransformBegin($command, $page->height)
+                        : "Q\n";
                     continue;
                 }
                 if ($command instanceof ClipPaintCommand) {
@@ -321,6 +328,29 @@ final class PdfSerializer
         }
         $scale = $this->number($contentScale);
         return "q\n" . $scale . ' 0 0 ' . $scale . " 0 0 cm\n" . $content . "Q\n";
+    }
+
+    private function serializeTransformBegin(TransformPaintCommand $command, float $pageHeightPx): string
+    {
+        $matrix = $command->matrix;
+        if ($matrix === null) return "q\n";
+
+        // CSS/SVG uses y-down; PDF uses y-up. Conjugating with a Y flip negates b/c/f.
+        $a = $matrix->a;
+        $b = -$matrix->b;
+        $c = -$matrix->c;
+        $d = $matrix->d;
+        $e = Units::pxToPt($matrix->e);
+        $f = -Units::pxToPt($matrix->f);
+
+        $originX = Units::pxToPt($command->originX);
+        $originY = Units::pxToPt($pageHeightPx - $command->originY);
+
+        return "q\n"
+            . "1 0 0 1 " . $this->number($originX) . ' ' . $this->number($originY) . " cm\n"
+            . $this->number($a) . ' ' . $this->number($b) . ' ' . $this->number($c) . ' '
+                . $this->number($d) . ' ' . $this->number($e) . ' ' . $this->number($f) . " cm\n"
+            . "1 0 0 1 " . $this->number(-$originX) . ' ' . $this->number(-$originY) . " cm\n";
     }
 
     private function buildLinkAnnotation(TextPaintCommand $command, float $pageHeightPx, float $contentScale, array &$objects, callable $reserve): int
