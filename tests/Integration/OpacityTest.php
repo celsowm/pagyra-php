@@ -7,6 +7,7 @@ namespace Pagyra\Tests\Integration;
 use Pagyra\Pagyra;
 use Pagyra\Paint\BoxPaintCommand;
 use Pagyra\Paint\ImagePaintCommand;
+use Pagyra\Paint\OpacityGroupPaintCommand;
 use Pagyra\Paint\TextPaintCommand;
 use PHPUnit\Framework\TestCase;
 
@@ -30,7 +31,17 @@ final class OpacityTest extends TestCase
             if ($command instanceof BoxPaintCommand && $command->backgroundColor !== null) $alpha['fundo'] = $command->backgroundColor->a;
         }
 
-        self::assertEqualsWithDelta(['a' => 0.5, 'b' => 0.25, 'c' => 1.0, 'fundo' => 0.5], $alpha, 1e-6);
+        // The div's 0.5 is now isolated at group level. Its opaque text/background therefore
+        // return to alpha 1 inside the form; the inline span has no independent paint box yet,
+        // so its own 0.5 remains on the run. Effective visual alphas are still a=.5, b=.25.
+        self::assertEqualsWithDelta(['a' => 1.0, 'b' => 0.5, 'c' => 1.0, 'fundo' => 1.0], $alpha, 1e-6);
+
+        $groups = array_values(array_filter(
+            $commands,
+            static fn(object $command): bool => $command instanceof OpacityGroupPaintCommand && $command->opens(),
+        ));
+        self::assertCount(1, $groups);
+        self::assertEqualsWithDelta(0.5, $groups[0]->normalizedOpacity(), 1e-9);
     }
 
     public function testImagesAreFadedThroughAGraphicsState(): void
@@ -40,9 +51,18 @@ final class OpacityTest extends TestCase
             if ($command instanceof ImagePaintCommand) $image = $command;
         }
         self::assertNotNull($image);
-        self::assertEqualsWithDelta(0.3, $image->opacity, 1e-6);
+        self::assertEqualsWithDelta(1.0, $image->opacity, 1e-6);
+
+        $groups = array_values(array_filter(
+            $this->commands('<p style="opacity:0.3"><img src="' . self::PNG . '" width="10" height="10"></p>'),
+            static fn(object $command): bool => $command instanceof OpacityGroupPaintCommand && $command->opens(),
+        ));
+        self::assertCount(1, $groups);
+        self::assertEqualsWithDelta(0.3, $groups[0]->normalizedOpacity(), 1e-9);
 
         $pdf = Pagyra::renderHtmlToPdf(['html' => '<p style="opacity:0.3"><img src="' . self::PNG . '" width="10" height="10"></p>']);
+        self::assertStringContainsString('/Subtype /Form', $pdf);
+        self::assertStringContainsString('/Group << /S /Transparency', $pdf);
         self::assertStringContainsString('/ca 0.3 /CA 0.3', $pdf);
     }
 
