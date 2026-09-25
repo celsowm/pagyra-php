@@ -97,6 +97,55 @@ final class TableColumnWidthTest extends TestCase
         );
     }
 
+    public function testColElementsConstrainColumnProportions(): void
+    {
+        [$left, $right] = $this->cells(
+            '<table style="width:600px"><colgroup>'
+            . '<col style="width:100px"><col style="width:200px">'
+            . '</colgroup><tr><td>a</td><td>b</td></tr></table>'
+        );
+
+        self::assertEqualsWithDelta(200.0, $left->box->borderBox()->width, 1.0);
+        self::assertEqualsWithDelta(400.0, $right->box->borderBox()->width, 1.0);
+    }
+
+    public function testColSpanRepeatsTheColumnWidthHint(): void
+    {
+        [$first, $second, $third] = $this->cells(
+            '<table style="width:400px"><colgroup>'
+            . '<col span="2" style="width:100px"><col style="width:200px">'
+            . '</colgroup><tr><td>a</td><td>b</td><td>c</td></tr></table>'
+        );
+
+        self::assertEqualsWithDelta(100.0, $first->box->borderBox()->width, 1.0);
+        self::assertEqualsWithDelta(100.0, $second->box->borderBox()->width, 1.0);
+        self::assertEqualsWithDelta(200.0, $third->box->borderBox()->width, 1.0);
+    }
+
+    public function testLegacyColWidthAttributeParticipatesInSizing(): void
+    {
+        [$left, $right] = $this->cells(
+            '<table style="width:600px"><colgroup>'
+            . '<col width="25%"><col width="75%">'
+            . '</colgroup><tr><td>a</td><td>b</td></tr></table>'
+        );
+
+        self::assertEqualsWithDelta(150.0, $left->box->borderBox()->width, 1.0);
+        self::assertEqualsWithDelta(450.0, $right->box->borderBox()->width, 1.0);
+    }
+
+    public function testColgroupWidthFallsBackToItsChildColumns(): void
+    {
+        [$left, $right] = $this->cells(
+            '<table style="width:200px"><colgroup style="width:100px">'
+            . '<col><col>'
+            . '</colgroup><tr><td>a</td><td>b</td></tr></table>'
+        );
+
+        self::assertEqualsWithDelta(100.0, $left->box->borderBox()->width, 1.0);
+        self::assertEqualsWithDelta(100.0, $right->box->borderBox()->width, 1.0);
+    }
+
     public function testIntrinsicSizingWalksBlockDescendantsInsideCells(): void
     {
         [$short, $long] = $this->cells(
