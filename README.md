@@ -109,7 +109,7 @@ Current foundation:
 - glyph-advance and kerning-based text measurement with heuristic fallback;
 - `fontConfig.fontFaceDefs` support for local, `file://`, relative-to-`resourceBaseDir` and base64 data-URL sources;
 - CSS `@font-face` extraction from embedded and linked stylesheets;
-- CSS font source selection prefers sfnt-compatible TrueType/OpenType sources while WOFF/WOFF2 decoding is still pending;
+- CSS font source selection supports sfnt-compatible TrueType/OpenType and WOFF1 sources; WOFF1 is reconstructed to sfnt before metrics/subsetting/embedding, while WOFF2 remains pending;
 - base64 embedded `@font-face` sources can be parsed directly from CSS and participate in text measurement;
 - TrueType PDF embedding through Type0 + Identity-H + CIDFontType2 + `FontFile2`;
 - `ToUnicode` CMaps for Unicode extraction, including non-BMP UTF-16 surrogate pairs;
@@ -219,7 +219,7 @@ The optional `pagedBodyMargin` option (`'auto'` by default, or `'zero'`), as in 
 
 The optional `margins` option sets the default page margins in px, 48 on every side unless given. Pass an array keyed by `top`, `right`, `bottom` and `left` to set some or all sides, or a bare number for the same margin on all four (`margins => 37.795` is 10mm, the wkhtmltopdf default); `@page` rules in the document still apply on top of it. The bare number is a PHP-side extension, since `pagyra-js` types the option as an object of sides. Any other shape, an unknown key or a negative or non-finite value throws `InvalidArgumentException` instead of falling back to the default.
 
-The PDF serializer is still a subset renderer, not yet a full `pagyra-js` replacement. TrueType sfnt fonts can be embedded and subsetted today; OpenType/CFF (`OTTO`) embedding through `FontFile3`, WOFF/WOFF2 decoding, GPOS shaping/kerning, variable-font support and richer fallback-chain behavior remain pending.
+The PDF serializer is still a subset renderer, not yet a full `pagyra-js` replacement. TrueType sfnt fonts (including WOFF1 reconstructed to sfnt) can be embedded and subsetted today, and GPOS `kern` PairPos format 1/2 contributes kerning. OpenType/CFF (`OTTO`) embedding through `FontFile3`, WOFF2 decoding, broader shaping, variable-font support and richer per-codepoint fallback-chain behavior remain pending.
 
 Styled inline content is preserved through layout. For example:
 
