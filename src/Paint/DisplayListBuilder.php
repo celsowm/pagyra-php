@@ -260,10 +260,10 @@ final class DisplayListBuilder
                 }
             }
 
-            $this->appendBlockSelf($commands, $step->fragment, $margins);
+            $this->appendBlockSelf($commands, $step->subject, $margins);
 
             for ($i = 0; $i < $openedClips; $i++) {
-                $commands[] = new ClipPaintCommand($step->fragment->pageIndex);
+                $commands[] = new ClipPaintCommand($step->subject->pageIndex);
             }
         }
     }
