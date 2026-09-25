@@ -182,34 +182,33 @@ This list is only orientation. Inspect the current code before assuming exact su
 
 ## Known incomplete areas
 
-Do not accidentally present these as complete:
+The detailed live status is maintained in [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md). Read it
+before starting a parity feature: the repository moves faster than broad orientation lists, and a
+historical limitation must not be reimplemented just because an older comment still mentions it.
 
-- full mixed inline/block formatting contexts
-- full CSS shorthand/property grammar
-- pseudo-classes and pseudo-elements
-- sibling combinators
-- complete UA stylesheet behavior
-- `@media`, `@page`, `@font-face`
-- external stylesheet/resource loading parity
-- full CSS `calc()` grammar and all numeric functions
-- complete named-color table parity
-- advanced Unicode line breaking and hyphenation
-- full intrinsic image decoding from PNG/JPEG/WebP/SVG resources
-- full `object-fit` / replaced-element rendering
-- full inline-block/block formatting internals
-- parent/child margin collapsing and complete BFC behavior
-- floats and positioning
-- flexbox and grid
-- pagination
-- headers/footers
-- paint/display-list generation
-- PDF serialization
-- font outlines, embedding and subsetting
-- GPOS kerning/class pairs
-- variable fonts
-- complete font fallback/aliases/Base14 behavior
+The main structural gaps currently are:
 
-Check `PLAN.md` and current source for the most recent status.
+- real mixed block/inline formatting contexts inside atomic boxes;
+- complete BFC/float interactions;
+- reusing recursive min/max intrinsic sizing across every shrink-to-fit path (tables already use it);
+- per-column `<col>` table hints and complete fragmented table header/footer semantics;
+- named grid lines;
+- stacking contexts / `z-index`;
+- general CSS transforms;
+- full SVG vector paint and WebP PDF paint;
+- Adam7 PNG;
+- paged first/even/odd headers and footers;
+- WOFF/WOFF2 decoding;
+- GPOS PairPos parity with the JS reference and richer glyph fallback chains;
+- `::marker` and the remaining CSS long tail;
+- full isolated-group opacity compositing;
+- the remaining border styles and inset box shadows.
+
+Some historically listed gaps are implemented now: sibling combinators and structural selectors,
+flexbox, grid (including `grid-template-areas`), pagination, display-list/PDF serialization,
+TrueType embedding/subsetting, absolute/fixed positioning, float text wrapping, backgrounds and
+gradients, overflow clipping, opacity, `aspect-ratio`, and `::first-line`/`::first-letter`
+(partial semantics). Inspect current code/tests before assuming otherwise.
 
 ## Image behavior
 
