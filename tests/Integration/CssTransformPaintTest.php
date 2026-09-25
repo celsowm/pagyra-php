@@ -52,6 +52,38 @@ final class CssTransformPaintTest extends TestCase
         self::assertEqualsWithDelta(0.0, $commands[$open[0]]->originY, 1e-9);
     }
 
+    public function testInlineBlockTransformWrapsItsNestedPaint(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'margins' => 0.0,
+            'html' => '<p style="margin:0">A<span style="display:inline-block;width:40px;height:20px;transform:scale(1.5)">INNER</span>Z</p>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        $commands = $prepared->displayList->pages[0]->commands;
+        $open = null;
+        $close = null;
+        $inner = null;
+
+        foreach ($commands as $index => $command) {
+            if ($command instanceof TransformPaintCommand) {
+                if ($command->opens() && $open === null) $open = $index;
+                if (!$command->opens()) $close = $index;
+            }
+            if ($command instanceof TextPaintCommand && trim($command->text) === 'INNER') {
+                $inner = $index;
+            }
+        }
+
+        self::assertNotNull($open);
+        self::assertNotNull($close);
+        self::assertNotNull($inner);
+        self::assertLessThan($inner, $open);
+        self::assertGreaterThan($inner, $close);
+    }
+
     public function testTransformDoesNotChangeLayoutGeometry(): void
     {
         $plain = Pagyra::prepareHtmlRender([
