@@ -1347,7 +1347,7 @@ final class InlineTextFormatter
         foreach ($lines as $line) {
             $runs = [];
             foreach ($line->runs as $run) {
-                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
+                $runs[] = new TextRun($run->x + $dx, $run->y + $dy, $run->width, $run->height, $run->baseline + $dy, $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight, $run->inlineBorderStart, $run->inlineBorderEnd);
             }
             $boxes = [];
             foreach ($line->atomicBoxes as $box) {
