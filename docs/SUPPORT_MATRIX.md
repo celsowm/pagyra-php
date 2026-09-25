@@ -27,11 +27,11 @@ Status levels:
 | Block flow / box model | P2+ | Width/height, box sizing, min/max constraints, auto margins and sibling + parent/child margin collapsing are implemented for the current model. |
 | Inline formatting | P2+ | Styled runs, whitespace modes, wrapping, alignment, justification, vertical-align, atomic inline boxes, real inline padding/border geometry, inline-block internals and ellipsis around text plus fitting atomic boxes are implemented. |
 | Mixed block/inline inside atomic boxes | P2/P3 | Inline-block atomic boxes delegate block-containing interiors to a real nested block formatting context; mixed inline/block order, nested paint and last-line baseline are preserved. |
-| Floats / clear | Partial | Left/right floats, inline/replaced/block-content floats, recursive shrink-to-fit and text exclusion wrapping exist. Float exclusions now live in explicit per-BFC context frames and `clear:left|right|both` uses side-specific bottoms. Full float-placement retry when a later float cannot fit the current slot remains open. |
+| Floats / clear | P2+ | Left/right floats, inline/replaced/block-content floats, recursive shrink-to-fit and text exclusion wrapping exist. Float exclusions live in explicit per-BFC context frames, `clear:left|right|both` uses side-specific bottoms, and a float that cannot fit the current horizontal slot retries on the next float row. |
 | Absolute / fixed / relative positioning | Partial | Offsets and containing-block placement exist. As in the current JS reference simplification, absolute/fixed boxes are laid out in flow before being repositioned. |
 | Flexbox | P2+ | Direction, wrapping, grow/shrink/basis, order, gaps and main/cross-axis alignment are implemented. |
 | Grid | P2+ | px/%/fr/auto/minmax/repeat tracks, auto-fill/fit, placement/spans, implicit tracks, alignment and `grid-template-areas` are implemented. Named grid lines remain open. |
-| Tables | Partial | Real grid, row groups, captions, colspan/rowspan, vertical-align and collapsed borders exist. Table columns now use recursive min/max-content sizing. `<col>` hints and complete header/footer fragmentation semantics remain open. |
+| Tables | Partial | Real grid, row groups, captions, colspan/rowspan, vertical-align and collapsed borders exist. Columns use recursive min/max-content sizing and consume CSS/legacy `<col>`/`<colgroup>` width hints including `span`. Complete repeated header/footer fragmentation semantics remain open. |
 | Recursive intrinsic sizing | Partial | A reusable resolver now exposes min/max-content bounds; tables and float shrink-to-fit consume it. Reusing it across inline-block/flex/grid intrinsic paths is the next slice. |
 | Pagination | P2/P3 | Forced breaks, parity pages, break-inside, widows/orphans and recursive physical fragmentation are implemented. |
 | Header/footer page model | Open | The independent measured first/even/odd header/footer subsystem from `pagyra-js` is not ported yet. |
@@ -55,7 +55,7 @@ Status levels:
 ## Next implementation order
 
 1. Reuse recursive intrinsic sizing in flex and grid paths (inline-block, table and float paths already consume it).
-2. Complete float placement/retry semantics and table `<col>` + fragmented header/footer semantics.
+2. Complete fragmented/repeated table header/footer semantics.
 4. Port stacking contexts / z-index from `pagyra-js`.
 5. Add 2D transforms and reuse them for SVG paint.
 6. Port WOFF/WOFF2 decoding and the JS GPOS PairPos format-1 subset.
