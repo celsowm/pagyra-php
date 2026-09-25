@@ -150,6 +150,30 @@ final class ZIndexPaintOrderTest extends TestCase
         self::assertSame(['TOP-NORMAL', 'TOP-SIBLING-2', 'TOP-GRANDCHILD-100'], $texts);
     }
 
+    public function testOpacityCreatesAContextThatContainsHighZDescendants(): void
+    {
+        $texts = $this->paintedTexts(
+            '<div style="opacity:.5">OPACITY-CONTEXT'
+            . '<div style="position:absolute;z-index:100">INSIDE-100</div>'
+            . '</div>'
+            . '<div style="position:relative;z-index:2">OUTSIDE-2</div>',
+        );
+
+        self::assertSame(['OPACITY-CONTEXT', 'INSIDE-100', 'OUTSIDE-2'], $texts);
+    }
+
+    public function testOpacityOneDoesNotTrapPositionedDescendants(): void
+    {
+        $texts = $this->paintedTexts(
+            '<div style="opacity:1">NO-CONTEXT'
+            . '<div style="position:absolute;z-index:100">ESCAPES-100</div>'
+            . '</div>'
+            . '<div style="position:relative;z-index:2">OUTSIDE-2</div>',
+        );
+
+        self::assertSame(['NO-CONTEXT', 'OUTSIDE-2', 'ESCAPES-100'], $texts);
+    }
+
     public function testNestedSiblingScopesAreResolvedRecursively(): void
     {
         $texts = $this->paintedTexts(
