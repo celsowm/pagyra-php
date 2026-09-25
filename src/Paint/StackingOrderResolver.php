@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Pagyra\Paint;
 
+use Pagyra\Layout\LayoutNode;
 use Pagyra\Pagination\BlockFragment;
+use Pagyra\Pagination\PhysicalPageEntry;
 
 /**
- * Resolves the simplified stacking-context model already used by pagyra-js:
+ * Resolves the simplified stacking-context model used by pagyra-js:
  *
  * - a positioned element with numeric z-index establishes a context;
  * - context roots compete in negative / normal-auto / non-negative phases;
@@ -15,49 +17,53 @@ use Pagyra\Pagination\BlockFragment;
  *   ancestor context instead of being trapped in recursive DOM paint order;
  * - equal z-index values keep document order.
  *
- * The output is structural paint steps rather than a reordered tree. That lets DisplayListBuilder
- * paint a promoted descendant independently while re-applying overflow clips from the ancestors
- * it crossed.
+ * It accepts both top-level PhysicalPageEntry objects and descendant BlockFragments, so the page
+ * itself acts as the root stacking context instead of each top-level placement being an isolated
+ * paint island.
+ *
+ * @phpstan-type PaintSubject BlockFragment|PhysicalPageEntry
+ * @phpstan-type Entry array{subject:PaintSubject,ancestors:list<PaintSubject>,z:int,order:int}
  */
 final class StackingOrderResolver
 {
     /**
-     * Resolve all descendants of one already-painted stacking-context root.
+     * Resolve all subjects participating in one already-painted stacking-context root.
      *
-     * @param list<BlockFragment> $fragments
+     * @param list<BlockFragment|PhysicalPageEntry> $subjects
      * @return list<StackingPaintStep>
      */
-    public function plan(array $fragments): array
+    public function plan(array $subjects): array
     {
         $negative = [];
         $normal = [];
         $positive = [];
         $order = 0;
 
-        foreach ($fragments as $fragment) {
-            $this->collectInContext($fragment, [], $negative, $normal, $positive, $order);
+        foreach ($subjects as $subject) {
+            $this->collectInContext($subject, [], $negative, $normal, $positive, $order);
         }
 
         return $this->orderedSteps($negative, $normal, $positive);
     }
 
     /**
-     * @param list<BlockFragment> $ancestors
-     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $negative
-     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $normal
-     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $positive
+     * @param BlockFragment|PhysicalPageEntry $subject
+     * @param list<BlockFragment|PhysicalPageEntry> $ancestors
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $negative
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $normal
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $positive
      */
     private function collectInContext(
-        BlockFragment $fragment,
+        BlockFragment|PhysicalPageEntry $subject,
         array $ancestors,
         array &$negative,
         array &$normal,
         array &$positive,
         int &$order,
     ): void {
-        $z = $this->contextZIndex($fragment);
+        $z = $this->contextZIndex($subject);
         $entry = [
-            'fragment' => $fragment,
+            'subject' => $subject,
             'ancestors' => $ancestors,
             'z' => $z ?? 0,
             'order' => $order++,
@@ -66,22 +72,20 @@ final class StackingOrderResolver
         if ($z !== null) {
             if ($z < 0) $negative[] = $entry;
             else $positive[] = $entry;
-            // A nested context is atomic to this context. Its descendants are resolved only when
-            // that context itself is emitted.
             return;
         }
 
         $normal[] = $entry;
-        $nextAncestors = [...$ancestors, $fragment];
-        foreach ($fragment->children as $child) {
+        $nextAncestors = [...$ancestors, $subject];
+        foreach ($this->childrenOf($subject) as $child) {
             $this->collectInContext($child, $nextAncestors, $negative, $normal, $positive, $order);
         }
     }
 
     /**
-     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $negative
-     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $normal
-     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $positive
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $negative
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $normal
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $positive
      * @return list<StackingPaintStep>
      */
     private function orderedSteps(array $negative, array $normal, array $positive): array
@@ -95,26 +99,24 @@ final class StackingOrderResolver
 
         $steps = [];
         foreach ($negative as $entry) {
-            array_push($steps, ...$this->contextSteps($entry['fragment'], $entry['ancestors']));
+            array_push($steps, ...$this->contextSteps($entry['subject'], $entry['ancestors']));
         }
         foreach ($normal as $entry) {
-            $steps[] = new StackingPaintStep($entry['fragment'], $entry['ancestors']);
+            $steps[] = new StackingPaintStep($entry['subject'], $entry['ancestors']);
         }
         foreach ($positive as $entry) {
-            array_push($steps, ...$this->contextSteps($entry['fragment'], $entry['ancestors']));
+            array_push($steps, ...$this->contextSteps($entry['subject'], $entry['ancestors']));
         }
 
         return $steps;
     }
 
     /**
-     * Resolve one nested stacking context. Its root paints atomically as the context anchor, then
-     * its descendants are resolved against that root as a fresh context.
-     *
-     * @param list<BlockFragment> $ancestors
+     * @param BlockFragment|PhysicalPageEntry $root
+     * @param list<BlockFragment|PhysicalPageEntry> $ancestors
      * @return list<StackingPaintStep>
      */
-    private function contextSteps(BlockFragment $root, array $ancestors): array
+    private function contextSteps(BlockFragment|PhysicalPageEntry $root, array $ancestors): array
     {
         $steps = [new StackingPaintStep($root, $ancestors)];
 
@@ -124,7 +126,7 @@ final class StackingOrderResolver
         $order = 0;
         $nextAncestors = [...$ancestors, $root];
 
-        foreach ($root->children as $child) {
+        foreach ($this->childrenOf($root) as $child) {
             $this->collectInContext($child, $nextAncestors, $negative, $normal, $positive, $order);
         }
 
@@ -132,13 +134,24 @@ final class StackingOrderResolver
         return $steps;
     }
 
-    /**
-     * Numeric z-index only creates a context on positioned boxes, matching the current
-     * pagyra-js getStackingFlags() contract.
-     */
-    private function contextZIndex(BlockFragment $fragment): ?int
+    /** @return list<BlockFragment> */
+    private function childrenOf(BlockFragment|PhysicalPageEntry $subject): array
     {
-        $style = $fragment->node->source->style;
+        return $subject instanceof PhysicalPageEntry
+            ? $subject->fragment->blocks
+            : $subject->children;
+    }
+
+    private function nodeOf(BlockFragment|PhysicalPageEntry $subject): LayoutNode
+    {
+        return $subject instanceof PhysicalPageEntry
+            ? $subject->placement->node
+            : $subject->node;
+    }
+
+    private function contextZIndex(BlockFragment|PhysicalPageEntry $subject): ?int
+    {
+        $style = $this->nodeOf($subject)->source->style;
         $position = strtolower(trim($style->get('position', 'static') ?? 'static'));
         if (!in_array($position, ['relative', 'absolute', 'fixed', 'sticky'], true)) {
             return null;
