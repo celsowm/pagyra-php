@@ -76,4 +76,38 @@ final class TableColumnWidthTest extends TestCase
 
         self::assertGreaterThan($short->box->borderBox()->width, $long->box->borderBox()->width);
     }
+
+
+    public function testMinContentProtectsAnUnbreakableColumnWhenPreferredWidthsOverflow(): void
+    {
+        [$unbreakable, $wrappable] = $this->cells(
+            '<table style="width:200px;font-family:Courier;font-size:10px"><tr>'
+            . '<td style="padding:0">ABCDEFGHIJ</td>'
+            . '<td style="padding:0">' . str_repeat('aa ', 30) . '</td>'
+            . '</tr></table>'
+        );
+
+        // Courier at 10px makes the ten-character token about 60px wide. A max-content-only
+        // proportional shrink used to crush that column far below its unbreakable minimum.
+        self::assertGreaterThan(55.0, $unbreakable->box->borderBox()->width);
+        self::assertEqualsWithDelta(
+            200.0,
+            $unbreakable->box->borderBox()->width + $wrappable->box->borderBox()->width,
+            0.5,
+        );
+    }
+
+    public function testIntrinsicSizingWalksBlockDescendantsInsideCells(): void
+    {
+        [$short, $long] = $this->cells(
+            '<table style="width:300px;font-family:Courier;font-size:10px"><tr>'
+            . '<td style="padding:0"><div>aa</div></td>'
+            . '<td style="padding:0"><div>ABCDEFGHIJKLMNO</div></td>'
+            . '</tr></table>'
+        );
+
+        // InlineTextFormatter intentionally does not consume block children. The recursive
+        // intrinsic-size resolver must still see them, matching pagyra-js's cell.walk() pass.
+        self::assertGreaterThan($short->box->borderBox()->width, $long->box->borderBox()->width);
+    }
 }
