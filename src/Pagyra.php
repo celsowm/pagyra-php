@@ -20,6 +20,7 @@ use Pagyra\Pagination\PageFlow;
 use Pagyra\Pagination\PaginationEngine;
 use Pagyra\Paint\BorderPatternExpander;
 use Pagyra\Paint\DisplayListBuilder;
+use Pagyra\Paint\OpacityGroupNormalizer;
 use Pagyra\Paint\VisibilityFilter;
 use Pagyra\Pdf\PdfSerializer;
 use Pagyra\Style\StyleComputer;
@@ -84,6 +85,7 @@ final class Pagyra
             $pageStyle['margins'],
         );
         $displayList = (new BorderPatternExpander())->expand($displayList, $pagination);
+        $displayList = (new OpacityGroupNormalizer())->normalize($displayList);
         $displayList = (new VisibilityFilter())->apply($displayList);
 
         return new PreparedRender(
