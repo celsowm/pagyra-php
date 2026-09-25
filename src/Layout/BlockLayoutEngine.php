@@ -2297,13 +2297,10 @@ final class BlockLayoutEngine
      * does not advance the flow cursor on its own; the caller folds the run's tallest bottom
      * back into the flow once a non-floated sibling (or the end of children) clears the run.
      *
-     * This intentionally only covers the shape every real-world float in the motivating
-     * corpus takes: a handful of block siblings floated side by side with only inline
-     * (text/span) content, no explicit width, and no float wrapping inline text around them.
-     * Floats with block children, explicit widths that do not fit the run, or that need
-     * following inline content to reflow around them are unsupported and keep behaving as
-     * before (i.e. this method is simply not reached for anything wrapping inline text
-     * around a float, since that reflow is not implemented).
+     * Auto widths use recursive min/max intrinsic sizing, so block descendants participate.
+     * Registered float bands shorten following line boxes, while clear:left/right/both consult
+     * side-specific bottoms in the current Block Formatting Context. The remaining limitation is
+     * full CSS float-placement retry when another float cannot fit the current horizontal slot.
      *
      * @return array{0:LayoutNode,1:FloatRun}
      */
