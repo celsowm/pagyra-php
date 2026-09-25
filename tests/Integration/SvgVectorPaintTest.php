@@ -56,9 +56,9 @@ final class SvgVectorPaintTest extends TestCase
         self::assertEqualsWithDelta($clip->y, (float) $move['y'], 1e-6);
 
         self::assertNotNull($path->fill);
-        self::assertSame(255, $path->fill->r);
-        self::assertSame(0, $path->fill->g);
-        self::assertSame(0, $path->fill->b);
+        self::assertSame(255.0, $path->fill->r);
+        self::assertSame(0.0, $path->fill->g);
+        self::assertSame(0.0, $path->fill->b);
     }
 
     public function testPreserveAspectRatioNoneMapsIndependentAxes(): void
