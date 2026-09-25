@@ -44,7 +44,7 @@ final class BlockLayoutEngine
         $this->floatContext = new FloatExclusionContext();
         $metrics = $textMetrics ?? new HeuristicTextMetrics();
         $this->inlineTextFormatter = new InlineTextFormatter($metrics);
-        $this->intrinsicSizeResolver = new IntrinsicSizeResolver($this->inlineTextFormatter);
+        $this->intrinsicSizeResolver = new IntrinsicSizeResolver($this->inlineTextFormatter, $viewportWidth, $viewportHeight);
         $this->inlineTextFormatter->setIntrinsicSizeHandler(
             fn(StyledNode $node, float $referenceWidth, float $fontSize): IntrinsicInlineSize
                 => $this->intrinsicSizeResolver->measure($node, $referenceWidth, $fontSize),
@@ -1130,7 +1130,7 @@ final class BlockLayoutEngine
             }
 
             if ($isRow) {
-                $width = $basis ?? $this->flexPreferredWidth($child, max(0.0, $contentWidth - $childMargin->horizontal()), $childFont);
+                $width = $basis ?? $this->intrinsicPreferredWidth($child, max(0.0, $contentWidth - $childMargin->horizontal()), $childFont);
                 $layout = $this->layoutFlexItem($child, $contentX, $contentY, $width, $childMargin, null, $containingHeight, $fontSize);
                 $mainSize = $width;
                 $crossSize = $layout->box->borderBox()->height;
@@ -1138,7 +1138,7 @@ final class BlockLayoutEngine
                 $stretchCross = $this->flexAlignment($child, $alignItems) === 'stretch' && $this->isAuto($child->style->get('width', 'auto') ?? 'auto');
                 $width = $stretchCross
                     ? max(0.0, $contentWidth - $childMargin->horizontal())
-                    : $this->flexPreferredWidth($child, max(0.0, $contentWidth - $childMargin->horizontal()), $childFont);
+                    : $this->intrinsicPreferredWidth($child, max(0.0, $contentWidth - $childMargin->horizontal()), $childFont);
                 $layout = $this->layoutFlexItem($child, $contentX, $contentY, $width, $childMargin, $basis, $containingHeight, $fontSize);
                 $mainSize = $layout->box->borderBox()->height;
                 $crossSize = $layout->box->borderBox()->width;
@@ -1475,40 +1475,39 @@ final class BlockLayoutEngine
      * its declared width, else its max-content width (every line unbroken, every block child at
      * its own preferred width), capped by what is available.
      */
-    private function flexPreferredWidth(StyledNode $item, float $available, float $fontSize, int $depth = 0): float
+    private function intrinsicPreferredWidth(StyledNode $item, float $available, float $fontSize): float
     {
         $padding = $this->resolveEdges($item, 'padding', $available, $this->viewportHeight, $fontSize);
         $border = $this->resolveBorderEdges($item, $available, $this->viewportHeight, $fontSize);
         $extras = $padding->horizontal() + $border->horizontal();
         $width = $item->style->get('width', 'auto') ?? 'auto';
+
+        // Preserve the established definite-width path: flex/grid still receive a border-box
+        // preferred width and can subsequently flex/shrink it according to their own algorithms.
         if (!$this->isAuto($width) && !str_ends_with(trim($width), '%')) {
             $resolved = $this->resolveLength($width, $available, $fontSize, $available, $this->viewportHeight, 'zero');
-            return ($item->style->get('box-sizing') ?? 'content-box') === 'border-box' ? $resolved : $resolved + $extras;
-        }
-        if ($item->node->isImage() || $item->node->isSvg()) {
-            return min($available, $this->layoutBlockReplaced($item, 0.0, 0.0, $available, $this->viewportHeight, $fontSize)->box->borderBox()->width);
-        }
-        $content = 0.0;
-        foreach ($this->flowSegments($item) as $segment) {
-            if ($segment[0] === 'inline') {
-                $probe = $this->inlineTextFormatter->layout(new StyledNode($item->node, $item->style, $segment[1]), 0.0, 0.0, 1.0e6, $fontSize);
-                foreach ($probe->lines as $line) $content = max($content, $line->width);
-                continue;
-            }
-            $child = $segment[1];
-            $childFont = $this->resolveFontSize($child, $fontSize);
-            [$mt, $mr, $mb, $ml] = $this->edgeRawValues($child, 'margin');
-            $childMargin = $this->resolveRawEdges($mt, $mr, $mb, $ml, $available, $this->viewportHeight, $childFont);
-            $childWidth = $depth >= 24 ? $available : $this->flexPreferredWidth($child, max(0.0, $available - $extras), $childFont, $depth + 1);
-            $content = max($content, $childWidth + $childMargin->horizontal());
-        }
-        $min = $item->style->get('min-width');
-        $result = min($available, $content + $extras);
-        if ($min !== null && !$this->isAuto($min)) {
-            $result = max($result, $this->resolveLength($min, $available, $fontSize, $available, $this->viewportHeight, 'zero'));
+            return ($item->style->get('box-sizing') ?? 'content-box') === 'border-box'
+                ? $resolved
+                : $resolved + $extras;
         }
 
-        return $result;
+        // Content-driven sizing is centralized here. The resolver sees nested block descendants,
+        // declared descendant widths, atomic/replaced content and the same inline tokenization
+        // used by real layout, so flex and grid no longer maintain their own recursive probes.
+        $intrinsic = $this->intrinsicSizeResolver->borderBox($item, $available, $fontSize);
+        $result = min($available, $intrinsic->maxContent);
+
+        // Keep the pre-existing min-width behavior: an explicit minimum may force overflow beyond
+        // the available slot, while ordinary min-content remains shrinkable by flex/grid.
+        $min = $item->style->get('min-width');
+        if ($min !== null && !$this->isAuto($min)) {
+            $result = max(
+                $result,
+                $this->resolveLength($min, $available, $fontSize, $available, $this->viewportHeight, 'zero'),
+            );
+        }
+
+        return max(0.0, $result);
     }
 
     /**
@@ -1636,7 +1635,7 @@ final class BlockLayoutEngine
             if ($track['kind'] !== 'auto') continue;
             foreach ($placements as $index => $p) {
                 if ($p['col'] === $c && $p['colSpan'] === 1) {
-                    $widths[$c] = max($widths[$c], $this->flexPreferredWidth($children[$index], $available, $this->resolveFontSize($children[$index], $fontSize)));
+                    $widths[$c] = max($widths[$c], $this->intrinsicPreferredWidth($children[$index], $available, $this->resolveFontSize($children[$index], $fontSize)));
                 }
             }
         }
@@ -1690,7 +1689,7 @@ final class BlockLayoutEngine
             $justify = $this->gridAlignment($child, $styled, 'justify');
             $width = $justify === 'stretch' && $this->isAuto($child->style->get('width', 'auto') ?? 'auto')
                 ? max(0.0, $areaWidth - $itemMargins[$index]->horizontal())
-                : $this->flexPreferredWidth($child, max(0.0, $areaWidth - $itemMargins[$index]->horizontal()), $childFont);
+                : $this->intrinsicPreferredWidth($child, max(0.0, $areaWidth - $itemMargins[$index]->horizontal()), $childFont);
             $layouts[$index] = $this->layoutFlexItem($child, $contentX, $contentY, $width, $itemMargins[$index], null, $containingHeight, $fontSize);
             if ($p['rowSpan'] === 1 && ($rowTracks[$p['row']] ?? $autoRow)['kind'] !== 'fixed') {
                 $heights[$p['row']] = max($heights[$p['row']], $layouts[$index]->box->borderBox()->height + $itemMargins[$index]->vertical());
