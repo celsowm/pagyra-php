@@ -31,18 +31,17 @@ final readonly class TextRun implements \JsonSerializable
          */
         public ?string $inlineBackground = null,
         /**
-         * Border and horizontal padding of that same innermost inline element, painted around
-         * the same ascent/descent band `inlineBackground` uses. Like the background, this is a
-         * paint-only decoration: it does not widen the box the way a block element's border and
-         * padding do, so `padding-left`/`padding-right` on a `<span>` do not actually push
-         * neighbouring inline content aside — a border or background band drawn snug against the
-         * text, with no breathing room around it, is what would otherwise result, which is why
-         * this exists rather than leaving inline border/padding unpainted altogether.
+         * Border and horizontal padding of that same innermost inline element. The horizontal
+         * edges are real inline geometry: the formatter reserves them in line breaking and shifts
+         * the glyph run inward. These fields carry only the padding that actually occurs at this
+         * run's logical start/end; wrapped fragments in the middle keep zero horizontal padding.
          */
         public ?string $inlineBorderColor = null,
         public float $inlineBorderWidth = 0.0,
         public float $inlinePaddingLeft = 0.0,
         public float $inlinePaddingRight = 0.0,
+        public bool $inlineBorderStart = false,
+        public bool $inlineBorderEnd = false,
     ) {
     }
 
@@ -63,6 +62,8 @@ final readonly class TextRun implements \JsonSerializable
             'inlineBorderWidth' => $this->inlineBorderWidth,
             'inlinePaddingLeft' => $this->inlinePaddingLeft,
             'inlinePaddingRight' => $this->inlinePaddingRight,
+            'inlineBorderStart' => $this->inlineBorderStart,
+            'inlineBorderEnd' => $this->inlineBorderEnd,
         ];
     }
 }
