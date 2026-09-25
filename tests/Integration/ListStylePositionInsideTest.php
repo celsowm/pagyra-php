@@ -81,15 +81,28 @@ final class ListStylePositionInsideTest extends TestCase
         self::assertStringContainsString("(\x95 um) Tj", $pdf);
     }
 
-    public function testFallsBackToOutsidePlacementWhenTheItemsOwnContentIsABlock(): void
+    public function testBlockFirstContentGetsAnAnonymousInsideMarkerLine(): void
     {
-        // <li><p>...</p></li>: the item has no inline segment of its own for the marker to join,
-        // so it still needs to appear somewhere instead of silently vanishing.
-        $pdf = Pagyra::renderHtmlToPdf([
-            'html' => '<ol style="list-style-position:inside"><li><p>primeiro</p></li></ol>',
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'margins' => 0.0,
+            'html' => '<ol style="margin:0;padding-left:40px;list-style-position:inside"><li><p style="margin:0">primeiro</p></li></ol>',
         ]);
 
-        self::assertSame(['1.', 'primeiro'], self::tjStrings($pdf));
+        $li = $prepared->layoutRoot->children[0]->children[0];
+        self::assertCount(2, $li->children);
+        self::assertSame(\Pagyra\Layout\BlockLayoutEngine::ANONYMOUS_TAG, $li->children[0]->source->node->tagName);
+        self::assertSame('1.', trim($li->children[0]->lineBoxes[0]->text));
+        self::assertSame('p', $li->children[1]->source->node->tagName);
+
+        $texts = array_values(array_filter(
+            $prepared->displayList->pages[0]->commands,
+            static fn($command): bool => $command instanceof TextPaintCommand,
+        ));
+        self::assertCount(2, $texts);
+        self::assertSame('1.', trim($texts[0]->text));
+        self::assertSame('primeiro', trim($texts[1]->text));
+        self::assertEqualsWithDelta($texts[1]->x, $texts[0]->x, 0.5);
     }
 
     public function testOutsideRemainsThePaintOnlyMarkerUnaffected(): void
