@@ -402,11 +402,32 @@ final class DisplayListBuilder
         float $width,
         float $height,
     ): bool {
-        $matrix = $this->transformParser->parse($node->source->style->get('transform'), $width, $height);
+        return $this->openStyleTransform(
+            $commands,
+            $node->source->style,
+            $pageIndex,
+            $x,
+            $y,
+            $width,
+            $height,
+        );
+    }
+
+    /** @param list<object> $commands */
+    private function openStyleTransform(
+        array &$commands,
+        ComputedStyle $style,
+        int $pageIndex,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+    ): bool {
+        $matrix = $this->transformParser->parse($style->get('transform'), $width, $height);
         if (!$matrix instanceof TransformMatrix || $matrix->isIdentity()) return false;
 
         [$originX, $originY] = $this->transformParser->origin(
-            $node->source->style->get('transform-origin'),
+            $style->get('transform-origin'),
             $width,
             $height,
         );
@@ -1251,6 +1272,16 @@ final class DisplayListBuilder
         $borderWidth = $box->contentWidth + $box->padding['left'] + $box->padding['right'] + $box->border['left'] + $box->border['right'];
         $borderHeight = $box->contentHeight + $box->padding['top'] + $box->padding['bottom'] + $box->border['top'] + $box->border['bottom'];
 
+        $selfTransform = $this->openStyleTransform(
+            $commands,
+            $box->style,
+            $lineFragment->pageIndex,
+            $borderX,
+            $borderY,
+            $borderWidth,
+            $borderHeight,
+        );
+
         if ($borderWidth > 0.0 && $borderHeight > 0.0) {
             $radius = BorderRadiusResolver::resolve($box->style, $borderWidth, $borderHeight);
             $this->appendBoxShadows($commands, $box, $box->style, $lineFragment->pageIndex, $borderX, $borderY, $borderWidth, $borderHeight, $radius);
@@ -1298,6 +1329,10 @@ final class DisplayListBuilder
                 $fragments[] = $this->unfragmentedAtomicBlock($contentBlock, $lineFragment->pageIndex, $pageOffsetY);
             }
             $this->appendStackedBlocks($commands, $fragments, $margins);
+        }
+
+        if ($selfTransform) {
+            $commands[] = new TransformPaintCommand($lineFragment->pageIndex);
         }
     }
 
