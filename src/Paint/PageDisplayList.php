@@ -6,7 +6,7 @@ namespace Pagyra\Paint;
 
 final readonly class PageDisplayList implements \JsonSerializable
 {
-    /** @param list<BoxPaintCommand|TextPaintCommand> $commands */
+    /** @param list<object> $commands */
     public function __construct(
         public int $pageIndex,
         public float $width,
