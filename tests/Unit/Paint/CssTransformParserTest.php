@@ -40,6 +40,19 @@ final class CssTransformParserTest extends TestCase
         self::assertEqualsWithDelta(0.0, $matrix->d, 1e-9);
     }
 
+    public function testSvgRotateAroundCenterComposesTranslations(): void
+    {
+        $matrix = (new CssTransformParser())->parse('rotate(90 10 20)');
+
+        self::assertNotNull($matrix);
+        self::assertEqualsWithDelta(0.0, $matrix->a, 1e-9);
+        self::assertEqualsWithDelta(1.0, $matrix->b, 1e-9);
+        self::assertEqualsWithDelta(-1.0, $matrix->c, 1e-9);
+        self::assertEqualsWithDelta(0.0, $matrix->d, 1e-9);
+        self::assertEqualsWithDelta(30.0, $matrix->e, 1e-9);
+        self::assertEqualsWithDelta(10.0, $matrix->f, 1e-9);
+    }
+
     public function testTransformOriginSupportsKeywordsPercentagesAndLengths(): void
     {
         $parser = new CssTransformParser();
