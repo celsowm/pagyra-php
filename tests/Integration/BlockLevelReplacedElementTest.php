@@ -104,8 +104,15 @@ final class BlockLevelReplacedElementTest extends TestCase
 
         $line = $prepared->layoutRoot->children[0]->lineBoxes[0];
         $wrapper = $line->atomicBoxes[0];
-        self::assertCount(1, $wrapper->contentLines);
-        self::assertSame($wrapper->contentLines[0]->y, $line->y);
+        self::assertSame([], $wrapper->contentLines, 'a block child must not be faked as a line box');
+        self::assertCount(1, $wrapper->contentBlocks);
+        $image = $wrapper->contentBlocks[0];
+        self::assertSame('img', $image->source->node->tagName);
+        self::assertEqualsWithDelta(
+            $wrapper->y + $wrapper->margin['top'] + $wrapper->border['top'] + $wrapper->padding['top'],
+            $image->box->content->y,
+            0.0001,
+        );
     }
 
     public function testTextAlignCenterDoesNotCentreABlockLevelImage(): void
