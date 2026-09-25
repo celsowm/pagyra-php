@@ -122,6 +122,22 @@ final class FloatLayoutTest extends TestCase
         self::assertGreaterThan(0.0, $float->box->content->width);
     }
 
+    public function testFloatWithBlockChildUsesRecursiveIntrinsicWidth(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<div style="margin:0;width:400px;font-size:16px">'
+                . '<div style="float:left"><div>curto</div></div>'
+                . '</div>',
+            'viewportWidth' => 400,
+            'viewportHeight' => 200,
+        ]);
+
+        $float = $prepared->layoutRoot->children[0]->children[0];
+        self::assertGreaterThan(0.0, $float->box->content->width);
+        self::assertLessThan(200.0, $float->box->content->width);
+    }
+
     public function testFloatWithExplicitWidthKeepsThatWidthInsteadOfShrinkToFit(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
