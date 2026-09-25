@@ -46,8 +46,8 @@ Status levels:
 | WebP | Partial | Metadata/intrinsic sizing is implemented; PDF paint/decoding is not. |
 | SVG | Partial P3 | Inline/block inline-SVG now paints vector `path`, `rect`, `circle`, `ellipse`, `line`, `polyline` and `polygon` shapes directly into PDF, with `viewBox`, `preserveAspectRatio`, nested 2D `transform`, fill/stroke, stroke width, fill-rule and basic opacity. `defs` paint servers/gradients, `use`, SVG text/image, clipPath/mask/filter and richer SVG CSS remain open. |
 | TrueType sfnt | P3 | Unicode cmap, metrics, classic kern, embedding, sparse subsetting and ToUnicode are implemented. |
-| WOFF / WOFF2 | Open | The JS reference decodes these back to sfnt; PHP source selection currently skips them. |
-| GPOS | Open | Classic `kern` works. The JS reference's PairPos format-1 subset is not yet ported. |
+| WOFF / WOFF2 | Partial P3 | WOFF1 is decoded losslessly back to sfnt in pure PHP before metrics/subsetting/FontFile2 embedding, including zlib-compressed tables and `@font-face format("woff")` sources. WOFF2 remains open because its Brotli + transformed-table decoding is a separate format and the project/CI has no Brotli dependency. |
+| GPOS | P2/P3 | `kern` feature PairPos format 1 (explicit pairs) and format 2 (class pairs) are parsed, including Extension Positioning wrappers. GPOS kerning supersedes the legacy `kern` table to avoid double application. Broader OpenType shaping/substitution remains out of scope for this kerning slice. |
 | CFF / variable fonts | Open / beyond current parity | Do not treat these as higher priority than JS-parity gaps; the JS reference is also incomplete here. |
 | Font fallback chain | Partial | Family stack/Base14 fallback works; per-codepoint fallback-run segmentation remains open. |
 | Remote HTTP resources | Intentional | Disabled by default. Any future support must be explicit and SSRF-safe rather than silently fetching arbitrary URLs. |
@@ -56,7 +56,7 @@ Status levels:
 
 4. Give normal non-atomic inline opacity its own fragment/group identity instead of the per-run fallback.
 5. Extend SVG vector paint to `defs`/gradients, `use`, text/image and clipPath/mask; add CSS 3D only if reference/corpus requires it.
-6. Port WOFF/WOFF2 decoding and the JS GPOS PairPos format-1 subset.
+6. Add WOFF2 only with an explicit Brotli/WOFF2 strategy; continue richer per-codepoint glyph fallback first.
 7. Port the independent paged header/footer subsystem.
 8. Finish WebP, Adam7 and the remaining border/effect styles.
 9. Work through the long CSS tail only after the structural layout/paint gaps above.
