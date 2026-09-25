@@ -31,7 +31,7 @@ Status levels:
 | Absolute / fixed / relative positioning | Partial | Offsets and containing-block placement exist. As in the current JS reference simplification, absolute/fixed boxes are laid out in flow before being repositioned. |
 | Flexbox | P2+ | Direction, wrapping, grow/shrink/basis, order, gaps and main/cross-axis alignment are implemented. |
 | Grid | P2+ | px/%/fr/auto/minmax/repeat tracks, auto-fill/fit, placement/spans, implicit tracks, alignment and `grid-template-areas` are implemented. Named grid lines remain open. |
-| Tables | Partial | Real grid, row groups, captions, colspan/rowspan, vertical-align and collapsed borders exist. Columns use recursive min/max-content sizing and consume CSS/legacy `<col>`/`<colgroup>` width hints including `span`. Complete repeated header/footer fragmentation semantics remain open. |
+| Tables | P2/P3 | Real grid, row groups, captions, colspan/rowspan, vertical-align and collapsed borders exist. Columns use recursive min/max-content sizing and consume CSS/legacy `<col>`/`<colgroup>` width hints including `span`. `table-header-group` / `table-footer-group` rows repeat across page fragments and reserve real page space; tables with multi-row `rowspan` fall back to the non-repeating fragment path until spanning-row packing is supported. |
 | Recursive intrinsic sizing | Partial | A reusable resolver now exposes min/max-content bounds; tables and float shrink-to-fit consume it. Reusing it across inline-block/flex/grid intrinsic paths is the next slice. |
 | Pagination | P2/P3 | Forced breaks, parity pages, break-inside, widows/orphans and recursive physical fragmentation are implemented. |
 | Header/footer page model | Open | The independent measured first/even/odd header/footer subsystem from `pagyra-js` is not ported yet. |
@@ -55,7 +55,6 @@ Status levels:
 ## Next implementation order
 
 1. Reuse recursive intrinsic sizing in flex and grid paths (inline-block, table and float paths already consume it).
-2. Complete fragmented/repeated table header/footer semantics.
 4. Port stacking contexts / z-index from `pagyra-js`.
 5. Add 2D transforms and reuse them for SVG paint.
 6. Port WOFF/WOFF2 decoding and the JS GPOS PairPos format-1 subset.
