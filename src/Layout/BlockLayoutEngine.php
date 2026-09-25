@@ -2205,10 +2205,9 @@ final class BlockLayoutEngine
     }
 
     /**
-     * Shrink-to-fit width for a float with `width:auto`: the widest measured line of its own
-     * inline content, capped at the available space. Block children inside a float are not
-     * measured this way (they always fill $available, same as normal-flow auto width) since
-     * no float in the motivating corpus has block children.
+     * Shrink-to-fit width for an auto-width float. Uses recursive min/max intrinsic sizes so
+     * block descendants and replaced content participate instead of forcing the float to fill all
+     * available space.
      */
     /**
      * The element's own `width`, resolved against the containing block, or null when it is `auto`
@@ -2227,11 +2226,13 @@ final class BlockLayoutEngine
 
     private function shrinkToFitWidth(StyledNode $styled, float $available, float $fontSize): float
     {
-        if (!$this->hasInlineContent($styled)) return $available;
-        $probe = $this->inlineTextFormatter->layout($styled, 0.0, 0.0, $available, $fontSize);
-        $natural = 0.0;
-        foreach ($probe->lines as $line) $natural = max($natural, $line->width);
-        return min($natural, $available);
+        // CSS 2.1 shrink-to-fit: min(max(preferred-min-width, available), preferred-width).
+        // The recursive resolver sees block descendants and replaced content too, so floats no
+        // longer fall back to the entire containing width merely because their direct children
+        // are block-level.
+        $intrinsic = $this->intrinsicSizeResolver->measure($styled, $available, $fontSize);
+
+        return min(max($intrinsic->minContent, $available), $intrinsic->maxContent);
     }
 
     /**
