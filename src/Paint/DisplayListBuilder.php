@@ -32,12 +32,14 @@ final class DisplayListBuilder
     private const INLINE_BACKGROUND_DESCENT = 0.22;
 
     private readonly ImageMetadataReader $imageMetadata;
+    private readonly StackingOrderResolver $stackingOrder;
 
     public function __construct(
         private readonly ?ImageSourceBytesResolver $imageBytes = null,
         private readonly ?TextMetrics $textMetrics = null,
     ) {
         $this->imageMetadata = new ImageMetadataReader();
+        $this->stackingOrder = new StackingOrderResolver();
     }
 
     /** @param array<string,mixed> $margins */
@@ -66,7 +68,9 @@ final class DisplayListBuilder
         $pageIndex = $entry->fragment->pageIndex;
         $clip = $this->appendTopLevelBox($commands, $entry, $pagination, $margins);
         $this->appendLines($commands, $entry->fragment->lines, $margins);
-        foreach ($entry->fragment->blocks as $block) $this->appendBlock($commands, $block, $margins);
+        foreach ($this->stackingOrder->order($entry->fragment->blocks) as $block) {
+            $this->appendBlock($commands, $block, $margins);
+        }
         if ($clip) $commands[] = new ClipPaintCommand($pageIndex);
     }
 
@@ -216,7 +220,9 @@ final class DisplayListBuilder
         }
         $this->appendListMarker($commands, $block, $margins);
         $this->appendLines($commands, $block->lines, $margins);
-        foreach ($block->children as $child) $this->appendBlock($commands, $child, $margins);
+        foreach ($this->stackingOrder->order($block->children) as $child) {
+            $this->appendBlock($commands, $child, $margins);
+        }
         if ($clip ?? false) $commands[] = new ClipPaintCommand($block->pageIndex);
     }
 
