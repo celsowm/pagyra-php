@@ -33,6 +33,7 @@ final class DisplayListBuilder
 
     private readonly ImageMetadataReader $imageMetadata;
     private readonly StackingOrderResolver $stackingOrder;
+    private readonly CssTransformParser $transformParser;
 
     public function __construct(
         private readonly ?ImageSourceBytesResolver $imageBytes = null,
@@ -40,6 +41,7 @@ final class DisplayListBuilder
     ) {
         $this->imageMetadata = new ImageMetadataReader();
         $this->stackingOrder = new StackingOrderResolver();
+        $this->transformParser = new CssTransformParser();
     }
 
     /** @param array<string,mixed> $margins */
@@ -74,27 +76,28 @@ final class DisplayListBuilder
         array $margins,
     ): void {
         foreach ($this->stackingOrder->plan($entries) as $step) {
-            $openedClips = 0;
+            $openedScopes = [];
             foreach ($step->ancestors as $ancestor) {
-                $opened = $ancestor instanceof PhysicalPageEntry
+                $transform = $ancestor instanceof PhysicalPageEntry
+                    ? $this->openTopLevelEntryTransform($commands, $ancestor, $pagination, $margins)
+                    : $this->openBlockFragmentTransform($commands, $ancestor, $margins);
+                if ($transform) $openedScopes[] = 'transform';
+
+                $clip = $ancestor instanceof PhysicalPageEntry
                     ? $this->openTopLevelEntryClip($commands, $ancestor, $pagination, $margins)
                     : $this->openBlockFragmentClip($commands, $ancestor, $margins);
-                if ($opened) $openedClips++;
+                if ($clip) $openedScopes[] = 'clip';
             }
 
             if ($step->subject instanceof PhysicalPageEntry) {
                 $this->appendEntrySelf($commands, $step->subject, $pagination, $margins);
+                $pageIndex = $step->subject->fragment->pageIndex;
             } else {
                 $this->appendBlockSelf($commands, $step->subject, $margins);
+                $pageIndex = $step->subject->pageIndex;
             }
 
-            for ($i = 0; $i < $openedClips; $i++) {
-                $commands[] = new ClipPaintCommand(
-                    $step->subject instanceof PhysicalPageEntry
-                        ? $step->subject->fragment->pageIndex
-                        : $step->subject->pageIndex,
-                );
-            }
+            $this->closePaintScopes($commands, $openedScopes, $pageIndex);
         }
     }
 
@@ -105,6 +108,7 @@ final class DisplayListBuilder
         PaginationResult $pagination,
         array $margins,
     ): void {
+        $selfTransform = $this->openTopLevelEntryTransform($commands, $entry, $pagination, $margins);
         $geometry = $this->topLevelPaintGeometry($entry, $pagination, $margins);
         if ($geometry !== null) {
             [$x, $y, $width, $height, $drawTop, $drawBottom] = $geometry;
@@ -137,6 +141,9 @@ final class DisplayListBuilder
         $this->appendLines($commands, $entry->fragment->lines, $margins);
         if ($selfClip) {
             $commands[] = new ClipPaintCommand($entry->fragment->pageIndex);
+        }
+        if ($selfTransform) {
+            $commands[] = new TransformPaintCommand($entry->fragment->pageIndex);
         }
     }
 
@@ -180,6 +187,28 @@ final class DisplayListBuilder
 
         if ($height <= self::EPSILON) return null;
         return [$x, $y, $width, $height, $drawTop, $drawBottom];
+    }
+
+    /** @param list<object> $commands */
+    private function openTopLevelEntryTransform(
+        array &$commands,
+        PhysicalPageEntry $entry,
+        PaginationResult $pagination,
+        array $margins,
+    ): bool {
+        $geometry = $this->topLevelPaintGeometry($entry, $pagination, $margins);
+        if ($geometry === null) return false;
+        [$x, $y, $width, $height] = $geometry;
+
+        return $this->openTransform(
+            $commands,
+            $entry->placement->node,
+            $entry->fragment->pageIndex,
+            $x,
+            $y,
+            $width,
+            $height,
+        );
     }
 
     /** @param list<object> $commands */
@@ -253,18 +282,18 @@ final class DisplayListBuilder
     private function appendStackedBlocks(array &$commands, array $blocks, array $margins): void
     {
         foreach ($this->stackingOrder->plan($blocks) as $step) {
-            $openedClips = 0;
+            $openedScopes = [];
             foreach ($step->ancestors as $ancestor) {
+                if ($this->openBlockFragmentTransform($commands, $ancestor, $margins)) {
+                    $openedScopes[] = 'transform';
+                }
                 if ($this->openBlockFragmentClip($commands, $ancestor, $margins)) {
-                    $openedClips++;
+                    $openedScopes[] = 'clip';
                 }
             }
 
             $this->appendBlockSelf($commands, $step->subject, $margins);
-
-            for ($i = 0; $i < $openedClips; $i++) {
-                $commands[] = new ClipPaintCommand($step->subject->pageIndex);
-            }
+            $this->closePaintScopes($commands, $openedScopes, $step->subject->pageIndex);
         }
     }
 
@@ -278,6 +307,7 @@ final class DisplayListBuilder
      */
     private function appendBlockSelf(array &$commands, BlockFragment $block, array $margins): void
     {
+        $selfTransform = $this->openBlockFragmentTransform($commands, $block, $margins);
         $border = $block->node->box->borderBox();
         if ($block->height > 0.0) {
             $x = $border->x + $margins['left'];
@@ -319,6 +349,26 @@ final class DisplayListBuilder
         if ($selfClip) {
             $commands[] = new ClipPaintCommand($block->pageIndex);
         }
+        if ($selfTransform) {
+            $commands[] = new TransformPaintCommand($block->pageIndex);
+        }
+    }
+
+    /** @param list<object> $commands */
+    private function openBlockFragmentTransform(array &$commands, BlockFragment $block, array $margins): bool
+    {
+        if ($block->height <= 0.0) return false;
+        $border = $block->node->box->borderBox();
+
+        return $this->openTransform(
+            $commands,
+            $block->node,
+            $block->pageIndex,
+            $border->x + $margins['left'],
+            $block->pageY + $margins['top'],
+            $border->width,
+            $block->height,
+        );
     }
 
     /** @param list<object> $commands */
@@ -340,6 +390,44 @@ final class DisplayListBuilder
             $wholeBox,
             $wholeBox,
         );
+    }
+
+    /** @param list<object> $commands */
+    private function openTransform(
+        array &$commands,
+        LayoutNode $node,
+        int $pageIndex,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+    ): bool {
+        $matrix = $this->transformParser->parse($node->source->style->get('transform'), $width, $height);
+        if (!$matrix instanceof TransformMatrix || $matrix->isIdentity()) return false;
+
+        [$originX, $originY] = $this->transformParser->origin(
+            $node->source->style->get('transform-origin'),
+            $width,
+            $height,
+        );
+        $commands[] = new TransformPaintCommand(
+            $pageIndex,
+            $matrix,
+            $x + $originX,
+            $y + $originY,
+        );
+
+        return true;
+    }
+
+    /** @param list<object> $commands @param list<'transform'|'clip'> $scopes */
+    private function closePaintScopes(array &$commands, array $scopes, int $pageIndex): void
+    {
+        foreach (array_reverse($scopes) as $scope) {
+            $commands[] = $scope === 'transform'
+                ? new TransformPaintCommand($pageIndex)
+                : new ClipPaintCommand($pageIndex);
+        }
     }
 
     /**
