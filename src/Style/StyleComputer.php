@@ -194,7 +194,7 @@ final class StyleComputer
             }
         }
 
-        if ($node->isElement('table') || $node->isElement('td') || $node->isElement('th') || $node->isElement('col')) {
+        if ($node->isElement('table') || $node->isElement('td') || $node->isElement('th') || $node->isElement('col') || $node->isElement('colgroup')) {
             foreach (['width', 'height'] as $property) {
                 $value = $this->dimensionAttribute($node, $property);
                 if ($value !== null) {
