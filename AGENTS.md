@@ -198,8 +198,8 @@ The main structural gaps currently are:
 - advanced SVG paint (`defs`/gradients, `use`, text/image, clipPath/mask/filter) and WebP PDF paint; basic SVG vector shapes are implemented;
 - Adam7 PNG;
 - paged first/even/odd headers and footers;
-- WOFF/WOFF2 decoding;
-- GPOS PairPos parity with the JS reference and richer glyph fallback chains;
+- WOFF2 decoding (WOFF1 is implemented without an external dependency);
+- richer glyph fallback chains (GPOS PairPos format 1/2 kerning is implemented);
 - `::marker` and the remaining CSS long tail;
 - isolated-group opacity for normal inline spans;
 - the remaining border styles and inset box shadows.
