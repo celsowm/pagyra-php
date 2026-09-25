@@ -245,8 +245,12 @@ final class DisplayListBuilder
             $this->appendOutline($commands, $block->node, $block->node->source->style, $block->pageIndex, $x, $y, $border->width, $block->height);
         }
 
+        $selfClip = $this->openBlockFragmentClip($commands, $block, $margins);
         $this->appendListMarker($commands, $block, $margins);
         $this->appendLines($commands, $block->lines, $margins);
+        if ($selfClip) {
+            $commands[] = new ClipPaintCommand($block->pageIndex);
+        }
     }
 
     /** @param list<object> $commands */
