@@ -76,7 +76,7 @@ final class CssTransformParser
             'scale' => $this->scale($tokens),
             'scalex' => new TransformMatrix(a: $this->scaleValue($tokens[0] ?? '1')),
             'scaley' => new TransformMatrix(d: $this->scaleValue($tokens[0] ?? '1')),
-            'rotate' => $this->rotate($tokens[0] ?? '0'),
+            'rotate' => $this->rotateValues($tokens),
             'skewx' => new TransformMatrix(c: tan($this->angleRadians($tokens[0] ?? '0'))),
             'skewy' => new TransformMatrix(b: tan($this->angleRadians($tokens[0] ?? '0'))),
             'skew' => $this->skew($tokens),
@@ -90,6 +90,20 @@ final class CssTransformParser
         $sx = $this->scaleValue($tokens[0] ?? '1');
         $sy = $this->scaleValue($tokens[1] ?? ($tokens[0] ?? '1'));
         return new TransformMatrix(a: $sx, d: $sy);
+    }
+
+    /** @param list<string> $tokens */
+    private function rotateValues(array $tokens): TransformMatrix
+    {
+        $rotation = $this->rotate($tokens[0] ?? '0');
+        if (count($tokens) < 3) return $rotation;
+
+        $cx = $this->number($tokens[1]);
+        $cy = $this->number($tokens[2]);
+
+        return (new TransformMatrix(e: $cx, f: $cy))
+            ->multiply($rotation)
+            ->multiply(new TransformMatrix(e: -$cx, f: -$cy));
     }
 
     private function rotate(string $value): TransformMatrix
