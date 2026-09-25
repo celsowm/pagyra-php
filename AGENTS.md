@@ -193,7 +193,7 @@ The main structural gaps currently are:
 - reusing recursive min/max intrinsic sizing across the remaining intrinsic paths (tables and floats already use it);
 - repeated table header/footer groups with multi-row `rowspan` packing;
 - named grid lines;
-- full stacking-context flattening across non-context ancestors and opacity-isolated groups (sibling numeric z-index phases are implemented);
+- true isolated PDF transparency-group compositing for opacity contexts (stacking-context ordering/flattening is implemented);
 - general CSS transforms;
 - full SVG vector paint and WebP PDF paint;
 - Adam7 PNG;
