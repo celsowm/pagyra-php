@@ -179,7 +179,10 @@ final class StackingOrderResolver
             $ownOpacity = max(0.0, min(1.0, (float) $m[1] / (isset($m[2]) && $m[2] !== '' ? 100.0 : 1.0)));
         }
 
-        return [$numericZ !== null || $ownOpacity < 1.0, $numericZ];
+        $transform = strtolower(trim($style->get('transform', 'none') ?? 'none'));
+        $hasTransform = $transform !== '' && $transform !== 'none';
+
+        return [$numericZ !== null || $ownOpacity < 1.0 || $hasTransform, $numericZ];
     }
 
 }
