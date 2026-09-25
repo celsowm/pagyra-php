@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Fonts;
 
+use Pagyra\Fonts\Ttf\TtfFontMetrics;
 use Pagyra\Style\ComputedStyle;
 
 final class GlyphTextMetrics implements TextMetrics
@@ -16,20 +17,13 @@ final class GlyphTextMetrics implements TextMetrics
 
     public function measure(string $text, ComputedStyle $style, float $fontSize): TextMeasurement
     {
-        $metrics = $this->registry->resolve(
-            $style->get('font-family'),
-            $this->fontWeight($style->get('font-weight')),
-            $style->get('font-style', 'normal') ?? 'normal',
-        );
-        if ($metrics === null) return $this->fallback->measure($text, $style, $fontSize);
-
         $lines = preg_split('/\r?\n/u', $text) ?: [''];
         $maxLine = 0.0;
         $maxWord = 0.0;
         foreach ($lines as $line) {
-            $maxLine = max($maxLine, $this->measureLine($line, $metrics, $style, $fontSize));
+            $maxLine = max($maxLine, $this->measureLine($line, $style, $fontSize));
             foreach (preg_split('/\s+/u', $line) ?: [] as $word) {
-                if ($word !== '') $maxWord = max($maxWord, $this->measureLine($word, $metrics, $style, $fontSize));
+                if ($word !== '') $maxWord = max($maxWord, $this->measureLine($word, $style, $fontSize));
             }
         }
         $lineHeight = $this->lineHeight($style, $fontSize);
@@ -41,23 +35,56 @@ final class GlyphTextMetrics implements TextMetrics
         return $this->fallback->lineHeight($style, $fontSize);
     }
 
-    private function measureLine(string $text, \Pagyra\Fonts\Ttf\TtfFontMetrics $metrics, ComputedStyle $style, float $fontSize): float
+    private function measureLine(string $text, ComputedStyle $style, float $fontSize): float
     {
+        if ($text === '') return 0.0;
+
         $chars = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        $units = 0;
-        $previous = null;
+        $weight = $this->fontWeight($style->get('font-weight'));
+        $fontStyle = $style->get('font-style', 'normal') ?? 'normal';
+        $family = $style->get('font-family');
+        $width = 0.0;
+        $fallbackBuffer = '';
+        $previousFace = null;
+        $previousGlyph = null;
+
+        $flushFallback = function () use (&$fallbackBuffer, &$width, $style, $fontSize): void {
+            if ($fallbackBuffer === '') return;
+            $properties = $style->properties;
+            unset($properties['letter-spacing'], $properties['word-spacing']);
+            $plainStyle = new ComputedStyle($properties);
+            $width += $this->fallback->measure($fallbackBuffer, $plainStyle, $fontSize)->inlineSize;
+            $fallbackBuffer = '';
+        };
+
         foreach ($chars as $char) {
-            $gid = $metrics->glyphId($this->codePoint($char));
-            if ($previous !== null) $units += $metrics->kerning($previous, $gid);
-            $units += $metrics->advanceWidth($gid);
-            $previous = $gid;
+            $codePoint = $this->codePoint($char);
+            $face = $this->registry->resolveFaceForCodePoint($family, $codePoint, $weight, $fontStyle);
+
+            if ($face === null) {
+                $fallbackBuffer .= $char;
+                $previousFace = null;
+                $previousGlyph = null;
+                continue;
+            }
+
+            $flushFallback();
+            $glyph = $face->metrics->glyphId($codePoint);
+            if ($previousFace === $face && $previousGlyph !== null) {
+                $width += ($face->metrics->kerning($previousGlyph, $glyph) / $face->metrics->unitsPerEm) * $fontSize;
+            }
+            $width += ($face->metrics->advanceWidth($glyph) / $face->metrics->unitsPerEm) * $fontSize;
+            $previousFace = $face;
+            $previousGlyph = $glyph;
         }
+        $flushFallback();
 
         $letterSpacing = $this->pxSpacing($style->get('letter-spacing'));
         $wordSpacing = $this->pxSpacing($style->get('word-spacing'));
         $spaces = substr_count($text, ' ');
-        $spacing = max(count($chars) - 1, 0) * $letterSpacing + $spaces * $wordSpacing;
-        return ($units / $metrics->unitsPerEm) * $fontSize + $spacing;
+        $width += max(count($chars) - 1, 0) * $letterSpacing + $spaces * $wordSpacing;
+
+        return $width;
     }
 
     private function codePoint(string $char): int
