@@ -18,19 +18,25 @@ final readonly class FloatRun
         public bool $active = false,
         public float $bottom = 0.0,
         public float $startY = 0.0,
+        public ?float $leftBottom = null,
+        public ?float $rightBottom = null,
     ) {
     }
 
     public function withLeft(float $newLeftX, float $childBottom, float $rowY): self
     {
         $startY = $this->active ? $this->startY : $rowY;
-        return new self($newLeftX, $this->rightX, true, max($this->active ? $this->bottom : 0.0, $childBottom), $startY);
+        $leftBottom = max($this->leftBottom ?? 0.0, $childBottom);
+        $bottom = max($leftBottom, $this->rightBottom ?? 0.0);
+        return new self($newLeftX, $this->rightX, true, $bottom, $startY, $leftBottom, $this->rightBottom);
     }
 
     public function withRight(float $newRightX, float $childBottom, float $rowY): self
     {
         $startY = $this->active ? $this->startY : $rowY;
-        return new self($this->leftX, $newRightX, true, max($this->active ? $this->bottom : 0.0, $childBottom), $startY);
+        $rightBottom = max($this->rightBottom ?? 0.0, $childBottom);
+        $bottom = max($this->leftBottom ?? 0.0, $rightBottom);
+        return new self($this->leftX, $newRightX, true, $bottom, $startY, $this->leftBottom, $rightBottom);
     }
 
     public function reset(float $leftX, float $rightX): self
