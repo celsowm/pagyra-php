@@ -32,7 +32,7 @@ Status levels:
 | Flexbox | P2+ | Direction, wrapping, grow/shrink/basis, order, gaps and main/cross-axis alignment are implemented. |
 | Grid | P2+ | px/%/fr/auto/minmax/repeat tracks, auto-fill/fit, placement/spans, implicit tracks, alignment and `grid-template-areas` are implemented. Named grid lines remain open. |
 | Tables | Partial | Real grid, row groups, captions, colspan/rowspan, vertical-align and collapsed borders exist. Table columns now use recursive min/max-content sizing. `<col>` hints and complete header/footer fragmentation semantics remain open. |
-| Recursive intrinsic sizing | Partial | A reusable resolver now exposes min/max-content bounds and tables consume it. Reusing it across float/inline-block/flex/grid shrink-to-fit paths is the next slice. |
+| Recursive intrinsic sizing | Partial | A reusable resolver now exposes min/max-content bounds; tables and float shrink-to-fit consume it. Reusing it across inline-block/flex/grid intrinsic paths is the next slice. |
 | Pagination | P2/P3 | Forced breaks, parity pages, break-inside, widows/orphans and recursive physical fragmentation are implemented. |
 | Header/footer page model | Open | The independent measured first/even/odd header/footer subsystem from `pagyra-js` is not ported yet. |
 | Background color/images/gradients | P3 | URL backgrounds, position, size, repeat, linear/radial gradients and color are painted. Attachment/origin/clip need broader semantics. |
@@ -54,7 +54,7 @@ Status levels:
 
 ## Next implementation order
 
-1. Reuse recursive intrinsic sizing in float, inline-block, flex and grid paths.
+1. Reuse recursive intrinsic sizing in inline-block, flex and grid paths.
 2. Replace the remaining mixed inline/block special cases with explicit formatting-context dispatch.
 3. Complete BFC/float interactions and table `<col>` + fragmented header/footer semantics.
 4. Port stacking contexts / z-index from `pagyra-js`.
