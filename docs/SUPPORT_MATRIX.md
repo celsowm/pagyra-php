@@ -25,8 +25,8 @@ Status levels:
 | `::first-letter` / `::first-line` | Partial | Implemented. First-letter does not yet descend through the first inline descendant or model the full typographic-letter rules; first-line style changes that affect metrics do not trigger reflow. |
 | `::marker` | Open | List markers exist, but the pseudo-element styling surface is not implemented. |
 | Block flow / box model | P2+ | Width/height, box sizing, min/max constraints, auto margins and sibling + parent/child margin collapsing are implemented for the current model. |
-| Inline formatting | P2+ | Styled runs, whitespace modes, wrapping, alignment, justification, vertical-align, atomic inline boxes, inline-block internals and ellipsis for text-only nowrap lines are implemented. |
-| Mixed block/inline inside atomic boxes | Partial | Block-level non-replaced children inside the inline formatter still need a real nested block formatting context. |
+| Inline formatting | P2+ | Styled runs, whitespace modes, wrapping, alignment, justification, vertical-align, atomic inline boxes, real inline padding/border geometry, inline-block internals and ellipsis around text plus fitting atomic boxes are implemented. |
+| Mixed block/inline inside atomic boxes | P2/P3 | Inline-block atomic boxes delegate block-containing interiors to a real nested block formatting context; mixed inline/block order, nested paint and last-line baseline are preserved. |
 | Floats / clear | Partial | Left/right floats, inline/replaced floats, text exclusion wrapping and clear behavior exist; complete BFC interactions and complex block-content floats remain. |
 | Absolute / fixed / relative positioning | Partial | Offsets and containing-block placement exist. As in the current JS reference simplification, absolute/fixed boxes are laid out in flow before being repositioned. |
 | Flexbox | P2+ | Direction, wrapping, grow/shrink/basis, order, gaps and main/cross-axis alignment are implemented. |
@@ -38,7 +38,7 @@ Status levels:
 | Background color/images/gradients | P3 | URL backgrounds, position, size, repeat, linear/radial gradients and color are painted. Attachment/origin/clip need broader semantics. |
 | Borders / radius | Partial | Solid/dashed/dotted and rounded geometry are painted. `double`, `groove`, `ridge`, `inset`, `outset` and complete asymmetric rounded combinations remain. |
 | Text decoration | P3 | Underline, line-through, overline, solid/double/dashed/dotted/wavy and decoration color are implemented. |
-| Overflow clipping | P3 | `hidden`/`clip` paint clipping and text-overflow ellipsis for the current text-only subset exist. |
+| Overflow clipping | P3 | `hidden`/`clip` paint clipping and text-overflow ellipsis exist; ellipsis preserves atomic inline boxes that fully fit before the truncation point. |
 | Opacity | Partial | Element/ancestor opacity reaches paint through per-command alpha. True isolated-group compositing for overlapping child paint is still open. |
 | Stacking contexts / z-index | Open | The JS reference has a dedicated stacking-context pipeline; the PHP display list still lacks equivalent ordering. |
 | CSS transforms | Open | No general matrix/transform paint pipeline yet. |
@@ -54,9 +54,8 @@ Status levels:
 
 ## Next implementation order
 
-1. Reuse recursive intrinsic sizing in inline-block, flex and grid paths.
-2. Replace the remaining mixed inline/block special cases with explicit formatting-context dispatch.
-3. Complete BFC/float interactions and table `<col>` + fragmented header/footer semantics.
+1. Reuse recursive intrinsic sizing in flex and grid paths (inline-block, table and float paths already consume it).
+2. Complete/formalize BFC/float interactions and table `<col>` + fragmented header/footer semantics.
 4. Port stacking contexts / z-index from `pagyra-js`.
 5. Add 2D transforms and reuse them for SVG paint.
 6. Port WOFF/WOFF2 decoding and the JS GPOS PairPos format-1 subset.
