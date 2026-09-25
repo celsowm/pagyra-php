@@ -21,12 +21,17 @@ final class PaginationEngine
      */
     private array $subtreeExtents = [];
 
+    /** @var array<int,TablePaginationPlan> keyed by spl_object_id(LayoutNode) */
+    private array $tablePlans = [];
+
     public function paginate(LayoutNode $root, float|PageFlow $contentHeightOrFlow): PaginationResult
     {
         $flow = $contentHeightOrFlow instanceof PageFlow
             ? $contentHeightOrFlow
             : new PageFlow($contentHeightOrFlow);
-        $nodeOffsets = (new RecursivePaginationOffsets())->resolve($root, $flow);
+        $baseOffsets = (new RecursivePaginationOffsets())->resolve($root, $flow);
+        $this->tablePlans = [];
+        $nodeOffsets = $this->applyTablePaginationOffsets($root, $flow, $baseOffsets);
         $this->subtreeExtents = [];
         $this->measureSubtree($root, $nodeOffsets);
         $placements = [];
@@ -36,20 +41,27 @@ final class PaginationEngine
             $offset = $this->offsetFor($node, $nodeOffsets);
             $start = $node->box->marginBox()->y + $offset;
             $end = $this->absoluteSubtreeBottom($node, $nodeOffsets);
-            $pageIndex = $flow->pageIndexAt($start);
-            $endPageIndex = $flow->pageIndexAt(max($start, $end - self::EPSILON));
             $fragments = $this->fragmentsForNode($node, $start, $end, $offset, $flow, $nodeOffsets);
+            $plan = $this->tablePlans[spl_object_id($node)] ?? null;
+            $pageIndex = $plan?->firstPage ?? ($fragments[0]->pageIndex ?? $flow->pageIndexAt($start));
+            $endPageIndex = $plan?->lastPage ?? (
+                $fragments !== []
+                    ? $fragments[array_key_last($fragments)]->pageIndex
+                    : $flow->pageIndexAt(max($start, $end - self::EPSILON))
+            );
+            $placementStart = $plan?->continuousStartY ?? $start;
+            $placementEnd = $plan?->flowEndY ?? $end;
 
             $placements[] = new PagePlacement(
                 node: $node,
                 pageIndex: $pageIndex,
                 endPageIndex: $endPageIndex,
                 offsetY: $offset,
-                startY: $start,
-                endY: $end,
+                startY: $placementStart,
+                endY: $placementEnd,
                 fragments: $fragments,
             );
-            $maxEnd = max($maxEnd, $end);
+            $maxEnd = max($maxEnd, $placementEnd);
         }
 
         $pageCount = max(1, $flow->pageIndexAt(max(0.0, $maxEnd - self::EPSILON)) + 1);
@@ -116,6 +128,11 @@ final class PaginationEngine
         PageFlow $flow,
         array $nodeOffsets,
     ): array {
+        $tablePlan = $this->tablePlans[spl_object_id($node)] ?? null;
+        if ($tablePlan instanceof TablePaginationPlan) {
+            return $this->tablePageFragments($tablePlan, $flow);
+        }
+
         $linesByPage = [];
         foreach ($node->lineBoxes as $lineIndex => $line) {
             $lineFragment = $this->lineFragmentForPage($lineIndex, $line->y, $line->baseline, $line, $offset, $flow);
@@ -192,6 +209,11 @@ final class PaginationEngine
     /** @param array<int,float> $nodeOffsets */
     private function blockFragmentForPage(LayoutNode $node, int $pageIndex, PageFlow $flow, array $nodeOffsets): ?BlockFragment
     {
+        $tablePlan = $this->tablePlans[spl_object_id($node)] ?? null;
+        if ($tablePlan instanceof TablePaginationPlan) {
+            return $this->tableBlockFragmentForPage($node, $tablePlan, $pageIndex, $flow);
+        }
+
         $offset = $this->offsetFor($node, $nodeOffsets);
         $border = $node->box->borderBox();
         $start = $border->y + $offset;
@@ -247,6 +269,195 @@ final class PaginationEngine
         );
     }
 
+    /**
+     * Repeated table header/footer groups consume real fragmentainer space. This post-pass adds
+     * that expansion to every later flow node, the same way forced page breaks add a global
+     * offset, so content following a multi-page table cannot overlap its repeated rows.
+     *
+     * @param array<int,float> $baseOffsets
+     * @return array<int,float>
+     */
+    private function applyTablePaginationOffsets(LayoutNode $root, PageFlow $flow, array $baseOffsets): array
+    {
+        $offsets = $baseOffsets;
+        $globalExpansion = 0.0;
+        $planner = new TablePaginationPlanner();
+
+        foreach ($root->children as $child) {
+            $this->visitTablePaginationOffsets($child, $flow, $baseOffsets, $offsets, $globalExpansion, $planner);
+        }
+
+        return $offsets;
+    }
+
+    /**
+     * @param array<int,float> $baseOffsets
+     * @param array<int,float> $offsets
+     */
+    private function visitTablePaginationOffsets(
+        LayoutNode $node,
+        PageFlow $flow,
+        array $baseOffsets,
+        array &$offsets,
+        float &$globalExpansion,
+        TablePaginationPlanner $planner,
+    ): void {
+        $id = spl_object_id($node);
+        $effectiveOffset = ($baseOffsets[$id] ?? 0.0) + $globalExpansion;
+        $offsets[$id] = $effectiveOffset;
+
+        $display = strtolower(trim($node->source->style->get('display', 'block') ?? 'block'));
+        if ($display === 'table') {
+            $plan = $planner->plan($node, $effectiveOffset, $flow);
+            if ($plan instanceof TablePaginationPlan) {
+                $this->tablePlans[$id] = $plan;
+                foreach ($node->children as $child) {
+                    $this->assignExpandedOffsets($child, $baseOffsets, $offsets, $globalExpansion);
+                }
+
+                $naturalEnd = $node->box->marginBox()->bottom() + $effectiveOffset;
+                $globalExpansion += max(0.0, $plan->flowEndY - $naturalEnd);
+                return;
+            }
+        }
+
+        foreach ($node->children as $child) {
+            $this->visitTablePaginationOffsets($child, $flow, $baseOffsets, $offsets, $globalExpansion, $planner);
+        }
+    }
+
+    /**
+     * Descendants of a planner-managed table are painted through its page-local row fragments;
+     * they still receive the expansion accumulated before the table, but the table's own repeated
+     * rows must not recursively add that same expansion again.
+     *
+     * @param array<int,float> $baseOffsets
+     * @param array<int,float> $offsets
+     */
+    private function assignExpandedOffsets(LayoutNode $node, array $baseOffsets, array &$offsets, float $globalExpansion): void
+    {
+        $id = spl_object_id($node);
+        $offsets[$id] = ($baseOffsets[$id] ?? 0.0) + $globalExpansion;
+        foreach ($node->children as $child) {
+            $this->assignExpandedOffsets($child, $baseOffsets, $offsets, $globalExpansion);
+        }
+    }
+
+    /** @return list<PageFragment> */
+    private function tablePageFragments(TablePaginationPlan $plan, PageFlow $flow): array
+    {
+        $fragments = [];
+        foreach ($plan->slices as $pageIndex => $slice) {
+            $blocks = [];
+            foreach ($slice['rows'] as $rowPlacement) {
+                $blocks[] = $this->placedWholeBlockFragment(
+                    $rowPlacement['node'],
+                    $pageIndex,
+                    $rowPlacement['pageY'],
+                    $flow,
+                );
+            }
+
+            $pageStart = $flow->contentStartForPage($pageIndex);
+            $fragments[] = new PageFragment(
+                pageIndex: $pageIndex,
+                pageY: $slice['pageY'],
+                height: $slice['height'],
+                continuousStartY: $pageStart + $slice['pageY'],
+                continuousEndY: $pageStart + $slice['pageY'] + $slice['height'],
+                lines: [],
+                blocks: $blocks,
+            );
+        }
+
+        return $fragments;
+    }
+
+    private function tableBlockFragmentForPage(
+        LayoutNode $table,
+        TablePaginationPlan $plan,
+        int $pageIndex,
+        PageFlow $flow,
+    ): ?BlockFragment {
+        $slice = $plan->sliceForPage($pageIndex);
+        if ($slice === null) return null;
+
+        $children = [];
+        foreach ($slice['rows'] as $rowPlacement) {
+            $children[] = $this->placedWholeBlockFragment(
+                $rowPlacement['node'],
+                $pageIndex,
+                $rowPlacement['pageY'],
+                $flow,
+            );
+        }
+
+        $pageStart = $flow->contentStartForPage($pageIndex);
+        return new BlockFragment(
+            node: $table,
+            pageIndex: $pageIndex,
+            pageY: $slice['pageY'],
+            height: $slice['height'],
+            continuousStartY: $pageStart + $slice['pageY'],
+            continuousEndY: $pageStart + $slice['pageY'] + $slice['height'],
+            lines: [],
+            children: $children,
+        );
+    }
+
+    /**
+     * Reuses one laid-out row/cell subtree as an atomic page-local fragment. The LayoutNode stays
+     * immutable; only fragment coordinates are translated, which is what lets the same thead row
+     * paint on several pages without cloning or mutating the layout tree.
+     */
+    private function placedWholeBlockFragment(
+        LayoutNode $node,
+        int $pageIndex,
+        float $pageY,
+        PageFlow $flow,
+    ): BlockFragment {
+        $border = $node->box->borderBox();
+        $deltaY = $pageY - $border->y;
+        $pageStart = $flow->contentStartForPage($pageIndex);
+
+        $lines = [];
+        foreach ($node->lineBoxes as $lineIndex => $line) {
+            $linePageY = $line->y + $deltaY;
+            $linePageBaseline = $line->baseline + $deltaY;
+            $lines[] = new LineFragment(
+                line: $line,
+                lineIndex: $lineIndex,
+                pageIndex: $pageIndex,
+                pageY: $linePageY,
+                pageBaseline: $linePageBaseline,
+                continuousY: $pageStart + $linePageY,
+                continuousBaseline: $pageStart + $linePageBaseline,
+            );
+        }
+
+        $children = [];
+        foreach ($node->children as $child) {
+            $childBorder = $child->box->borderBox();
+            $children[] = $this->placedWholeBlockFragment(
+                $child,
+                $pageIndex,
+                $childBorder->y + $deltaY,
+                $flow,
+            );
+        }
+
+        return new BlockFragment(
+            node: $node,
+            pageIndex: $pageIndex,
+            pageY: $pageY,
+            height: $border->height,
+            continuousStartY: $pageStart + $pageY,
+            continuousEndY: $pageStart + $pageY + $border->height,
+            lines: $lines,
+            children: $children,
+        );
+    }
+
     /** @param array<int,float> $nodeOffsets */
     private function offsetFor(LayoutNode $node, array $nodeOffsets): float
     {
@@ -268,6 +479,14 @@ final class PaginationEngine
      */
     private function measureSubtree(LayoutNode $node, array $nodeOffsets): array
     {
+        $tablePlan = $this->tablePlans[spl_object_id($node)] ?? null;
+        if ($tablePlan instanceof TablePaginationPlan) {
+            return $this->subtreeExtents[spl_object_id($node)] = [
+                $tablePlan->continuousStartY,
+                $tablePlan->flowEndY,
+            ];
+        }
+
         $offset = $this->offsetFor($node, $nodeOffsets);
         $box = $node->box->marginBox();
         $top = $box->y + $offset;
@@ -288,6 +507,11 @@ final class PaginationEngine
     /** @param array<int,float> $nodeOffsets */
     private function absoluteSubtreeBottom(LayoutNode $node, array $nodeOffsets): float
     {
+        $tablePlan = $this->tablePlans[spl_object_id($node)] ?? null;
+        if ($tablePlan instanceof TablePaginationPlan) {
+            return $tablePlan->flowEndY;
+        }
+
         $bottom = $node->box->marginBox()->bottom() + $this->offsetFor($node, $nodeOffsets);
         foreach ($node->children as $child) {
             $bottom = max($bottom, $this->absoluteSubtreeBottom($child, $nodeOffsets));
