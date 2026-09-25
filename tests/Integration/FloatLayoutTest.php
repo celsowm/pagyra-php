@@ -160,6 +160,42 @@ final class FloatLayoutTest extends TestCase
         self::assertEqualsWithDelta($first->box->content->x + $first->box->content->width, $second->box->content->x, 0.01);
     }
 
+    public function testSecondFloatMovesToNextRowWhenTheCurrentSlotIsTooNarrow(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<div style="margin:0;width:300px">'
+                . '<div style="float:left;width:180px;height:20px">um</div>'
+                . '<div style="float:left;width:180px;height:20px">dois</div>'
+                . '</div>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        [$first, $second] = $prepared->layoutRoot->children[0]->children;
+        self::assertSame(0.0, $first->box->content->y);
+        self::assertGreaterThanOrEqual(20.0, $second->box->content->y);
+        self::assertSame(0.0, $second->box->content->x);
+    }
+
+    public function testPercentageFloatWidthResolvesAgainstContainingBlockNotRemainingSlot(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<div style="margin:0;width:300px">'
+                . '<div style="float:left;width:60%;height:20px">um</div>'
+                . '<div style="float:left;width:60%;height:20px">dois</div>'
+                . '</div>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        [$first, $second] = $prepared->layoutRoot->children[0]->children;
+        self::assertEqualsWithDelta(180.0, $first->box->content->width, 0.01);
+        self::assertEqualsWithDelta(180.0, $second->box->content->width, 0.01);
+        self::assertGreaterThanOrEqual(20.0, $second->box->content->y);
+    }
+
     public function testFloatWithAutoWidthShrinksToItsInlineContentInsteadOfFillingTheContainer(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
