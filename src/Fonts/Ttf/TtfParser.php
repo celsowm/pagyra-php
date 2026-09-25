@@ -36,7 +36,9 @@ final class TtfParser
 
         $advanceWidths = $this->parseHmtx($hmtx, min($numberOfHMetrics, $numGlyphs), $numGlyphs);
         $mapping = $this->parseCmap($cmap);
-        $kerning = $this->parseKern();
+        $gpos = $this->parseGpos();
+        $hasGposKerning = $gpos['pairs'] !== [] || $gpos['classes'] !== [];
+        $kerning = $hasGposKerning ? $gpos['pairs'] : $this->parseKern();
 
         return new TtfFontMetrics(
             $unitsPerEm,
@@ -47,6 +49,7 @@ final class TtfParser
             $mapping,
             $kerning,
             $bbox,
+            $hasGposKerning ? $gpos['classes'] : [],
         );
     }
 
@@ -162,6 +165,239 @@ final class TtfParser
             }
         }
         return $map;
+    }
+
+    /**
+     * OpenType GPOS Pair Adjustment for the default kerning feature.
+     *
+     * Format 1 contributes explicit glyph pairs. Format 2 stays class-based so a font with
+     * thousands of glyphs does not explode into a dense pair map. If any usable GPOS kern lookup
+     * exists, it supersedes the legacy 'kern' table instead of double-applying the same design
+     * adjustment twice.
+     *
+     * @return array{pairs:array<int,array<int,int>>,classes:list<array{coverage:array<int,bool>,class1:array<int,int>,class2:array<int,int>,values:array<int,array<int,int>>}>}
+     */
+    private function parseGpos(): array
+    {
+        $empty = ['pairs' => [], 'classes' => []];
+        if (!isset($this->tables['GPOS'])) return $empty;
+
+        $table = $this->tables['GPOS'];
+        $base = $table['offset'];
+        $end = $base + $table['length'];
+        if ($table['length'] < 10) return $empty;
+
+        $featureList = $base + $this->reader->u16($base + 6);
+        $lookupList = $base + $this->reader->u16($base + 8);
+        if ($featureList < $base || $featureList + 2 > $end || $lookupList < $base || $lookupList + 2 > $end) {
+            return $empty;
+        }
+
+        $lookupIndexes = [];
+        $featureCount = $this->reader->u16($featureList);
+        for ($i = 0; $i < $featureCount; $i++) {
+            $record = $featureList + 2 + $i * 6;
+            if ($record + 6 > $end) break;
+            if ($this->reader->tag($record) !== 'kern') continue;
+            $feature = $featureList + $this->reader->u16($record + 4);
+            if ($feature + 4 > $end) continue;
+            $count = $this->reader->u16($feature + 2);
+            for ($j = 0; $j < $count; $j++) {
+                $p = $feature + 4 + $j * 2;
+                if ($p + 2 > $end) break;
+                $lookupIndexes[$this->reader->u16($p)] = true;
+            }
+        }
+        if ($lookupIndexes === []) return $empty;
+
+        $lookupCount = $this->reader->u16($lookupList);
+        $pairs = [];
+        $classes = [];
+
+        foreach (array_keys($lookupIndexes) as $lookupIndex) {
+            if ($lookupIndex < 0 || $lookupIndex >= $lookupCount) continue;
+            $offsetPos = $lookupList + 2 + $lookupIndex * 2;
+            if ($offsetPos + 2 > $end) continue;
+            $lookup = $lookupList + $this->reader->u16($offsetPos);
+            if ($lookup + 6 > $end) continue;
+
+            $lookupType = $this->reader->u16($lookup);
+            $subtableCount = $this->reader->u16($lookup + 4);
+            for ($s = 0; $s < $subtableCount; $s++) {
+                $subOffsetPos = $lookup + 6 + $s * 2;
+                if ($subOffsetPos + 2 > $end) break;
+                $subtable = $lookup + $this->reader->u16($subOffsetPos);
+                $type = $lookupType;
+
+                // Extension Positioning Lookup: unwrap a type-2 PairPos subtable.
+                if ($type === 9 && $subtable + 8 <= $end && $this->reader->u16($subtable) === 1) {
+                    $type = $this->reader->u16($subtable + 2);
+                    $subtable += $this->reader->u32($subtable + 4);
+                }
+                if ($type !== 2 || $subtable + 2 > $end) continue;
+
+                $parsed = $this->parsePairPos($subtable, $end);
+                foreach ($parsed['pairs'] as $left => $rights) {
+                    foreach ($rights as $right => $value) {
+                        $pairs[$left][$right] = ($pairs[$left][$right] ?? 0) + $value;
+                    }
+                }
+                array_push($classes, ...$parsed['classes']);
+            }
+        }
+
+        return ['pairs' => $pairs, 'classes' => $classes];
+    }
+
+    /**
+     * @return array{pairs:array<int,array<int,int>>,classes:list<array{coverage:array<int,bool>,class1:array<int,int>,class2:array<int,int>,values:array<int,array<int,int>>}>}
+     */
+    private function parsePairPos(int $base, int $tableEnd): array
+    {
+        $empty = ['pairs' => [], 'classes' => []];
+        if ($base + 10 > $tableEnd) return $empty;
+
+        $format = $this->reader->u16($base);
+        $coverageOffset = $this->reader->u16($base + 2);
+        $valueFormat1 = $this->reader->u16($base + 4);
+        $valueFormat2 = $this->reader->u16($base + 6);
+        $coverage = $this->parseCoverage($base + $coverageOffset, $tableEnd);
+        if ($coverage === []) return $empty;
+
+        if ($format === 1) {
+            $pairSetCount = $this->reader->u16($base + 8);
+            if ($base + 10 + $pairSetCount * 2 > $tableEnd) return $empty;
+            $pairs = [];
+            $record1Size = $this->valueRecordSize($valueFormat1);
+            $record2Size = $this->valueRecordSize($valueFormat2);
+
+            for ($i = 0; $i < $pairSetCount && isset($coverage[$i]); $i++) {
+                $set = $base + $this->reader->u16($base + 10 + $i * 2);
+                if ($set + 2 > $tableEnd) continue;
+                $count = $this->reader->u16($set);
+                $cursor = $set + 2;
+                for ($p = 0; $p < $count; $p++) {
+                    if ($cursor + 2 + $record1Size + $record2Size > $tableEnd) break;
+                    $right = $this->reader->u16($cursor);
+                    $cursor += 2;
+                    $value = $this->xAdvance($cursor, $valueFormat1);
+                    $cursor += $record1Size + $record2Size;
+                    if ($value !== 0) $pairs[$coverage[$i]][$right] = $value;
+                }
+            }
+            return ['pairs' => $pairs, 'classes' => []];
+        }
+
+        if ($format !== 2 || $base + 16 > $tableEnd) return $empty;
+        $class1 = $this->parseClassDef($base + $this->reader->u16($base + 8), $tableEnd);
+        $class2 = $this->parseClassDef($base + $this->reader->u16($base + 10), $tableEnd);
+        $class1Count = $this->reader->u16($base + 12);
+        $class2Count = $this->reader->u16($base + 14);
+        $record1Size = $this->valueRecordSize($valueFormat1);
+        $record2Size = $this->valueRecordSize($valueFormat2);
+        $cursor = $base + 16;
+        $values = [];
+
+        for ($a = 0; $a < $class1Count; $a++) {
+            for ($b = 0; $b < $class2Count; $b++) {
+                if ($cursor + $record1Size + $record2Size > $tableEnd) break 2;
+                $value = $this->xAdvance($cursor, $valueFormat1);
+                $cursor += $record1Size + $record2Size;
+                if ($value !== 0) $values[$a][$b] = $value;
+            }
+        }
+
+        if ($values === []) return $empty;
+        return [
+            'pairs' => [],
+            'classes' => [[
+                'coverage' => array_fill_keys($coverage, true),
+                'class1' => $class1,
+                'class2' => $class2,
+                'values' => $values,
+            ]],
+        ];
+    }
+
+    /** @return list<int> glyph IDs in coverage-index order */
+    private function parseCoverage(int $base, int $tableEnd): array
+    {
+        if ($base < 0 || $base + 4 > $tableEnd) return [];
+        $format = $this->reader->u16($base);
+        $count = $this->reader->u16($base + 2);
+        $glyphs = [];
+
+        if ($format === 1) {
+            if ($base + 4 + $count * 2 > $tableEnd) return [];
+            for ($i = 0; $i < $count; $i++) $glyphs[] = $this->reader->u16($base + 4 + $i * 2);
+            return $glyphs;
+        }
+
+        if ($format !== 2 || $base + 4 + $count * 6 > $tableEnd) return [];
+        for ($i = 0; $i < $count; $i++) {
+            $p = $base + 4 + $i * 6;
+            $start = $this->reader->u16($p);
+            $end = $this->reader->u16($p + 2);
+            $coverageIndex = $this->reader->u16($p + 4);
+            for ($glyph = $start; $glyph <= $end; $glyph++) {
+                $glyphs[$coverageIndex + $glyph - $start] = $glyph;
+            }
+        }
+        ksort($glyphs, SORT_NUMERIC);
+        return array_values($glyphs);
+    }
+
+    /** @return array<int,int> glyph ID => class, absent glyphs implicitly class 0 */
+    private function parseClassDef(int $base, int $tableEnd): array
+    {
+        if ($base < 0 || $base + 4 > $tableEnd) return [];
+        $format = $this->reader->u16($base);
+        $classes = [];
+
+        if ($format === 1) {
+            $startGlyph = $this->reader->u16($base + 2);
+            $count = $this->reader->u16($base + 4);
+            if ($base + 6 + $count * 2 > $tableEnd) return [];
+            for ($i = 0; $i < $count; $i++) {
+                $class = $this->reader->u16($base + 6 + $i * 2);
+                if ($class !== 0) $classes[$startGlyph + $i] = $class;
+            }
+            return $classes;
+        }
+
+        if ($format !== 2) return [];
+        $count = $this->reader->u16($base + 2);
+        if ($base + 4 + $count * 6 > $tableEnd) return [];
+        for ($i = 0; $i < $count; $i++) {
+            $p = $base + 4 + $i * 6;
+            $start = $this->reader->u16($p);
+            $end = $this->reader->u16($p + 2);
+            $class = $this->reader->u16($p + 4);
+            if ($class === 0) continue;
+            for ($glyph = $start; $glyph <= $end; $glyph++) $classes[$glyph] = $class;
+        }
+        return $classes;
+    }
+
+    private function valueRecordSize(int $format): int
+    {
+        $size = 0;
+        for ($bit = 0; $bit < 16; $bit++) {
+            if (($format & (1 << $bit)) !== 0) $size += 2;
+        }
+        return $size;
+    }
+
+    private function xAdvance(int $base, int $format): int
+    {
+        $cursor = $base;
+        for ($bit = 0; $bit < 16; $bit++) {
+            $mask = 1 << $bit;
+            if (($format & $mask) === 0) continue;
+            if ($mask === 0x0004) return $this->reader->i16($cursor);
+            $cursor += 2;
+        }
+        return 0;
     }
 
     /** @return array<int,array<int,int>> */
