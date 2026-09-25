@@ -195,7 +195,7 @@ The main structural gaps currently are:
 - named grid lines;
 - isolated opacity grouping for normal non-atomic inline spans (layout/atomic boxes already use PDF Transparency Group Forms);
 - 3D/perspective CSS transforms and transformed link annotation geometry (2D transform paint is implemented);
-- full SVG vector paint and WebP PDF paint;
+- advanced SVG paint (`defs`/gradients, `use`, text/image, clipPath/mask/filter) and WebP PDF paint; basic SVG vector shapes are implemented;
 - Adam7 PNG;
 - paged first/even/odd headers and footers;
 - WOFF/WOFF2 decoding;
