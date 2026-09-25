@@ -6,6 +6,7 @@ namespace Pagyra\Fonts;
 
 use Pagyra\Fonts\Ttf\TtfFontMetrics;
 use Pagyra\Fonts\Ttf\TtfParser;
+use Pagyra\Fonts\Woff\WoffDecoder;
 
 final class FontRegistry
 {
@@ -36,7 +37,9 @@ final class FontRegistry
 
     public function registerData(string $family, string $binary, int $weight = 400, string $style = 'normal'): void
     {
-        $this->register($family, (new TtfParser())->parse($binary), $weight, $style, $binary);
+        $woff = new WoffDecoder();
+        $sfnt = $woff->isWoff($binary) ? $woff->decode($binary) : $binary;
+        $this->register($family, (new TtfParser())->parse($sfnt), $weight, $style, $sfnt);
     }
 
     public function resolve(?string $fontFamily, int $weight = 400, string $style = 'normal'): ?TtfFontMetrics
