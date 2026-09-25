@@ -75,7 +75,17 @@ final class DisplayListBuilder
         PaginationResult $pagination,
         array $margins,
     ): void {
+        $activeOpacityGroups = [];
         foreach ($this->stackingOrder->plan($entries) as $step) {
+            $this->syncOpacityGroups(
+                $commands,
+                $activeOpacityGroups,
+                $this->opacityGroupsForStep($step),
+                $step->subject instanceof PhysicalPageEntry
+                    ? $step->subject->fragment->pageIndex
+                    : $step->subject->pageIndex,
+            );
+
             $openedScopes = [];
             foreach ($step->ancestors as $ancestor) {
                 $transform = $ancestor instanceof PhysicalPageEntry
@@ -99,6 +109,13 @@ final class DisplayListBuilder
 
             $this->closePaintScopes($commands, $openedScopes, $pageIndex);
         }
+
+        $this->syncOpacityGroups(
+            $commands,
+            $activeOpacityGroups,
+            [],
+            $entries !== [] ? $entries[array_key_last($entries)]->fragment->pageIndex : 0,
+        );
     }
 
     /** @param list<object> $commands */
@@ -281,7 +298,15 @@ final class DisplayListBuilder
      */
     private function appendStackedBlocks(array &$commands, array $blocks, array $margins): void
     {
+        $activeOpacityGroups = [];
         foreach ($this->stackingOrder->plan($blocks) as $step) {
+            $this->syncOpacityGroups(
+                $commands,
+                $activeOpacityGroups,
+                $this->opacityGroupsForStep($step),
+                $step->subject->pageIndex,
+            );
+
             $openedScopes = [];
             foreach ($step->ancestors as $ancestor) {
                 if ($this->openBlockFragmentTransform($commands, $ancestor, $margins)) {
@@ -295,6 +320,13 @@ final class DisplayListBuilder
             $this->appendBlockSelf($commands, $step->subject, $margins);
             $this->closePaintScopes($commands, $openedScopes, $step->subject->pageIndex);
         }
+
+        $this->syncOpacityGroups(
+            $commands,
+            $activeOpacityGroups,
+            [],
+            $blocks !== [] ? $blocks[array_key_last($blocks)]->pageIndex : 0,
+        );
     }
 
     /**
@@ -390,6 +422,63 @@ final class DisplayListBuilder
             $wholeBox,
             $wholeBox,
         );
+    }
+
+    /**
+     * @return list<array{id:int,opacity:float}>
+     */
+    private function opacityGroupsForStep(StackingPaintStep $step): array
+    {
+        $groups = [];
+        foreach ([...$step->ancestors, $step->subject] as $subject) {
+            $style = $subject instanceof PhysicalPageEntry
+                ? $subject->placement->node->source->style
+                : $subject->node->source->style;
+            $opacity = $this->ownOpacity($style);
+            if ($opacity >= 1.0 - self::EPSILON) continue;
+
+            $groups[] = [
+                'id' => spl_object_id($subject),
+                'opacity' => $opacity,
+            ];
+        }
+
+        return $groups;
+    }
+
+    /**
+     * @param list<object> $commands
+     * @param list<array{id:int,opacity:float}> $active
+     * @param list<array{id:int,opacity:float}> $desired
+     */
+    private function syncOpacityGroups(array &$commands, array &$active, array $desired, int $pageIndex): void
+    {
+        $common = 0;
+        $limit = min(count($active), count($desired));
+        while ($common < $limit && $active[$common]['id'] === $desired[$common]['id']) {
+            $common++;
+        }
+
+        for ($i = count($active) - 1; $i >= $common; $i--) {
+            $commands[] = new OpacityGroupPaintCommand($pageIndex);
+        }
+        $active = array_slice($active, 0, $common);
+
+        for ($i = $common; $i < count($desired); $i++) {
+            $commands[] = new OpacityGroupPaintCommand($pageIndex, $desired[$i]['opacity']);
+            $active[] = $desired[$i];
+        }
+    }
+
+    private function ownOpacity(ComputedStyle $style): float
+    {
+        $raw = strtolower(trim($style->get('opacity', '1') ?? '1'));
+        if (preg_match('/^(\d*\.?\d+)(%)?$/', $raw, $m) !== 1) return 1.0;
+
+        return max(0.0, min(
+            1.0,
+            (float) $m[1] / (isset($m[2]) && $m[2] !== '' ? 100.0 : 1.0),
+        ));
     }
 
     /** @param list<object> $commands */
@@ -1272,6 +1361,12 @@ final class DisplayListBuilder
         $borderWidth = $box->contentWidth + $box->padding['left'] + $box->padding['right'] + $box->border['left'] + $box->border['right'];
         $borderHeight = $box->contentHeight + $box->padding['top'] + $box->padding['bottom'] + $box->border['top'] + $box->border['bottom'];
 
+        $atomicOpacity = $this->ownOpacity($box->style);
+        $opacityGroup = $atomicOpacity < 1.0 - self::EPSILON;
+        if ($opacityGroup) {
+            $commands[] = new OpacityGroupPaintCommand($lineFragment->pageIndex, $atomicOpacity);
+        }
+
         $selfTransform = $this->openStyleTransform(
             $commands,
             $box->style,
@@ -1333,6 +1428,9 @@ final class DisplayListBuilder
 
         if ($selfTransform) {
             $commands[] = new TransformPaintCommand($lineFragment->pageIndex);
+        }
+        if ($opacityGroup) {
+            $commands[] = new OpacityGroupPaintCommand($lineFragment->pageIndex);
         }
     }
 
