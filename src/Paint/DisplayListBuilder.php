@@ -68,9 +68,7 @@ final class DisplayListBuilder
         $pageIndex = $entry->fragment->pageIndex;
         $clip = $this->appendTopLevelBox($commands, $entry, $pagination, $margins);
         $this->appendLines($commands, $entry->fragment->lines, $margins);
-        foreach ($this->stackingOrder->order($entry->fragment->blocks) as $block) {
-            $this->appendBlock($commands, $block, $margins);
-        }
+        $this->appendStackedBlocks($commands, $entry->fragment->blocks, $margins);
         if ($clip) $commands[] = new ClipPaintCommand($pageIndex);
     }
 
@@ -180,8 +178,37 @@ final class DisplayListBuilder
         return true;
     }
 
-    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
-    private function appendBlock(array &$commands, BlockFragment $block, array $margins): void
+    /**
+     * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     * @param list<BlockFragment> $blocks
+     */
+    private function appendStackedBlocks(array &$commands, array $blocks, array $margins): void
+    {
+        foreach ($this->stackingOrder->plan($blocks) as $step) {
+            $openedClips = 0;
+            foreach ($step->ancestors as $ancestor) {
+                if ($this->openBlockFragmentClip($commands, $ancestor, $margins)) {
+                    $openedClips++;
+                }
+            }
+
+            $this->appendBlockSelf($commands, $step->fragment, $margins);
+
+            for ($i = 0; $i < $openedClips; $i++) {
+                $commands[] = new ClipPaintCommand($step->fragment->pageIndex);
+            }
+        }
+    }
+
+    /**
+     * Paint one block atomically without recursing into children. Descendants are emitted by
+     * StackingOrderResolver in their resolved context order, which is what allows a positioned
+     * grandchild to compete with its ancestor's siblings instead of being trapped inside DOM
+     * recursion.
+     *
+     * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     */
+    private function appendBlockSelf(array &$commands, BlockFragment $block, array $margins): void
     {
         $border = $block->node->box->borderBox();
         if ($block->height > 0.0) {
@@ -216,14 +243,31 @@ final class DisplayListBuilder
                 $wholeBox,
             );
             $this->appendOutline($commands, $block->node, $block->node->source->style, $block->pageIndex, $x, $y, $border->width, $block->height);
-            $clip = $this->openOverflowClip($commands, $block->node, $block->pageIndex, $x, $y, $border->width, $block->height, $wholeBox, $wholeBox);
         }
+
         $this->appendListMarker($commands, $block, $margins);
         $this->appendLines($commands, $block->lines, $margins);
-        foreach ($this->stackingOrder->order($block->children) as $child) {
-            $this->appendBlock($commands, $child, $margins);
-        }
-        if ($clip ?? false) $commands[] = new ClipPaintCommand($block->pageIndex);
+    }
+
+    /** @param list<object> $commands */
+    private function openBlockFragmentClip(array &$commands, BlockFragment $block, array $margins): bool
+    {
+        if ($block->height <= 0.0) return false;
+
+        $border = $block->node->box->borderBox();
+        $wholeBox = $block->height + self::EPSILON >= $border->height;
+
+        return $this->openOverflowClip(
+            $commands,
+            $block->node,
+            $block->pageIndex,
+            $border->x + $margins['left'],
+            $block->pageY + $margins['top'],
+            $border->width,
+            $block->height,
+            $wholeBox,
+            $wholeBox,
+        );
     }
 
     /**
@@ -1089,13 +1133,11 @@ final class DisplayListBuilder
 
         if ($box->contentBlocks !== []) {
             $pageOffsetY = $lineFragment->pageY - $line->y;
+            $fragments = [];
             foreach ($box->contentBlocks as $contentBlock) {
-                $this->appendBlock(
-                    $commands,
-                    $this->unfragmentedAtomicBlock($contentBlock, $lineFragment->pageIndex, $pageOffsetY),
-                    $margins,
-                );
+                $fragments[] = $this->unfragmentedAtomicBlock($contentBlock, $lineFragment->pageIndex, $pageOffsetY);
             }
+            $this->appendStackedBlocks($commands, $fragments, $margins);
         }
     }
 
