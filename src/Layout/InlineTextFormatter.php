@@ -26,6 +26,93 @@ final class InlineTextFormatter
         $this->replacedElementSizing = new ReplacedElementSizingResolver();
     }
 
+
+    /**
+     * Returns min/max-content inline sizes using the same tokenization and font metrics as the
+     * real inline formatter. This keeps intrinsic sizing from inventing a second text-measurement
+     * path that can disagree with wrapping or PDF paint.
+     */
+    public function intrinsicInlineSize(StyledNode $node, float $referenceWidth, float $fontSize): IntrinsicInlineSize
+    {
+        if ($node->node->isImage() || $node->node->isSvg()) {
+            $metrics = $this->atomicBoxMetrics($node, $referenceWidth, $fontSize);
+            return new IntrinsicInlineSize($metrics['outerWidth'], $metrics['outerWidth']);
+        }
+
+        $tokens = $this->collectTokens($node, $fontSize, $referenceWidth);
+        if ($tokens === []) {
+            return new IntrinsicInlineSize(0.0, 0.0);
+        }
+
+        $whiteSpace = strtolower($node->style->get('white-space', 'normal') ?? 'normal');
+        $overflowWrap = strtolower(
+            $node->style->get('overflow-wrap') ?? $node->style->get('word-wrap', 'normal') ?? 'normal',
+        );
+        $wordBreak = strtolower($node->style->get('word-break', 'normal') ?? 'normal');
+        $allowSoftWrap = !in_array($whiteSpace, ['nowrap', 'pre'], true);
+
+        $maxContent = 0.0;
+        $lineWidth = 0.0;
+        $minContent = 0.0;
+        $lastWasCollapsedSpace = true;
+
+        foreach ($tokens as $token) {
+            if ($token['kind'] === 'newline') {
+                $maxContent = max($maxContent, $lineWidth);
+                $lineWidth = 0.0;
+                $lastWasCollapsedSpace = true;
+                continue;
+            }
+
+            if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
+                if ($lastWasCollapsedSpace) {
+                    continue;
+                }
+                $token['width'] = $this->metrics->measure(' ', $token['style'], $token['fontSize'])->inlineSize;
+                $lastWasCollapsedSpace = true;
+            } else {
+                $lastWasCollapsedSpace = false;
+            }
+
+            $lineWidth += $token['width'];
+
+            if (!$allowSoftWrap) {
+                continue;
+            }
+
+            if ($token['kind'] === 'box') {
+                $minContent = max($minContent, $token['width']);
+                continue;
+            }
+
+            if ($token['kind'] !== 'word') {
+                continue;
+            }
+
+            if ($overflowWrap === 'anywhere' || $wordBreak === 'break-all') {
+                $chars = preg_split('//u', $token['text'], -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                $charWidth = 0.0;
+                foreach ($chars as $char) {
+                    $charWidth = max(
+                        $charWidth,
+                        $this->metrics->measure($char, $token['style'], $token['fontSize'])->inlineSize,
+                    );
+                }
+                $minContent = max($minContent, $charWidth);
+                continue;
+            }
+
+            $minContent = max($minContent, $token['width']);
+        }
+
+        $maxContent = max($maxContent, $lineWidth);
+        if (!$allowSoftWrap) {
+            $minContent = $maxContent;
+        }
+
+        return new IntrinsicInlineSize($minContent, max($minContent, $maxContent));
+    }
+
     /**
      * @param list<array{top:float,bottom:float,left:float,right:float}> $exclusions float areas
      *        the lines must go around: a line whose band crosses one starts right of `left` and
