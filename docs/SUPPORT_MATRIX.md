@@ -41,7 +41,7 @@ Status levels:
 | Overflow clipping | P3 | `hidden`/`clip` paint clipping and text-overflow ellipsis exist; ellipsis preserves atomic inline boxes that fully fit before the truncation point. |
 | Opacity | Partial | Element/ancestor opacity reaches paint through per-command alpha. True isolated-group compositing for overlapping child paint is still open. |
 | Stacking contexts / z-index | P3 ordering | The physical page is the root stacking context; positioned numeric z-index roots are flattened through non-context ancestors and paint in stable negative / normal-auto / non-negative phases, including across top-level page entries. `opacity < 1` also establishes an isolating context. True PDF transparency-group compositing remains open, so opacity is still applied per command. |
-| CSS transforms | Open | No general matrix/transform paint pipeline yet. |
+| CSS transforms | P3 2D | Paint-only 2D transforms support `matrix()`, `translate*()`, `scale*()`, `rotate()`, `skew*()` and function lists, with CSS angle units, percentage translation and `transform-origin`. Transform scopes apply to blocks and atomic inline boxes, are re-opened across flattened stacking descendants, and establish stacking contexts. 3D/perspective and transformed link-annotation hit rectangles remain open. |
 | JPEG / PNG PDF paint | P3 | JPEG direct embedding and multiple PNG color/transparency forms are supported. Adam7 remains open. |
 | WebP | Partial | Metadata/intrinsic sizing is implemented; PDF paint/decoding is not. |
 | SVG | Partial | DOM/path parsing and intrinsic sizing exist; full vector PDF paint is not wired in yet. |
@@ -56,7 +56,7 @@ Status levels:
 
 1. Reuse recursive intrinsic sizing in flex and grid paths (inline-block, table and float paths already consume it).
 4. Add true isolated PDF transparency-group compositing for opacity contexts.
-5. Add 2D transforms and reuse them for SVG paint.
+5. Reuse the 2D transform primitives for SVG paint and add 3D only if reference/corpus requires it.
 6. Port WOFF/WOFF2 decoding and the JS GPOS PairPos format-1 subset.
 7. Port the independent paged header/footer subsystem.
 8. Finish WebP, Adam7 and the remaining border/effect styles.
