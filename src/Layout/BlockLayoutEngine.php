@@ -476,14 +476,29 @@ final class BlockLayoutEngine
         // that belongs *after* a block came out of the PDF before it. The geometry was right, the
         // order of the drawing operations was not, which is what anyone copying text out of the
         // decision gets. A block whose content is all inline keeps its lines on itself, as before.
-        $wrapsInlineInAnonymousBlocks = $this->hasMixedFlow($segments);
         $insideMarker = $this->insideListMarker($styled);
-        // Cleared from the returned node's style once the marker becomes a real text run below,
-        // so DisplayListBuilder's own (paint-only, `outside`-shaped) marker naturally has nothing
-        // left to draw and the two do not double up. It stays set — and that fallback still
-        // draws it — for the rarer `<li><p>text</p></li>` shape, where the item's own content is
-        // a block and there is no first inline segment here to weave the marker into.
         $insideMarkerConsumed = false;
+
+        // CSS Lists puts an inside marker in the list item's principal block box even when the
+        // authored content begins with a block. In that shape there is no existing inline run to
+        // prepend to, so create the anonymous inline segment CSS would generate before the first
+        // block child. This replaces the old paint-only outside fallback for <li><p>...</p></li>.
+        if ($insideMarker !== null) {
+            $hasInlineSegment = false;
+            foreach ($segments as $segment) {
+                if ($segment[0] === 'inline') {
+                    $hasInlineSegment = true;
+                    break;
+                }
+            }
+            if (!$hasInlineSegment) {
+                array_unshift($segments, ['inline', [$this->listMarkerStyledNode($styled, $insideMarker)]]);
+                $insideMarker = null;
+                $insideMarkerConsumed = true;
+            }
+        }
+
+        $wrapsInlineInAnonymousBlocks = $this->hasMixedFlow($segments);
 
         foreach ($segments as $segment) {
             if ($segment[0] === 'inline') {
