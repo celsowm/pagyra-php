@@ -79,6 +79,26 @@ final class SvgDocumentParserTest extends TestCase
         self::assertSame(['x' => 20.0, 'y' => 0.0], $document->shapes[3]['points'][2]);
     }
 
+    public function testPreservesNestedGroupAndShapeTransformsInOrder(): void
+    {
+        $svg = Node::element('svg', ['transform' => 'translate(1 2)'], [
+            Node::element('g', ['transform' => 'scale(2)'], [
+                Node::element('path', [
+                    'd' => 'M0 0 L1 0',
+                    'transform' => 'rotate(90 1 1)',
+                ], []),
+            ]),
+        ]);
+
+        $document = (new SvgDocumentParser())->parse($svg);
+
+        self::assertNotNull($document);
+        self::assertSame(
+            'translate(1 2) scale(2) rotate(90 1 1)',
+            $document->shapes[0]['transform'],
+        );
+    }
+
     public function testRejectsNonSvgRootAndInvalidEmptyShapes(): void
     {
         $parser = new SvgDocumentParser();
