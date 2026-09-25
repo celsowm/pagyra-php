@@ -2251,11 +2251,17 @@ final class BlockLayoutEngine
      */
     private function withUsedWidth(StyledNode $cell, float $width): StyledNode
     {
-        $properties = $cell->style->properties;
+        return $this->withUsedBorderBoxWidth($cell, $width);
+    }
+
+    /** Pins an already-resolved box to a used border-box width so percentages are not resolved twice. */
+    private function withUsedBorderBoxWidth(StyledNode $node, float $width): StyledNode
+    {
+        $properties = $node->style->properties;
         $properties['width'] = $width . 'px';
         $properties['box-sizing'] = 'border-box';
 
-        return new StyledNode($cell->node, new ComputedStyle($properties), $cell->children);
+        return new StyledNode($node->node, new ComputedStyle($properties), $node->children);
     }
 
     /** @param list<string> $sides */
@@ -2350,7 +2356,15 @@ final class BlockLayoutEngine
             $contentY = $runY + $margin->top + $border->top + $padding->top;
             $layout = $this->buildReplacedLayoutNode($styled, $contentX, $contentY, $contentWidth, $contentHeight, $padding, $border, $margin, $fontSize);
         } else {
-            $layout = $this->layoutBlock($styled, $containingX, $runY, $marginBoxWidth, $containingHeight, $parentFontSize);
+            $usedBorderBoxWidth = $contentWidth + $padding->horizontal() + $border->horizontal();
+            $layout = $this->layoutBlock(
+                $this->withUsedBorderBoxWidth($styled, $usedBorderBoxWidth),
+                $containingX,
+                $runY,
+                $marginBoxWidth,
+                $containingHeight,
+                $parentFontSize,
+            );
         }
         $bottom = $layout->box->borderBox()->bottom();
         $nextFloat = $side === 'left' ? $float->withLeft($float->leftX + $marginBoxWidth, $bottom, $runY) : $float->withRight($float->rightX - $marginBoxWidth, $bottom, $runY);
