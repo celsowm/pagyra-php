@@ -15,6 +15,7 @@ use Pagyra\Paint\ClipPaintCommand;
 use Pagyra\Paint\GradientPaintCommand;
 use Pagyra\Paint\DisplayList;
 use Pagyra\Paint\ImagePaintCommand;
+use Pagyra\Paint\OpacityGroupPaintCommand;
 use Pagyra\Paint\RoundedBorderPaintCommand;
 use Pagyra\Paint\TextPaintCommand;
 use Pagyra\Paint\TransformPaintCommand;
@@ -44,81 +45,33 @@ final class PdfSerializer
 
         $pageIds = [];
         foreach ($displayList->pages as $page) {
-            $content = '';
             $usedFonts = [];
             $usedImages = [];
             $usedShadings = [];
             $linkAnnotations = [];
-            foreach ($page->commands as $command) {
-                if ($command instanceof GradientPaintCommand) {
-                    $name = 'Sh' . (count($usedShadings) + 1);
-                    $usedShadings[$name] = $this->buildShading($command, $page->height, $objects, $reserve);
-                    $content .= $this->serializeGradient($command, $page->height, $name);
-                    continue;
-                }
-                if ($command instanceof TransformPaintCommand) {
-                    $content .= $command->opens()
-                        ? $this->serializeTransformBegin($command, $page->height)
-                        : "Q\n";
-                    continue;
-                }
-                if ($command instanceof ClipPaintCommand) {
-                    $content .= $command->opens()
-                        ? "q\n" . $this->number(Units::pxToPt($command->x)) . ' '
-                            . $this->number(Units::pxToPt($page->height - $command->y - $command->height)) . ' '
-                            . $this->number(Units::pxToPt($command->width)) . ' '
-                            . $this->number(Units::pxToPt($command->height)) . " re W n\n"
-                        : "Q\n";
-                    continue;
-                }
-                if ($command instanceof BoxPaintCommand) {
-                    $content .= $this->serializeBox(
-                        $command,
-                        $page->height,
-                        $this->graphicsStateName($command->backgroundColor, $extGStateResources),
-                    );
-                    continue;
-                }
-                if ($command instanceof RoundedBorderPaintCommand) {
-                    $content .= $this->serializeRoundedBorder(
-                        $command,
-                        $page->height,
-                        $this->graphicsStateName($command->color, $extGStateResources),
-                    );
-                    continue;
-                }
-                if ($command instanceof BorderPaintCommand) {
-                    $content .= $this->serializeBorder(
-                        $command,
-                        $page->height,
-                        $this->graphicsStateName($command->color, $extGStateResources),
-                    );
-                    continue;
-                }
-                if ($command instanceof ImagePaintCommand) {
-                    $key = hash('sha256', $command->bytes);
-                    $resource = $imageResources[$key] ?? null;
-                    if ($resource !== null) {
-                        $usedImages[$resource['name']] = $resource['id'];
-                        $content .= $this->serializeImage($command, $page->height, $resource['name'], $this->graphicsStateName(new Rgba(0, 0, 0, $command->opacity), $extGStateResources));
-                    }
-                    continue;
-                }
-                if (!$command instanceof TextPaintCommand) continue;
+            $formResources = [];
+            $formIndex = 1;
+            $commandIndex = 0;
 
-                [$key] = $this->fontChoice($command, $fontRegistry);
-                $resource = $fontResources[$key];
-                $usedFonts[$resource['name']] = $resource['id'];
-                $graphicsState = $this->graphicsStateName($command->color, $extGStateResources);
-                $content .= $resource['face'] instanceof RegisteredFont
-                    ? $this->serializeEmbeddedText($command, $page->height, $resource['name'], $resource['face'], $graphicsState)
-                    : $this->serializeBase14Text($command, $page->height, $resource['name'], $graphicsState);
-                $content .= $this->serializeTextDecorations($command, $page->height, $graphicsState);
-
-                if ($command->linkHref !== null && $command->linkHref !== '') {
-                    $linkAnnotations[] = $command;
-                }
-            }
+            $content = $this->serializeCommandSequence(
+                $page->commands,
+                $commandIndex,
+                false,
+                $page->width,
+                $page->height,
+                $fontRegistry,
+                $fontResources,
+                $imageResources,
+                $extGStateResources,
+                $objects,
+                $reserve,
+                $usedFonts,
+                $usedImages,
+                $usedShadings,
+                $linkAnnotations,
+                $formResources,
+                $formIndex,
+            );
 
             $annotIds = [];
             foreach ($linkAnnotations as $linkCommand) {
@@ -133,16 +86,13 @@ final class PdfSerializer
             $pageId = $reserve();
             $pageIds[] = $pageId;
 
-            $fonts = '';
-            foreach ($usedFonts as $resourceName => $fontId) $fonts .= '/' . $resourceName . ' ' . $fontId . ' 0 R ';
-            $images = '';
-            foreach ($usedImages as $resourceName => $imageId) $images .= '/' . $resourceName . ' ' . $imageId . ' 0 R ';
-            $states = '';
-            foreach ($extGStateResources as $state) $states .= '/' . $state['name'] . ' ' . $state['id'] . ' 0 R ';
-            $shadings = '';
-            foreach ($usedShadings as $resourceName => $shadingId) $shadings .= '/' . $resourceName . ' ' . $shadingId . ' 0 R ';
-            $resources = '<< /Font << ' . $fonts . '>> /XObject << ' . $images . '>> /ExtGState << ' . $states . '>>'
-                . ($shadings !== '' ? ' /Shading << ' . $shadings . '>>' : '') . ' >>';
+            $resources = $this->resourceDictionary(
+                $usedFonts,
+                $usedImages,
+                $extGStateResources,
+                $usedShadings,
+                $formResources,
+            );
             $widthPt = $this->number(Units::pxToPt($page->width) * $contentScale);
             $heightPt = $this->number(Units::pxToPt($page->height) * $contentScale);
             $objects[$pageId] = '<< /Type /Page /Parent ' . $pagesId . ' 0 R '
@@ -154,6 +104,218 @@ final class PdfSerializer
         $objects[$pagesId] = '<< /Type /Pages /Count ' . count($pageIds) . ' /Kids [' . $kids . '] >>';
         $objects[$catalogId] = '<< /Type /Catalog /Pages ' . $pagesId . ' 0 R >>';
         return $this->assemble($objects, $catalogId);
+    }
+
+    /**
+     * Serializes a flat display-list range. Opacity groups recurse into isolated Form XObjects;
+     * their child commands therefore composite against transparent black before the group alpha
+     * is applied once at the Do invocation.
+     *
+     * @param list<object> $commands
+     * @param array<string,array{name:string,id:int,face:?RegisteredFont}> $fontResources
+     * @param array<string,array{name:string,id:int}> $imageResources
+     * @param array<string,array{name:string,id:int}> $extGStateResources
+     * @param array<int,string> $objects
+     * @param array<string,int> $usedFonts
+     * @param array<string,int> $usedImages
+     * @param array<string,int> $usedShadings
+     * @param list<TextPaintCommand> $linkAnnotations
+     * @param array<string,int> $formResources
+     */
+    private function serializeCommandSequence(
+        array $commands,
+        int &$index,
+        bool $stopAtOpacityEnd,
+        float $pageWidthPx,
+        float $pageHeightPx,
+        ?FontRegistry $fontRegistry,
+        array $fontResources,
+        array $imageResources,
+        array $extGStateResources,
+        array &$objects,
+        callable $reserve,
+        array &$usedFonts,
+        array &$usedImages,
+        array &$usedShadings,
+        array &$linkAnnotations,
+        array &$formResources,
+        int &$formIndex,
+    ): string {
+        $content = '';
+
+        while ($index < count($commands)) {
+            $command = $commands[$index++];
+
+            if ($command instanceof OpacityGroupPaintCommand) {
+                if (!$command->opens()) {
+                    if ($stopAtOpacityEnd) return $content;
+                    continue;
+                }
+
+                $inner = $this->serializeCommandSequence(
+                    $commands,
+                    $index,
+                    true,
+                    $pageWidthPx,
+                    $pageHeightPx,
+                    $fontRegistry,
+                    $fontResources,
+                    $imageResources,
+                    $extGStateResources,
+                    $objects,
+                    $reserve,
+                    $usedFonts,
+                    $usedImages,
+                    $usedShadings,
+                    $linkAnnotations,
+                    $formResources,
+                    $formIndex,
+                );
+
+                $formName = 'Fm' . $formIndex++;
+                $formId = $reserve();
+                $formResourceDictionary = $this->resourceDictionary(
+                    $usedFonts,
+                    $usedImages,
+                    $extGStateResources,
+                    $usedShadings,
+                    $formResources,
+                );
+                $bboxWidth = $this->number(Units::pxToPt($pageWidthPx));
+                $bboxHeight = $this->number(Units::pxToPt($pageHeightPx));
+                $objects[$formId] = '<< /Type /XObject /Subtype /Form'
+                    . ' /BBox [0 0 ' . $bboxWidth . ' ' . $bboxHeight . ']'
+                    . ' /Group << /S /Transparency /I true /K false /CS /DeviceRGB >>'
+                    . ' /Resources ' . $formResourceDictionary
+                    . ' /Length ' . strlen($inner) . " >>\nstream\n"
+                    . $inner . "endstream";
+                $formResources[$formName] = $formId;
+
+                $groupState = $this->graphicsStateNameForAlpha(
+                    $command->normalizedOpacity(),
+                    $extGStateResources,
+                );
+                $content .= "q\n"
+                    . ($groupState !== null ? '/' . $groupState . " gs\n" : '')
+                    . '/' . $formName . " Do\nQ\n";
+                continue;
+            }
+
+            if ($command instanceof GradientPaintCommand) {
+                $name = 'Sh' . (count($usedShadings) + 1);
+                $usedShadings[$name] = $this->buildShading($command, $pageHeightPx, $objects, $reserve);
+                $content .= $this->serializeGradient($command, $pageHeightPx, $name);
+                continue;
+            }
+
+            if ($command instanceof TransformPaintCommand) {
+                $content .= $command->opens()
+                    ? $this->serializeTransformBegin($command, $pageHeightPx)
+                    : "Q\n";
+                continue;
+            }
+
+            if ($command instanceof ClipPaintCommand) {
+                $content .= $command->opens()
+                    ? "q\n" . $this->number(Units::pxToPt($command->x)) . ' '
+                        . $this->number(Units::pxToPt($pageHeightPx - $command->y - $command->height)) . ' '
+                        . $this->number(Units::pxToPt($command->width)) . ' '
+                        . $this->number(Units::pxToPt($command->height)) . " re W n\n"
+                    : "Q\n";
+                continue;
+            }
+
+            if ($command instanceof BoxPaintCommand) {
+                $content .= $this->serializeBox(
+                    $command,
+                    $pageHeightPx,
+                    $this->graphicsStateName($command->backgroundColor, $extGStateResources),
+                );
+                continue;
+            }
+
+            if ($command instanceof RoundedBorderPaintCommand) {
+                $content .= $this->serializeRoundedBorder(
+                    $command,
+                    $pageHeightPx,
+                    $this->graphicsStateName($command->color, $extGStateResources),
+                );
+                continue;
+            }
+
+            if ($command instanceof BorderPaintCommand) {
+                $content .= $this->serializeBorder(
+                    $command,
+                    $pageHeightPx,
+                    $this->graphicsStateName($command->color, $extGStateResources),
+                );
+                continue;
+            }
+
+            if ($command instanceof ImagePaintCommand) {
+                $key = hash('sha256', $command->bytes);
+                $resource = $imageResources[$key] ?? null;
+                if ($resource !== null) {
+                    $usedImages[$resource['name']] = $resource['id'];
+                    $content .= $this->serializeImage(
+                        $command,
+                        $pageHeightPx,
+                        $resource['name'],
+                        $this->graphicsStateName(new Rgba(0, 0, 0, $command->opacity), $extGStateResources),
+                    );
+                }
+                continue;
+            }
+
+            if (!$command instanceof TextPaintCommand) continue;
+
+            [$key] = $this->fontChoice($command, $fontRegistry);
+            $resource = $fontResources[$key];
+            $usedFonts[$resource['name']] = $resource['id'];
+            $graphicsState = $this->graphicsStateName($command->color, $extGStateResources);
+            $content .= $resource['face'] instanceof RegisteredFont
+                ? $this->serializeEmbeddedText($command, $pageHeightPx, $resource['name'], $resource['face'], $graphicsState)
+                : $this->serializeBase14Text($command, $pageHeightPx, $resource['name'], $graphicsState);
+            $content .= $this->serializeTextDecorations($command, $pageHeightPx, $graphicsState);
+
+            if ($command->linkHref !== null && $command->linkHref !== '') {
+                $linkAnnotations[] = $command;
+            }
+        }
+
+        return $content;
+    }
+
+    /**
+     * @param array<string,int> $usedFonts
+     * @param array<string,int> $usedImages
+     * @param array<string,array{name:string,id:int}> $extGStateResources
+     * @param array<string,int> $usedShadings
+     * @param array<string,int> $formResources
+     */
+    private function resourceDictionary(
+        array $usedFonts,
+        array $usedImages,
+        array $extGStateResources,
+        array $usedShadings,
+        array $formResources,
+    ): string {
+        $fonts = '';
+        foreach ($usedFonts as $name => $id) $fonts .= '/' . $name . ' ' . $id . ' 0 R ';
+
+        $xObjects = '';
+        foreach ($usedImages as $name => $id) $xObjects .= '/' . $name . ' ' . $id . ' 0 R ';
+        foreach ($formResources as $name => $id) $xObjects .= '/' . $name . ' ' . $id . ' 0 R ';
+
+        $states = '';
+        foreach ($extGStateResources as $state) $states .= '/' . $state['name'] . ' ' . $state['id'] . ' 0 R ';
+
+        $shadings = '';
+        foreach ($usedShadings as $name => $id) $shadings .= '/' . $name . ' ' . $id . ' 0 R ';
+
+        return '<< /Font << ' . $fonts . '>> /XObject << ' . $xObjects . '>> /ExtGState << ' . $states . '>>'
+            . ($shadings !== '' ? ' /Shading << ' . $shadings . '>>' : '')
+            . ' >>';
     }
 
     private function buildFontResources(array $usage, array &$objects, callable $reserve): array
