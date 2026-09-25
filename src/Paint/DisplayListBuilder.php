@@ -34,6 +34,7 @@ final class DisplayListBuilder
     private readonly ImageMetadataReader $imageMetadata;
     private readonly StackingOrderResolver $stackingOrder;
     private readonly CssTransformParser $transformParser;
+    private readonly SvgPaintBuilder $svgPaintBuilder;
 
     public function __construct(
         private readonly ?ImageSourceBytesResolver $imageBytes = null,
@@ -42,6 +43,7 @@ final class DisplayListBuilder
         $this->imageMetadata = new ImageMetadataReader();
         $this->stackingOrder = new StackingOrderResolver();
         $this->transformParser = new CssTransformParser();
+        $this->svgPaintBuilder = new SvgPaintBuilder();
     }
 
     /** @param array<string,mixed> $margins */
@@ -1399,6 +1401,10 @@ final class DisplayListBuilder
             $this->appendAtomicImage($commands, $box, $line, $lineFragment, $margins);
         }
 
+        if ($box->source->node->isSvg()) {
+            $this->appendAtomicSvg($commands, $box, $line, $lineFragment, $margins);
+        }
+
         if ($box->contentLines !== []) {
             $nested = [];
             foreach ($box->contentLines as $index => $contentLine) {
@@ -1531,6 +1537,44 @@ final class DisplayListBuilder
         $color = $this->styleBorderColor($box->style, $side);
         if (!$color instanceof Rgba || $color->a <= 0.0) return;
         $commands[] = new BorderPaintCommand($box, $pageIndex, $side, $x, $y, $width, $height, $color);
+    }
+
+    /** @param list<object> $commands */
+    private function appendAtomicSvg(
+        array &$commands,
+        AtomicInlineBox $box,
+        LineBox $line,
+        LineFragment $lineFragment,
+        array $margins,
+    ): void {
+        if ($box->contentWidth <= 0.0 || $box->contentHeight <= 0.0) return;
+
+        $contentX = $box->x + $box->margin['left'] + $box->border['left'] + $box->padding['left'] + $margins['left'];
+        $contentY = $lineFragment->pageY
+            + (($box->y + $box->margin['top'] + $box->border['top'] + $box->padding['top']) - $line->y)
+            + $margins['top'];
+
+        $paths = $this->svgPaintBuilder->build(
+            $box,
+            $lineFragment->pageIndex,
+            $contentX,
+            $contentY,
+            $box->contentWidth,
+            $box->contentHeight,
+        );
+        if ($paths === []) return;
+
+        // Inline SVG establishes a viewport. Clip vector content to that viewport so
+        // preserveAspectRatio="slice" and transformed child shapes cannot leak outside it.
+        $commands[] = new ClipPaintCommand(
+            $lineFragment->pageIndex,
+            $contentX,
+            $contentY,
+            $box->contentWidth,
+            $box->contentHeight,
+        );
+        array_push($commands, ...$paths);
+        $commands[] = new ClipPaintCommand($lineFragment->pageIndex);
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
