@@ -77,6 +77,25 @@ final class TextOverflowEllipsisTest extends TestCase
         self::assertStringNotContainsString("\u{2026}", $command->text);
     }
 
+    public function testAtomicInlineBoxThatFitsIsKeptBeforeTheEllipsis(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'margins' => 0.0,
+            'html' => '<p style="' . self::STYLE . '">'
+                . 'A<span style="display:inline-block;width:20px;height:10px"></span>'
+                . 'texto-muito-longo'
+                . '</p>',
+            'viewportWidth' => 60,
+            'viewportHeight' => 200,
+        ]);
+
+        $line = $prepared->layoutRoot->children[0]->lineBoxes[0];
+        self::assertCount(1, $line->atomicBoxes);
+        self::assertStringEndsWith("\u{2026}", $line->text);
+        self::assertLessThanOrEqual(60.5, $line->width);
+    }
+
     public function testDefaultTextOverflowClipIsUnaffected(): void
     {
         $command = $this->firstText('<p style="margin:0;width:60px;white-space:nowrap;overflow:hidden">um texto bem mais longo do que a caixa</p>');
