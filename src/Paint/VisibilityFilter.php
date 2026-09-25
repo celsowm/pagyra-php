@@ -35,7 +35,7 @@ final class VisibilityFilter
     private function styleFor(object $command): ?ComputedStyle
     {
         if ($command instanceof TextPaintCommand) return $command->run->style;
-        if ($command instanceof ImagePaintCommand) return $command->box->style;
+        if ($command instanceof ImagePaintCommand || $command instanceof SvgPathPaintCommand) return $command->box->style;
         if ($command instanceof GradientPaintCommand && $command->node instanceof \Pagyra\Style\StyledNode) return $command->node->style;
         if ($command instanceof BoxPaintCommand || $command instanceof BorderPaintCommand || $command instanceof RoundedBorderPaintCommand) {
             $node = $command->node;
