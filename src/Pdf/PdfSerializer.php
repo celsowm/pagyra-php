@@ -17,6 +17,7 @@ use Pagyra\Paint\DisplayList;
 use Pagyra\Paint\ImagePaintCommand;
 use Pagyra\Paint\OpacityGroupPaintCommand;
 use Pagyra\Paint\RoundedBorderPaintCommand;
+use Pagyra\Paint\SvgPathPaintCommand;
 use Pagyra\Paint\TextPaintCommand;
 use Pagyra\Paint\TransformPaintCommand;
 use Pagyra\Units\Units;
@@ -267,6 +268,11 @@ final class PdfSerializer
                 continue;
             }
 
+            if ($command instanceof SvgPathPaintCommand) {
+                $content .= $this->serializeSvgPath($command, $pageHeightPx, $extGStateResources);
+                continue;
+            }
+
             if (!$command instanceof TextPaintCommand) continue;
 
             [$key] = $this->fontChoice($command, $fontRegistry);
@@ -448,26 +454,31 @@ final class PdfSerializer
         $index = 1;
         foreach ($displayList->pages as $page) {
             foreach ($page->commands as $command) {
-                $alpha = match (true) {
-                    $command instanceof OpacityGroupPaintCommand && $command->opens() => $command->normalizedOpacity(),
-                    $command instanceof BoxPaintCommand => $command->backgroundColor?->a,
-                    $command instanceof RoundedBorderPaintCommand => $command->color->a,
-                    $command instanceof BorderPaintCommand => $command->color->a,
-                    $command instanceof TextPaintCommand => $command->color?->a,
-                    $command instanceof ImagePaintCommand => $command->opacity,
-                    default => null,
-                };
-                if ($alpha === null || $alpha >= 1.0) continue;
-                // Primitive alpha=0 never emits paint, but an opacity:0 group still needs a
-                // graphics state so the whole transparency Form disappears at invocation time.
-                if ($alpha <= 0.0 && !$command instanceof OpacityGroupPaintCommand) continue;
-                $key = $this->alphaKey($alpha);
-                if (isset($resources[$key])) continue;
-                $id = $reserve();
-                $name = 'GS' . $index++;
-                $serializedAlpha = $this->number($alpha);
-                $objects[$id] = '<< /Type /ExtGState /ca ' . $serializedAlpha . ' /CA ' . $serializedAlpha . ' >>';
-                $resources[$key] = ['name' => $name, 'id' => $id];
+                $alphas = $command instanceof SvgPathPaintCommand
+                    ? [$command->fill?->a, $command->stroke?->a]
+                    : [match (true) {
+                        $command instanceof OpacityGroupPaintCommand && $command->opens() => $command->normalizedOpacity(),
+                        $command instanceof BoxPaintCommand => $command->backgroundColor?->a,
+                        $command instanceof RoundedBorderPaintCommand => $command->color->a,
+                        $command instanceof BorderPaintCommand => $command->color->a,
+                        $command instanceof TextPaintCommand => $command->color?->a,
+                        $command instanceof ImagePaintCommand => $command->opacity,
+                        default => null,
+                    }];
+
+                foreach ($alphas as $alpha) {
+                    if ($alpha === null || $alpha >= 1.0) continue;
+                    // Primitive alpha=0 never emits paint, but an opacity:0 group still needs a
+                    // graphics state so the whole transparency Form disappears at invocation time.
+                    if ($alpha <= 0.0 && !$command instanceof OpacityGroupPaintCommand) continue;
+                    $key = $this->alphaKey($alpha);
+                    if (isset($resources[$key])) continue;
+                    $id = $reserve();
+                    $name = 'GS' . $index++;
+                    $serializedAlpha = $this->number($alpha);
+                    $objects[$id] = '<< /Type /ExtGState /ca ' . $serializedAlpha . ' /CA ' . $serializedAlpha . ' >>';
+                    $resources[$key] = ['name' => $name, 'id' => $id];
+                }
             }
         }
         return $resources;
@@ -494,6 +505,68 @@ final class PdfSerializer
         }
         $scale = $this->number($contentScale);
         return "q\n" . $scale . ' 0 0 ' . $scale . " 0 0 cm\n" . $content . "Q\n";
+    }
+
+    private function serializeSvgPath(
+        SvgPathPaintCommand $command,
+        float $pageHeightPx,
+        array $extGStateResources,
+    ): string {
+        $path = $this->svgPdfPath($command->segments, $pageHeightPx);
+        if ($path === '') return '';
+
+        $content = '';
+        if ($command->fill instanceof Rgba && $command->fill->a > 0.0) {
+            [$r, $g, $b] = $command->fill->toPdfRgb();
+            $state = $this->graphicsStateName($command->fill, $extGStateResources);
+            $content .= "q\n"
+                . ($state !== null ? '/' . $state . " gs\n" : '')
+                . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n"
+                . $path
+                . ($command->fillRule === 'evenodd' ? "f*\n" : "f\n")
+                . "Q\n";
+        }
+
+        if ($command->stroke instanceof Rgba && $command->stroke->a > 0.0 && $command->strokeWidth > 0.0) {
+            [$r, $g, $b] = $command->stroke->toPdfRgb();
+            $state = $this->graphicsStateName($command->stroke, $extGStateResources);
+            $content .= "q\n"
+                . ($state !== null ? '/' . $state . " gs\n" : '')
+                . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " RG\n"
+                . $this->number(Units::pxToPt($command->strokeWidth)) . " w\n"
+                . $path
+                . "S\nQ\n";
+        }
+
+        return $content;
+    }
+
+    /** @param list<array<string,float|string>> $segments */
+    private function svgPdfPath(array $segments, float $pageHeightPx): string
+    {
+        $path = '';
+        foreach ($segments as $segment) {
+            $type = (string) ($segment['type'] ?? '');
+            if ($type === 'Z') {
+                $path .= "h\n";
+                continue;
+            }
+            if ($type === 'C') {
+                $path .= $this->number(Units::pxToPt((float) $segment['x1'])) . ' '
+                    . $this->number(Units::pxToPt($pageHeightPx - (float) $segment['y1'])) . ' '
+                    . $this->number(Units::pxToPt((float) $segment['x2'])) . ' '
+                    . $this->number(Units::pxToPt($pageHeightPx - (float) $segment['y2'])) . ' '
+                    . $this->number(Units::pxToPt((float) $segment['x'])) . ' '
+                    . $this->number(Units::pxToPt($pageHeightPx - (float) $segment['y'])) . " c\n";
+                continue;
+            }
+            if (!in_array($type, ['M', 'L'], true)) continue;
+            $path .= $this->number(Units::pxToPt((float) $segment['x'])) . ' '
+                . $this->number(Units::pxToPt($pageHeightPx - (float) $segment['y'])) . ' '
+                . ($type === 'M' ? "m\n" : "l\n");
+        }
+
+        return $path;
     }
 
     private function serializeTransformBegin(TransformPaintCommand $command, float $pageHeightPx): string
