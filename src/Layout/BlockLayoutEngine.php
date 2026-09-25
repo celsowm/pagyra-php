@@ -32,6 +32,7 @@ final class BlockLayoutEngine
 
     private readonly LengthParser $lengthParser;
     private readonly InlineTextFormatter $inlineTextFormatter;
+    private readonly IntrinsicSizeResolver $intrinsicSizeResolver;
     /** @var array<int,bool> memoiza containsBlockLevelChild() por nó */
     private array $containsBlockCache = [];
 
@@ -41,7 +42,9 @@ final class BlockLayoutEngine
         ?TextMetrics $textMetrics = null,
     ) {
         $this->lengthParser = new LengthParser($viewportWidth, $viewportHeight);
-        $this->inlineTextFormatter = new InlineTextFormatter($textMetrics ?? new HeuristicTextMetrics());
+        $metrics = $textMetrics ?? new HeuristicTextMetrics();
+        $this->inlineTextFormatter = new InlineTextFormatter($metrics);
+        $this->intrinsicSizeResolver = new IntrinsicSizeResolver($this->inlineTextFormatter);
     }
 
     public function layout(StyledNode $root): LayoutNode
@@ -606,18 +609,13 @@ final class BlockLayoutEngine
      * no longer visually compresses the columns after it. Per-column `<col>` width hints and
      * caption/footer semantics remain unimplemented.
      *
-     * Column widths follow the same overall shape as pagyra-js's real (min/max-content based)
-     * table algorithm for its common "preferred widths fit" case: measure each column's
-     * natural width and distribute any leftover space proportionally. What's ported is
-     * deliberately simpler, because pagyra-js's min-content measurement depends on a
-     * recursive intrinsic-sizing pass (TableLayoutStrategy::calculateColumnWidths, walking
-     * intrinsicInlineSize/minIntrinsicInlineSize across every descendant) that this PHP port
-     * does not have yet for arbitrary content. Each column's "natural width" here is instead
-     * the widest single-line shrink-to-fit measurement (shrinkToFitWidth(), the same helper
-     * float layout uses) of any cell touching that column; a colspanning cell's measured width
-     * is split evenly across the columns it covers, mirroring pagyra-js's own simplification
-     * for that case. If the total exceeds the table's content width, columns are scaled down
-     * proportionally rather than the JS reference's min/max blend.
+     * Column widths use the same min/max-content shape as pagyra-js's
+     * TableLayoutStrategy::calculateColumnWidths(): intrinsic bounds are collected recursively
+     * across each cell subtree, colspans split their requirement across the covered tracks,
+     * preferred widths receive slack when they fit, and an overflowing preferred set is blended
+     * down toward min-content before the emergency proportional shrink. A declared cell width
+     * remains a preferred column constraint, preserving the HTML width-hint behavior used by the
+     * motivating corpus.
      *
      * Row height for a rowspanning cell is reconciled the same incremental way: rows are laid
      * out top to bottom, and once a spanning cell's own row range has closed, whatever height
@@ -692,30 +690,63 @@ final class BlockLayoutEngine
             $placements = $this->collapseCellBorders($placements, $contentWidth, $containingHeight, $fontSize);
         }
 
-        $naturalColumnWidths = array_fill(0, $columnCount, 0.0);
+        $minColumnWidths = array_fill(0, $columnCount, 0.0);
+        $maxColumnWidths = array_fill(0, $columnCount, 0.0);
         foreach ($placements as $p) {
             $cellFontSize = $this->resolveFontSize($p['cell'], $fontSize);
             // A cell that declares its own width states the column's preferred width; only a cell
-            // that leaves it auto has the column guessed from its content. Real grids carry those
-            // proportions and nothing else: `<td width="378">` next to `<td width="227">` is what
-            // puts the dividing rule at 62%, and measuring the text instead moved it wherever the
-            // longest line happened to fall.
+            // that leaves it auto is sized from its subtree. This preserves the width-attribute
+            // proportions used by old HTML while allowing auto columns to follow the reference's
+            // min/max-content algorithm instead of a single shrink-to-fit probe.
             $declared = $this->declaredWidth($p['cell'], $contentWidth, $containingHeight, $cellFontSize);
-            $preferred = $declared ?? $this->shrinkToFitWidth($p['cell'], $contentWidth, $cellFontSize);
-            $share = $preferred / $p['colSpan'];
+            if ($declared !== null) {
+                $cellMin = $declared;
+                $cellMax = $declared;
+            } else {
+                $intrinsic = $this->intrinsicSizeResolver->measure($p['cell'], $contentWidth, $cellFontSize);
+                $cellPadding = $this->resolveEdges($p['cell'], 'padding', $contentWidth, $containingHeight, $cellFontSize);
+                $cellBorder = $this->resolveBorderEdges($p['cell'], $contentWidth, $containingHeight, $cellFontSize);
+                $horizontalExtras = $cellPadding->horizontal() + $cellBorder->horizontal();
+                $cellMin = $intrinsic->minContent + $horizontalExtras;
+                $cellMax = max($cellMin, $intrinsic->maxContent + $horizontalExtras);
+            }
+
+            $minShare = $cellMin / $p['colSpan'];
+            $maxShare = $cellMax / $p['colSpan'];
             for ($k = 0; $k < $p['colSpan']; $k++) {
-                $naturalColumnWidths[$p['col'] + $k] = max($naturalColumnWidths[$p['col'] + $k], $share);
+                $column = $p['col'] + $k;
+                $minColumnWidths[$column] = max($minColumnWidths[$column], $minShare);
+                $maxColumnWidths[$column] = max($maxColumnWidths[$column], $maxShare);
             }
         }
-        $totalNatural = array_sum($naturalColumnWidths);
-        if ($totalNatural <= 0.0) {
+
+        $totalMin = array_sum($minColumnWidths);
+        $totalMax = array_sum($maxColumnWidths);
+        if ($totalMax <= 0.0) {
             $columnWidths = array_fill(0, $columnCount, $contentWidth / $columnCount);
-        } elseif ($totalNatural <= $contentWidth) {
-            $slack = $contentWidth - $totalNatural;
-            $columnWidths = array_map(static fn (float $w): float => $w + $slack * ($w / $totalNatural), $naturalColumnWidths);
+        } elseif ($totalMax <= $contentWidth) {
+            $slack = $contentWidth - $totalMax;
+            $columnWidths = array_map(
+                static fn (float $w): float => $w + $slack * ($w / $totalMax),
+                $maxColumnWidths,
+            );
+        } elseif ($totalMin <= $contentWidth) {
+            $growthRoom = $totalMax - $totalMin;
+            if ($growthRoom <= 0.0) {
+                $columnWidths = $minColumnWidths;
+            } else {
+                $fraction = ($contentWidth - $totalMin) / $growthRoom;
+                $columnWidths = array_map(
+                    static fn (float $min, int $i): float => $min + ($maxColumnWidths[$i] - $min) * $fraction,
+                    $minColumnWidths,
+                    array_keys($minColumnWidths),
+                );
+            }
+        } elseif ($totalMin > 0.0) {
+            $scale = $contentWidth / $totalMin;
+            $columnWidths = array_map(static fn (float $w): float => $w * $scale, $minColumnWidths);
         } else {
-            $scale = $contentWidth / $totalNatural;
-            $columnWidths = array_map(static fn (float $w): float => $w * $scale, $naturalColumnWidths);
+            $columnWidths = array_fill(0, $columnCount, $contentWidth / $columnCount);
         }
         $columnX = [];
         $x = $contentX;
