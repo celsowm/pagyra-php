@@ -136,6 +136,18 @@ final class OpacityGroupNormalizer
             );
         }
 
+        if ($command instanceof SvgPathPaintCommand) {
+            return new SvgPathPaintCommand(
+                $command->box,
+                $command->pageIndex,
+                $command->segments,
+                $this->normalizeColor($command->fill, $factor),
+                $this->normalizeColor($command->stroke, $factor),
+                $command->strokeWidth,
+                $command->fillRule,
+            );
+        }
+
         if ($command instanceof GradientPaintCommand) {
             $stops = array_map(
                 fn(array $stop): array => [$stop[0], $this->normalizeColor($stop[1], $factor) ?? $stop[1]],
