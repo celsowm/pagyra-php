@@ -20,10 +20,31 @@ final class InlineTextFormatter
     private const EPSILON = 0.01;
 
     private readonly ReplacedElementSizingResolver $replacedElementSizing;
+    private ?\Closure $blockContentLayoutHandler = null;
+    private ?\Closure $intrinsicSizeHandler = null;
 
     public function __construct(private readonly TextMetrics $metrics = new HeuristicTextMetrics())
     {
         $this->replacedElementSizing = new ReplacedElementSizingResolver();
+    }
+
+
+    /**
+     * Lets the block engine provide a real inner formatting context for atomic inline boxes that
+     * contain block-level children. The formatter stays responsible for the outer inline atom;
+     * the block engine owns the subtree inside it.
+     *
+     * @param callable(StyledNode,float,float):AtomicContentLayout $handler
+     */
+    public function setBlockContentLayoutHandler(callable $handler): void
+    {
+        $this->blockContentLayoutHandler = \Closure::fromCallable($handler);
+    }
+
+    /** @param callable(StyledNode,float,float):IntrinsicInlineSize $handler */
+    public function setIntrinsicSizeHandler(callable $handler): void
+    {
+        $this->intrinsicSizeHandler = \Closure::fromCallable($handler);
     }
 
 
@@ -320,6 +341,7 @@ final class InlineTextFormatter
                         padding: $token['padding'],
                         border: $token['border'],
                         contentLines: $contentLines,
+                        contentBlocks: $this->translateLayoutNodes($token['contentBlocks'] ?? [], $contentX, $contentY),
                     );
                 } else {
                     $runBaseline = $cursorY + (($placement['baseline'] ?? $lineBaseline) - $minTop);
@@ -529,7 +551,7 @@ final class InlineTextFormatter
             if ($display === 'none') {
                 continue;
             }
-            $blockLevel = in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true);
+            $blockLevel = $this->isBlockLevelDisplay($display);
             if ($blockLevel && !($child->node->isImage() || $child->node->isSvg())) {
                 // Block-level, non-replaced children belong to a block formatting context this
                 // formatter does not run (see the mixed inline/block limitation in README.md).
@@ -671,7 +693,8 @@ final class InlineTextFormatter
             'padding' => $metrics['padding'],
             'border' => $metrics['border'],
             'contentLines' => $metrics['contentLines'],
-            'hasInlineFlowBaseline' => $metrics['hasInlineFlowBaseline'],
+            'contentBlocks' => $metrics['contentBlocks'],
+            'contentBaseline' => $metrics['contentBaseline'],
         ];
     }
 
@@ -767,16 +790,12 @@ final class InlineTextFormatter
      */
     private function atomicBoxBaseline(array $token): ?float
     {
-        if (!($token['hasInlineFlowBaseline'] ?? true)) {
+        $contentBaseline = $token['contentBaseline'] ?? null;
+        if ($contentBaseline === null) {
             return null;
         }
-        $lines = $token['contentLines'] ?? [];
-        if ($lines === []) {
-            return null;
-        }
-        $last = $lines[array_key_last($lines)];
 
-        return $token['margin']['top'] + $token['border']['top'] + $token['padding']['top'] + $last->baseline;
+        return $token['margin']['top'] + $token['border']['top'] + $token['padding']['top'] + $contentBaseline;
     }
 
     private function ownBaseline(float $fontSize, float $lineHeight): float
@@ -824,15 +843,10 @@ final class InlineTextFormatter
         if ($node->node->isImage() || $node->node->isSvg()) {
             [$contentWidth, $contentHeight] = $this->imageContentSize($node, $referenceWidth, $fontSize, $margin, $padding, $border);
             $contentLines = [];
-            $hasInlineFlowBaseline = false;
+            $contentBlocks = [];
+            $contentBaseline = null;
         } else {
-            [$contentWidth, $contentHeight, $contentLines] = $this->inlineBlockContentSize($node, $referenceWidth, $fontSize);
-            // contentLines still carries a synthetic line for a block-level replaced child (the
-            // display:block <img> collectTokens() approximates as an atomic box of its own — see
-            // the comment there) because DisplayListBuilder needs it to paint that child. But it
-            // is not a real line box, so atomicBoxBaseline() must not read a baseline out of it;
-            // see hasInlineFlowContent().
-            $hasInlineFlowBaseline = $this->hasInlineFlowContent($node);
+            [$contentWidth, $contentHeight, $contentLines, $contentBlocks, $contentBaseline] = $this->inlineBlockContentSize($node, $referenceWidth, $fontSize);
         }
 
         $horizontalExtras = $margin['left'] + $margin['right'] + $padding['left'] + $padding['right'] + $border['left'] + $border['right'];
@@ -847,7 +861,8 @@ final class InlineTextFormatter
             'padding' => $padding,
             'border' => $border,
             'contentLines' => $contentLines,
-            'hasInlineFlowBaseline' => $hasInlineFlowBaseline,
+            'contentBlocks' => $contentBlocks,
+            'contentBaseline' => $contentBaseline,
         ];
     }
 
@@ -876,7 +891,7 @@ final class InlineTextFormatter
             }
             $display = strtolower($child->style->get('display', 'inline') ?? 'inline');
             if ($display === 'none') continue;
-            $blockLevel = in_array($display, ['block', 'flow-root', 'list-item', 'table', 'table-row', 'table-cell'], true);
+            $blockLevel = $this->isBlockLevelDisplay($display);
             if ($blockLevel) continue;
             if ($child->node->isElement('br')) continue;
             if ($child->node->isImage() || $child->node->isSvg() || in_array($display, ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'], true)) {
@@ -885,6 +900,39 @@ final class InlineTextFormatter
             if ($this->hasInlineFlowContent($child)) return true;
         }
         return false;
+    }
+
+    private function hasBlockFormattingContent(StyledNode $node): bool
+    {
+        foreach ($node->children as $child) {
+            if ($child->node->type !== 'element') {
+                continue;
+            }
+            $display = strtolower(trim($child->style->get('display', 'inline') ?? 'inline'));
+            if ($display !== 'none' && $this->isBlockLevelDisplay($display)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isBlockLevelDisplay(string $display): bool
+    {
+        return in_array($display, [
+            'block',
+            'flow-root',
+            'list-item',
+            'table',
+            'table-row',
+            'table-row-group',
+            'table-header-group',
+            'table-footer-group',
+            'table-caption',
+            'table-cell',
+            'flex',
+            'grid',
+        ], true);
     }
 
     private function imageContentSize(StyledNode $node, float $referenceWidth, float $fontSize, array $margin, array $padding, array $border): array
@@ -947,6 +995,9 @@ final class InlineTextFormatter
         return $this->resolveSimpleLength($raw, $referenceWidth, $fontSize, $fallback);
     }
 
+    /**
+     * @return array{0:float,1:float,2:list<LineBox>,3:list<LayoutNode>,4:?float}
+     */
     private function inlineBlockContentSize(StyledNode $node, float $referenceWidth, float $fontSize): array
     {
         $rawWidth = trim($node->style->get('width', 'auto') ?? 'auto');
@@ -957,26 +1008,54 @@ final class InlineTextFormatter
         if ($hasWidth) {
             $contentWidth = $this->resolveSimpleLength($rawWidth, $referenceWidth, $fontSize, $referenceWidth);
         } else {
-            $contentWidth = min($referenceWidth > 0.0 ? $referenceWidth : INF, $this->maxContentWidth($node, $fontSize, $referenceWidth));
+            $maxContent = $this->maxContentWidth($node, $fontSize, $referenceWidth);
+            if ($this->intrinsicSizeHandler !== null) {
+                $intrinsic = ($this->intrinsicSizeHandler)($node, $referenceWidth, $fontSize);
+                if ($intrinsic instanceof IntrinsicInlineSize) {
+                    $maxContent = max($maxContent, $intrinsic->maxContent);
+                }
+            }
+            $contentWidth = min($referenceWidth > 0.0 ? $referenceWidth : INF, $maxContent);
             if (!is_finite($contentWidth) || $contentWidth <= 0.0) {
                 $contentWidth = $this->metrics->lineHeight($node->style, $fontSize);
             }
         }
 
-        $inner = $this->layout($node, 0.0, 0.0, max(0.0, $contentWidth), $fontSize);
-        $contentHeight = $hasHeight
-            ? $this->resolveSimpleLength($rawHeight, $referenceWidth, $fontSize, $inner->height)
-            : max($inner->height, $this->metrics->lineHeight($node->style, $fontSize));
-
         $contentWidth = $this->clampDimension($node, 'width', $contentWidth, $referenceWidth, $fontSize);
+        $inner = $this->layoutAtomicContents($node, max(0.0, $contentWidth), $fontSize);
+
+        if ($hasHeight) {
+            $contentHeight = $this->resolveSimpleLength($rawHeight, $referenceWidth, $fontSize, $inner->height);
+        } else {
+            // A genuine block formatting context has no anonymous font strut of its own: its
+            // height is exactly the content it laid out. The line-height floor remains for the
+            // legacy/all-inline path so empty and text-only inline-block behavior stays stable.
+            $contentHeight = $inner->blocks !== []
+                ? $inner->height
+                : max($inner->height, $this->metrics->lineHeight($node->style, $fontSize));
+        }
         $contentHeight = $this->clampDimension($node, 'height', $contentHeight, $referenceWidth, $fontSize);
 
-        if (!$hasWidth) {
-            $inner = $this->layout($node, 0.0, 0.0, max(0.0, $contentWidth), $fontSize);
-            if (!$hasHeight) $contentHeight = max($inner->height, $this->metrics->lineHeight($node->style, $fontSize));
+        return [$contentWidth, $contentHeight, $inner->lines, $inner->blocks, $inner->baseline];
+    }
+
+    private function layoutAtomicContents(StyledNode $node, float $contentWidth, float $fontSize): AtomicContentLayout
+    {
+        if ($this->blockContentLayoutHandler !== null && $this->hasBlockFormattingContent($node)) {
+            $layout = ($this->blockContentLayoutHandler)($node, $contentWidth, $fontSize);
+            if ($layout instanceof AtomicContentLayout) {
+                return $layout;
+            }
         }
 
-        return [$contentWidth, $contentHeight, $inner->lines];
+        $inner = $this->layout($node, 0.0, 0.0, $contentWidth, $fontSize);
+        $baseline = null;
+        if ($this->hasInlineFlowContent($node) && $inner->lines !== []) {
+            $last = $inner->lines[array_key_last($inner->lines)];
+            $baseline = $last->baseline;
+        }
+
+        return new AtomicContentLayout($inner->height, $inner->lines, [], $baseline);
     }
 
     private function maxContentWidth(StyledNode $node, float $fontSize, float $referenceWidth): float
@@ -1144,11 +1223,36 @@ final class InlineTextFormatter
             }
             $boxes = [];
             foreach ($line->atomicBoxes as $box) {
-                $boxes[] = new AtomicInlineBox($box->source, $box->x + $dx, $box->y + $dy, $box->width, $box->height, $box->style, $box->contentWidth, $box->contentHeight, $box->margin, $box->padding, $box->border, $this->translateLines($box->contentLines, $dx, $dy));
+                $boxes[] = new AtomicInlineBox($box->source, $box->x + $dx, $box->y + $dy, $box->width, $box->height, $box->style, $box->contentWidth, $box->contentHeight, $box->margin, $box->padding, $box->border, $this->translateLines($box->contentLines, $dx, $dy), $this->translateLayoutNodes($box->contentBlocks, $dx, $dy));
             }
             $translated[] = new LineBox($line->x + $dx, $line->y + $dy, $line->width, $line->height, $line->baseline + $dy, $line->text, $runs, $boxes);
         }
         return $translated;
+    }
+
+    /** @param list<LayoutNode> $nodes @return list<LayoutNode> */
+    private function translateLayoutNodes(array $nodes, float $dx, float $dy): array
+    {
+        return array_map(fn(LayoutNode $node): LayoutNode => $this->translateLayoutNode($node, $dx, $dy), $nodes);
+    }
+
+    private function translateLayoutNode(LayoutNode $node, float $dx, float $dy): LayoutNode
+    {
+        $box = $node->box;
+        $content = $box->content;
+
+        return new LayoutNode(
+            $node->source,
+            new LayoutBox(
+                new \Pagyra\Geometry\Rect($content->x + $dx, $content->y + $dy, $content->width, $content->height),
+                $box->padding,
+                $box->border,
+                $box->margin,
+            ),
+            $this->translateLayoutNodes($node->children, $dx, $dy),
+            $node->fontSize,
+            $this->translateLines($node->lineBoxes, $dx, $dy),
+        );
     }
 
     private function collapsesSpaces(string $whiteSpace): bool
