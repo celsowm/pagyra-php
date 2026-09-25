@@ -32,7 +32,7 @@ Status levels:
 | Flexbox | P2+ | Direction, wrapping, grow/shrink/basis, order, gaps and main/cross-axis alignment are implemented. |
 | Grid | P2+ | px/%/fr/auto/minmax/repeat tracks, auto-fill/fit, placement/spans, implicit tracks, alignment and `grid-template-areas` are implemented. Named grid lines remain open. |
 | Tables | P2/P3 | Real grid, row groups, captions, colspan/rowspan, vertical-align and collapsed borders exist. Columns use recursive min/max-content sizing and consume CSS/legacy `<col>`/`<colgroup>` width hints including `span`. `table-header-group` / `table-footer-group` rows repeat across page fragments and reserve real page space; tables with multi-row `rowspan` fall back to the non-repeating fragment path until spanning-row packing is supported. |
-| Recursive intrinsic sizing | Partial | A reusable resolver now exposes min/max-content bounds; tables and float shrink-to-fit consume it. Reusing it across inline-block/flex/grid intrinsic paths is the next slice. |
+| Recursive intrinsic sizing | P2+ | One reusable resolver exposes recursive min/max-content and border-box contributions, including declared descendant widths and box edges. Table, float, inline-block, flex and grid intrinsic paths consume the shared measurement instead of maintaining separate recursive probes. |
 | Pagination | P2/P3 | Forced breaks, parity pages, break-inside, widows/orphans and recursive physical fragmentation are implemented. |
 | Header/footer page model | Open | The independent measured first/even/odd header/footer subsystem from `pagyra-js` is not ported yet. |
 | Background color/images/gradients | P3 | URL backgrounds, position, size, repeat, linear/radial gradients and color are painted. Attachment/origin/clip need broader semantics. |
@@ -54,7 +54,6 @@ Status levels:
 
 ## Next implementation order
 
-1. Reuse recursive intrinsic sizing in flex and grid paths (inline-block, table and float paths already consume it).
 4. Give normal non-atomic inline opacity its own fragment/group identity instead of the per-run fallback.
 5. Extend SVG vector paint to `defs`/gradients, `use`, text/image and clipPath/mask; add CSS 3D only if reference/corpus requires it.
 6. Port WOFF/WOFF2 decoding and the JS GPOS PairPos format-1 subset.
