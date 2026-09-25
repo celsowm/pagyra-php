@@ -61,6 +61,19 @@ final class GridLayoutTest extends TestCase
         self::assertSame([100.0, 20.0, 100.0, 30.0], $items[2]);
     }
 
+    public function testAutoColumnUsesRecursiveIntrinsicBorderBoxOfNestedBlock(): void
+    {
+        $items = $this->items(
+            'grid-template-columns:auto 1fr',
+            '<div><div style="width:80px;padding:10px;border:2px solid #000"></div></div>'
+            . '<div class="i"></div>',
+        );
+
+        self::assertEqualsWithDelta(104.0, $items[0][2], 0.001);
+        self::assertEqualsWithDelta(104.0, $items[1][0], 0.001);
+        self::assertEqualsWithDelta(296.0, $items[1][2], 0.001);
+    }
+
     public function testAutoColumnsTakeTheirContentAndAlignment(): void
     {
         $items = $this->items('grid-template-columns:auto 1fr;align-items:center;grid-auto-rows:60px', '<div style="width:80px" class="i"></div><div class="i" style="justify-self:end;width:50px"></div>');
