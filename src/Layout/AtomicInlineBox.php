@@ -14,6 +14,7 @@ final readonly class AtomicInlineBox implements \JsonSerializable
      * @param array{top:float,right:float,bottom:float,left:float} $padding
      * @param array{top:float,right:float,bottom:float,left:float} $border
      * @param list<LineBox> $contentLines
+     * @param list<LayoutNode> $contentBlocks
      */
     public function __construct(
         public StyledNode $source,
@@ -28,6 +29,7 @@ final readonly class AtomicInlineBox implements \JsonSerializable
         public array $padding = ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0],
         public array $border = ['top' => 0.0, 'right' => 0.0, 'bottom' => 0.0, 'left' => 0.0],
         public array $contentLines = [],
+        public array $contentBlocks = [],
     ) {
     }
 
@@ -45,6 +47,7 @@ final readonly class AtomicInlineBox implements \JsonSerializable
             'padding' => $this->padding,
             'border' => $this->border,
             'contentLines' => $this->contentLines,
+            'contentBlocks' => $this->contentBlocks,
             'style' => $this->style,
         ];
     }
