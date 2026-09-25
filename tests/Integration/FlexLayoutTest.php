@@ -62,6 +62,30 @@ final class FlexLayoutTest extends TestCase
         self::assertEqualsWithDelta(400.0, $items[1][0] + $items[1][2], 0.001);
     }
 
+    public function testAutoItemUsesRecursiveIntrinsicBorderBoxOfNestedBlock(): void
+    {
+        $items = $this->items(
+            'display:flex',
+            '<div><div style="width:80px;padding:10px;border:2px solid #000"></div></div>'
+            . '<div class="i" style="width:20px"></div>',
+        );
+
+        self::assertEqualsWithDelta(104.0, $items[0][2], 0.001);
+        self::assertEqualsWithDelta(104.0, $items[1][0], 0.001);
+    }
+
+    public function testPercentageWidthParticipatesInPreferredFlexSizing(): void
+    {
+        $items = $this->items(
+            'display:flex',
+            '<div class="i" style="width:50%;flex-shrink:0"></div>'
+            . '<div class="i" style="width:20px"></div>',
+        );
+
+        self::assertEqualsWithDelta(200.0, $items[0][2], 0.001);
+        self::assertEqualsWithDelta(200.0, $items[1][0], 0.001);
+    }
+
     public function testWrapAndAlignment(): void
     {
         $wrapped = $this->items('display:flex;flex-wrap:wrap', str_repeat('<div class="i" style="width:150px"></div>', 3));
