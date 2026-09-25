@@ -1062,6 +1062,55 @@ final class DisplayListBuilder
             }
             $this->appendLines($commands, $nested, $margins);
         }
+
+        if ($box->contentBlocks !== []) {
+            $pageOffsetY = $lineFragment->pageY - $line->y;
+            foreach ($box->contentBlocks as $contentBlock) {
+                $this->appendBlock(
+                    $commands,
+                    $this->unfragmentedAtomicBlock($contentBlock, $lineFragment->pageIndex, $pageOffsetY),
+                    $margins,
+                );
+            }
+        }
+    }
+
+    /**
+     * Turns a nested LayoutNode from an atomic inline box into the same fragment shape the normal
+     * paint path consumes. Inline-blocks are atomic for pagination, so their inner block tree
+     * cannot fragment independently: every descendant stays on the parent's page.
+     */
+    private function unfragmentedAtomicBlock(LayoutNode $node, int $pageIndex, float $pageOffsetY): BlockFragment
+    {
+        $border = $node->box->borderBox();
+        $lines = [];
+        foreach ($node->lineBoxes as $lineIndex => $line) {
+            $lines[] = new LineFragment(
+                line: $line,
+                lineIndex: $lineIndex,
+                pageIndex: $pageIndex,
+                pageY: $line->y + $pageOffsetY,
+                pageBaseline: $line->baseline + $pageOffsetY,
+                continuousY: $line->y,
+                continuousBaseline: $line->baseline,
+            );
+        }
+
+        $children = array_map(
+            fn(LayoutNode $child): BlockFragment => $this->unfragmentedAtomicBlock($child, $pageIndex, $pageOffsetY),
+            $node->children,
+        );
+
+        return new BlockFragment(
+            node: $node,
+            pageIndex: $pageIndex,
+            pageY: $border->y + $pageOffsetY,
+            height: $border->height,
+            continuousStartY: $border->y,
+            continuousEndY: $border->bottom(),
+            lines: $lines,
+            children: $children,
+        );
     }
 
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
