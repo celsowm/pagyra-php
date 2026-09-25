@@ -68,6 +68,35 @@ final class FontRegistry
         return null;
     }
 
+    /**
+     * Resolve the first family in the CSS stack whose matched face actually contains this
+     * codepoint. Glyph 0 is .notdef and therefore does not count as coverage.
+     */
+    public function resolveFaceForCodePoint(
+        ?string $fontFamily,
+        int $codePoint,
+        int $weight = 400,
+        string $style = 'normal',
+    ): ?RegisteredFont {
+        $requestedWeight = $this->normalizedWeight($weight);
+        $requestedStyle = $this->normalizedStyle($style);
+
+        foreach ($this->families($fontFamily) as $family) {
+            $variants = $this->fonts[$this->familyKey($family)] ?? null;
+            if ($variants === null) continue;
+
+            $face = $variants[$this->variantKey($requestedWeight, $requestedStyle)] ?? null;
+            $face ??= $this->nearestVariant($variants, $requestedWeight, $requestedStyle, true);
+            $face ??= $this->nearestVariant($variants, $requestedWeight, $requestedStyle, false);
+
+            if ($face !== null && $face->metrics->glyphId($codePoint) !== 0) {
+                return $face;
+            }
+        }
+
+        return null;
+    }
+
     /** @param array<string,RegisteredFont> $variants */
     private function nearestVariant(array $variants, int $requestedWeight, string $requestedStyle, bool $requireStyle): ?RegisteredFont
     {
