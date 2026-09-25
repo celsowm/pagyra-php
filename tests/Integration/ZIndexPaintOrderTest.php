@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pagyra\Tests\Integration;
 
 use Pagyra\Pagyra;
+use Pagyra\Paint\ClipPaintCommand;
 use Pagyra\Paint\TextPaintCommand;
 use PHPUnit\Framework\TestCase;
 
@@ -96,6 +97,45 @@ final class ZIndexPaintOrderTest extends TestCase
         );
 
         self::assertSame(['NEGATIVE-GRANDCHILD', 'NORMAL-A', 'NORMAL-B'], $texts);
+    }
+
+    public function testPromotedDescendantReopensOverflowClipOfCrossedAncestor(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'margins' => 0.0,
+            'html' => '<div>'
+                . '<div style="height:20px;overflow:hidden">CLIPPED-ANCESTOR'
+                . '<div style="position:absolute;z-index:100">PROMOTED</div>'
+                . '</div>'
+                . '<div style="position:relative;z-index:2">SIBLING</div>'
+                . '</div>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        $commands = $prepared->displayList->pages[0]->commands;
+        $promotedIndex = null;
+        foreach ($commands as $index => $command) {
+            if ($command instanceof TextPaintCommand && trim($command->text) === 'PROMOTED') {
+                $promotedIndex = $index;
+                break;
+            }
+        }
+
+        self::assertNotNull($promotedIndex);
+
+        $openBefore = false;
+        $depth = 0;
+        foreach ($commands as $index => $command) {
+            if ($index >= $promotedIndex) break;
+            if (!$command instanceof ClipPaintCommand) continue;
+            if ($command->opens()) $depth++;
+            else $depth = max(0, $depth - 1);
+        }
+        $openBefore = $depth > 0;
+
+        self::assertTrue($openBefore, 'promoted descendant must still paint inside its overflow ancestor clip');
     }
 
     public function testNestedSiblingScopesAreResolvedRecursively(): void
