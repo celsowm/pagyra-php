@@ -2138,15 +2138,15 @@ final class BlockLayoutEngine
      *
      * @return list<StyledNode>
      */
-    private function collectTableRows(StyledNode $table): array
+    private function collectTableRows(StyledNode $table, string $section = 'body'): array
     {
         $rows = [];
         $pending = [];
 
-        $flushPending = function () use (&$pending, &$rows, $table): void {
+        $flushPending = function () use (&$pending, &$rows, $table, $section): void {
             if ($pending === []) return;
             $cell = $this->anonymousTableBox($table, 'table-cell', $pending);
-            $rows[] = $this->anonymousTableBox($table, 'table-row', [$cell]);
+            $rows[] = $this->withTableSection($this->anonymousTableBox($table, 'table-row', [$cell]), $section);
             $pending = [];
         };
 
@@ -2156,12 +2156,17 @@ final class BlockLayoutEngine
 
             if ($display === 'table-row') {
                 $flushPending();
-                $rows[] = $child;
+                $rows[] = $this->withTableSection($child, $section);
                 continue;
             }
             if (in_array($display, ['table-row-group', 'table-header-group', 'table-footer-group'], true)) {
                 $flushPending();
-                array_push($rows, ...$this->collectTableRows($child));
+                $groupSection = match ($display) {
+                    'table-header-group' => 'header',
+                    'table-footer-group' => 'footer',
+                    default => 'body',
+                };
+                array_push($rows, ...$this->collectTableRows($child, $groupSection));
                 continue;
             }
             // Column boxes and captions are not rows and generate no anonymous ones either; the
@@ -2175,6 +2180,14 @@ final class BlockLayoutEngine
         $flushPending();
 
         return $rows;
+    }
+
+    private function withTableSection(StyledNode $row, string $section): StyledNode
+    {
+        $properties = $row->style->properties;
+        $properties['x-table-section'] = $section;
+
+        return new StyledNode($row->node, new ComputedStyle($properties), $row->children);
     }
 
     /**
