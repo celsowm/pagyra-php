@@ -78,8 +78,8 @@ Current foundation:
 - fallback baseline follows the `pagyra-js` ascent/half-leading model (`0.75 * font-size` ascent when font ascent metrics are unavailable);
 - atomic inline-box participation for `inline-block`, `inline-flex`, `inline-grid`, `inline-table`, images and inline SVG;
 - atomic inline wrapping uses full outer size: content + padding + border + margins;
-- `AtomicInlineBox` exposes content size plus margin/padding/border edge metrics and nested `contentLines`;
-- recursive atomic-inline paint for backgrounds, solid/rounded borders and nested `contentLines`, including nested inline-block text;
+- `AtomicInlineBox` exposes content size plus margin/padding/border edge metrics, nested inline `contentLines`, and real nested block-layout subtrees through `contentBlocks`;
+- recursive atomic-inline paint for backgrounds, solid/rounded borders, nested `contentLines` and nested block-formatting-context subtrees;
 - `LineBox` exposes a unified ordered inline item view so surrounding `TextRun` and `AtomicInlineBox` paint in inline/layout order instead of all text first and atomics afterward;
 - intrinsic PNG/JPEG/WebP metadata extraction from data URLs and readable local resources;
 - SVG intrinsic sizing from `width`/`height`/`viewBox` for inline SVG and SVG image sources;
@@ -242,9 +242,9 @@ Atomic inline content can participate in the same line, expose an internal layou
 </p>
 ```
 
-The span carries nested `contentLines` laid out inside its content box, and its background/border/text participate in the display list. The image resolves to `80 x 40` content pixels because only its width is overridden. Text and atomic boxes are consumed in one ordered inline sequence for paint.
+The span carries an internal formatting context: all-inline content uses nested `contentLines`, while block-containing inline-blocks carry real nested `contentBlocks`; both paint recursively in document order. The image resolves to `80 x 40` content pixels because only its width is overridden. Text and atomic boxes are consumed in one ordered inline sequence for paint.
 
-The inline formatter still has deliberate limits: block-level, non-replaced children inside atomic boxes (a `<div>` inside an `inline-block` still needs a real nested block formatting context), richer Unicode line-breaking rules, hyphenation and browser-specific vertical-align/justification edge cases remain for later slices.
+The inline formatter now delegates block-containing atomic boxes to a real nested block formatting context; inline padding/border also reserves real horizontal line geometry, and ellipsis can retain fitting atomic boxes. Richer Unicode line-breaking rules, hyphenation and browser-specific vertical-align/justification edge cases remain for later slices.
 
 `text-decoration` paint now covers underline, line-through and overline plus solid/double/dashed/dotted/wavy styles and `text-decoration-color`, using the reference renderer's geometry where applicable.
 
