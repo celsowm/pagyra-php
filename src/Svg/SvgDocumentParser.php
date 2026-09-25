@@ -35,8 +35,9 @@ final class SvgDocumentParser
         ]);
 
         $shapes = [];
+        $rootTransform = trim($root->attribute('transform') ?? '');
         foreach ($root->children as $child) {
-            $this->collect($child, $style, $shapes);
+            $this->collect($child, $style, $shapes, $rootTransform);
         }
 
         return new SvgDocument(
@@ -49,14 +50,16 @@ final class SvgDocumentParser
     }
 
     /** @param array<string,string> $inherited @param list<array<string,mixed>> $shapes */
-    private function collect(Node $node, array $inherited, array &$shapes): void
+    private function collect(Node $node, array $inherited, array &$shapes, string $inheritedTransform = ''): void
     {
         if ($node->type !== 'element') return;
         $style = $this->style($node, $inherited);
         $tag = $node->tagName ?? '';
+        $ownTransform = trim($node->attribute('transform') ?? '');
+        $transform = trim($inheritedTransform . ($inheritedTransform !== '' && $ownTransform !== '' ? ' ' : '') . $ownTransform);
 
         if (in_array($tag, ['svg', 'g'], true)) {
-            foreach ($node->children as $child) $this->collect($child, $style, $shapes);
+            foreach ($node->children as $child) $this->collect($child, $style, $shapes, $transform);
             return;
         }
 
@@ -69,7 +72,10 @@ final class SvgDocumentParser
             'polyline', 'polygon' => $this->pointsShape($node, $style, $tag),
             default => null,
         };
-        if ($shape !== null) $shapes[] = $shape;
+        if ($shape !== null) {
+            if ($transform !== '') $shape['transform'] = $transform;
+            $shapes[] = $shape;
+        }
     }
 
     /** @param array<string,string> $style */
