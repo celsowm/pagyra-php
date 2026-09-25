@@ -916,15 +916,14 @@ final class DisplayListBuilder
         $baseline = $lineFragment->pageBaseline + ($run->baseline - $line->baseline) + $margins['top'];
         if ($run->inlineBackground !== null || $run->inlineBorderWidth > 0.0) {
             // CSS paints an inline box's background/border over its content area, which is the
-            // font's ascent plus descent around the baseline, not the line box: a highlighted
-            // word in a paragraph with line-height: 2 gets a band hugging the glyphs, not a
-            // double-height slab. The 0.9/0.22 em split is the hhea ascent/descent of the
-            // Liberation and URW faces that stand in for the Base14 families, which is what
-            // WebKit draws with. `padding-left`/`padding-right` widen that same band instead of
-            // pushing the surrounding text aside (TextRun's own docblock has why).
-            $bandX = $run->x + $margins['left'] - $run->inlinePaddingLeft;
+            // font's ascent plus descent around the baseline, not the line box. Horizontal
+            // padding/border are real line geometry now, so the glyph run starts *inside* those
+            // edges and this paint band expands back out to the inline box fragment.
+            $startBorder = $run->inlineBorderStart ? $run->inlineBorderWidth : 0.0;
+            $endBorder = $run->inlineBorderEnd ? $run->inlineBorderWidth : 0.0;
+            $bandX = $run->x + $margins['left'] - $run->inlinePaddingLeft - $startBorder;
             $bandY = $baseline - self::INLINE_BACKGROUND_ASCENT * $run->fontSize;
-            $bandWidth = $run->width + $run->inlinePaddingLeft + $run->inlinePaddingRight;
+            $bandWidth = $run->width + $run->inlinePaddingLeft + $run->inlinePaddingRight + $startBorder + $endBorder;
             $bandHeight = (self::INLINE_BACKGROUND_ASCENT + self::INLINE_BACKGROUND_DESCENT) * $run->fontSize;
             if ($run->inlineBackground !== null) {
                 $commands[] = new BoxPaintCommand(
@@ -941,12 +940,13 @@ final class DisplayListBuilder
                 $borderColor = Opacity::apply(ColorParser::parse($run->inlineBorderColor), $run->style);
                 if ($borderColor !== null) {
                     $w = $run->inlineBorderWidth;
-                    foreach ([
+                    $sides = [
                         [$bandX, $bandY, $bandWidth, $w],
                         [$bandX, $bandY + $bandHeight - $w, $bandWidth, $w],
-                        [$bandX, $bandY, $w, $bandHeight],
-                        [$bandX + $bandWidth - $w, $bandY, $w, $bandHeight],
-                    ] as [$sideX, $sideY, $sideWidth, $sideHeight]) {
+                    ];
+                    if ($run->inlineBorderStart) $sides[] = [$bandX, $bandY, $w, $bandHeight];
+                    if ($run->inlineBorderEnd) $sides[] = [$bandX + $bandWidth - $w, $bandY, $w, $bandHeight];
+                    foreach ($sides as [$sideX, $sideY, $sideWidth, $sideHeight]) {
                         $commands[] = new BoxPaintCommand(
                             node: $run,
                             pageIndex: $lineFragment->pageIndex,
