@@ -745,8 +745,8 @@ final class BlockLayoutEngine
      * and `border-collapse: collapse`. `<thead>`/`<tbody>`/`<tfoot>` wrappers are read through
      * transparently (collectTableRows()); buildTableGrid() places every cell at its true
      * (row, col) origin and reserves the extra columns/rows a span covers, so a spanning cell
-     * no longer visually compresses the columns after it. Per-column `<col>` width hints and
-     * caption/footer semantics remain unimplemented.
+     * no longer visually compresses the columns after it. `<col>`/`<colgroup>` width hints
+     * participate in column sizing; repeated header/footer fragmentation semantics remain open.
      *
      * Column widths use the same min/max-content shape as pagyra-js's
      * TableLayoutStrategy::calculateColumnWidths(): intrinsic bounds are collected recursively
@@ -831,6 +831,16 @@ final class BlockLayoutEngine
 
         $minColumnWidths = array_fill(0, $columnCount, 0.0);
         $maxColumnWidths = array_fill(0, $columnCount, 0.0);
+
+        // CSS table-column/table-column-group widths are track constraints, not boxes that get
+        // laid out on their own. StyleComputer already maps legacy <col width="..."> attributes
+        // into computed width values; consume those tracks before cell intrinsic measurements.
+        foreach ($this->tableColumnWidthHints($styled, $columnCount, $contentWidth, $containingHeight, $fontSize) as $column => $hint) {
+            if ($hint === null) continue;
+            $minColumnWidths[$column] = max($minColumnWidths[$column], $hint);
+            $maxColumnWidths[$column] = max($maxColumnWidths[$column], $hint);
+        }
+
         foreach ($placements as $p) {
             $cellFontSize = $this->resolveFontSize($p['cell'], $fontSize);
             // A cell that declares its own width states the column's preferred width; only a cell
@@ -1933,6 +1943,73 @@ final class BlockLayoutEngine
         $overflow = strtolower(trim($node->style->get('overflow') ?? 'visible'));
 
         return in_array($overflow, ['', 'visible', 'clip'], true);
+    }
+
+    /**
+     * Width hints contributed by table-column/table-column-group boxes in source order.
+     *
+     * A <col span=N> applies its width to N consecutive columns. A <colgroup> containing explicit
+     * <col> children takes its coverage from those children; an empty group uses its own span.
+     * Group width acts as a fallback for child cols that do not declare one themselves.
+     *
+     * @return list<?float>
+     */
+    private function tableColumnWidthHints(
+        StyledNode $table,
+        int $columnCount,
+        float $widthReference,
+        float $heightReference,
+        float $fontSize,
+    ): array {
+        $hints = array_fill(0, $columnCount, null);
+        $cursor = 0;
+
+        $apply = function (StyledNode $column, int $span, ?float $fallbackWidth = null) use (&$hints, &$cursor, $columnCount, $widthReference, $heightReference, $fontSize): void {
+            if ($cursor >= $columnCount) return;
+            $columnFont = $this->resolveFontSize($column, $fontSize);
+            $width = $this->declaredWidth($column, $widthReference, $heightReference, $columnFont) ?? $fallbackWidth;
+            $span = max(1, min($span, $columnCount - $cursor));
+            for ($i = 0; $i < $span; $i++, $cursor++) {
+                if ($width !== null) {
+                    $hints[$cursor] = max($hints[$cursor] ?? 0.0, $width);
+                }
+            }
+        };
+
+        foreach ($table->children as $child) {
+            $display = $this->display($child);
+            if ($display === 'table-column') {
+                $span = $this->positiveSpanAttribute($child, 'span');
+                $apply($child, $span);
+                continue;
+            }
+            if ($display !== 'table-column-group') continue;
+
+            $groupFont = $this->resolveFontSize($child, $fontSize);
+            $groupWidth = $this->declaredWidth($child, $widthReference, $heightReference, $groupFont);
+            $columns = array_values(array_filter(
+                $child->children,
+                fn(StyledNode $col): bool => $this->display($col) === 'table-column',
+            ));
+            if ($columns === []) {
+                $span = $this->positiveSpanAttribute($child, 'span');
+                $apply($child, $span, $groupWidth);
+                continue;
+            }
+            foreach ($columns as $column) {
+                $span = $this->positiveSpanAttribute($column, 'span');
+                $apply($column, $span, $groupWidth);
+            }
+        }
+
+        return $hints;
+    }
+
+    private function positiveSpanAttribute(StyledNode $node, string $name): int
+    {
+        $raw = trim($node->node->attribute($name) ?? '');
+        if ($raw === '' || preg_match('/^\d+$/', $raw) !== 1) return 1;
+        return max(1, (int) $raw);
     }
 
     /**
