@@ -282,6 +282,18 @@ final class BlockLayoutEngine
                 $children[] = $layout;
                 continue;
             }
+
+            $clear = $this->clearSide($child);
+            if ($clear !== null) {
+                if ($float->active) $this->excludeFloat($float);
+                $clearance = $this->floatContext->clearanceBottom($clear);
+                if ($clearance > $cursorY) {
+                    $cursorY = $clearance;
+                    $previousBorderBottom = null;
+                    $previousBottomMargin = 0.0;
+                }
+            }
+
             if ($float->active && $this->wrapsAroundFloats($child)) {
                 $this->excludeFloat($float);
             } elseif ($float->active) {
@@ -550,6 +562,19 @@ final class BlockLayoutEngine
                 $firstInFlowChild = false;
                 continue;
             }
+
+            $clear = $this->clearSide($child);
+            if ($clear !== null) {
+                if ($float->active) $this->excludeFloat($float);
+                $clearance = $this->floatContext->clearanceBottom($clear);
+                if ($clearance > $cursorY) {
+                    $cursorY = $clearance;
+                    $previousBorderBottom = null;
+                    $previousBottomMargin = 0.0;
+                    $firstInFlowChild = false;
+                }
+            }
+
             if ($float->active && $this->wrapsAroundFloats($child)) {
                 $this->excludeFloat($float);
                 $firstInFlowChild = false;
@@ -1895,14 +1920,15 @@ final class BlockLayoutEngine
 
     /**
      * Whether a block lets the lines inside it flow around outside floats: an ordinary block in
-     * normal flow does; one that clears, and one that establishes a formatting context of its
-     * own (table, flex, grid, inline-block, overflow other than visible), does not.
+     * normal flow does; a box that establishes a formatting context of its own (table, flex,
+     * grid, inline-block, overflow other than visible) does not. `clear` changes vertical
+     * placement but does not itself create a new BFC, so opposite-side floats may still shorten
+     * the cleared box's line boxes.
      */
     private function wrapsAroundFloats(StyledNode $node): bool
     {
         if ($node->node->isImage() || $node->node->isSvg()) return false;
         if (!in_array($this->display($node), ['block', 'list-item'], true)) return false;
-        if (!in_array(strtolower(trim($node->style->get('clear') ?? 'none')), ['', 'none'], true)) return false;
         if ($this->floatSide($node) !== null) return false;
         $overflow = strtolower(trim($node->style->get('overflow') ?? 'visible'));
 
@@ -2250,6 +2276,13 @@ final class BlockLayoutEngine
     {
         $value = strtolower(trim($node->style->get('float', 'none') ?? 'none'));
         return $value === 'left' || $value === 'right' ? $value : null;
+    }
+
+
+    private function clearSide(StyledNode $node): ?string
+    {
+        $value = strtolower(trim($node->style->get('clear', 'none') ?? 'none'));
+        return in_array($value, ['left', 'right', 'both'], true) ? $value : null;
     }
 
     /**
