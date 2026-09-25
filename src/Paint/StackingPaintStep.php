@@ -5,19 +5,25 @@ declare(strict_types=1);
 namespace Pagyra\Paint;
 
 use Pagyra\Pagination\BlockFragment;
+use Pagyra\Pagination\PhysicalPageEntry;
 
 /**
- * One independently painted block in a resolved stacking-context order.
+ * One independently painted subject in resolved stacking-context order.
  *
- * @param list<BlockFragment> $ancestors Ancestor fragments between the current stacking-context
- * root and this block. They are retained so paint can re-apply overflow clips after a descendant
- * is promoted out of the ancestor's recursive paint position.
+ * A subject is either a top-level physical-page entry or a descendant block fragment. The
+ * ancestor chain preserves the structural path crossed by context flattening so overflow clips
+ * can be re-applied even when a positioned descendant paints far away from its DOM parent.
+ *
+ * @phpstan-type PaintSubject BlockFragment|PhysicalPageEntry
  */
 final readonly class StackingPaintStep
 {
-    /** @param list<BlockFragment> $ancestors */
+    /**
+     * @param BlockFragment|PhysicalPageEntry $subject
+     * @param list<BlockFragment|PhysicalPageEntry> $ancestors
+     */
     public function __construct(
-        public BlockFragment $fragment,
+        public BlockFragment|PhysicalPageEntry $subject,
         public array $ancestors = [],
     ) {
     }
