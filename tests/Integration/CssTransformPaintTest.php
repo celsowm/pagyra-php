@@ -27,7 +27,11 @@ final class CssTransformPaintTest extends TestCase
         $text = null;
         foreach ($commands as $index => $command) {
             if ($command instanceof TransformPaintCommand) {
-                ($command->opens() ? $open : $close)[] = $index;
+                if ($command->opens()) {
+                    $open[] = $index;
+                } else {
+                    $close[] = $index;
+                }
             }
             if ($command instanceof TextPaintCommand && trim($command->text) === 'TEXT') {
                 $text = $index;
