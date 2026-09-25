@@ -40,7 +40,7 @@ Status levels:
 | Text decoration | P3 | Underline, line-through, overline, solid/double/dashed/dotted/wavy and decoration color are implemented. |
 | Overflow clipping | P3 | `hidden`/`clip` paint clipping and text-overflow ellipsis exist; ellipsis preserves atomic inline boxes that fully fit before the truncation point. |
 | Opacity | Partial | Element/ancestor opacity reaches paint through per-command alpha. True isolated-group compositing for overlapping child paint is still open. |
-| Stacking contexts / z-index | Partial | Positioned sibling context roots with numeric `z-index` now paint in stable negative / normal-auto / non-negative phases recursively. Full same-context descendant flattening across ancestors that do not establish a context, plus opacity-group context isolation, remains open. |
+| Stacking contexts / z-index | P3 ordering | The physical page is the root stacking context; positioned numeric z-index roots are flattened through non-context ancestors and paint in stable negative / normal-auto / non-negative phases, including across top-level page entries. `opacity < 1` also establishes an isolating context. True PDF transparency-group compositing remains open, so opacity is still applied per command. |
 | CSS transforms | Open | No general matrix/transform paint pipeline yet. |
 | JPEG / PNG PDF paint | P3 | JPEG direct embedding and multiple PNG color/transparency forms are supported. Adam7 remains open. |
 | WebP | Partial | Metadata/intrinsic sizing is implemented; PDF paint/decoding is not. |
@@ -55,7 +55,7 @@ Status levels:
 ## Next implementation order
 
 1. Reuse recursive intrinsic sizing in flex and grid paths (inline-block, table and float paths already consume it).
-4. Complete same-context descendant flattening and opacity-aware stacking contexts.
+4. Add true isolated PDF transparency-group compositing for opacity contexts.
 5. Add 2D transforms and reuse them for SVG paint.
 6. Port WOFF/WOFF2 decoding and the JS GPOS PairPos format-1 subset.
 7. Port the independent paged header/footer subsystem.
