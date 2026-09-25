@@ -29,7 +29,22 @@ final class TtfParserTest extends TestCase
         ], $metrics->bbox);
     }
 
-    private function fontFixture(): string
+    public function testGposPairPosFormat1SupersedesLegacyKern(): void
+    {
+        $metrics = (new TtfParser())->parse($this->fontFixture($this->gposPairFormat1(-80)));
+
+        self::assertSame(-80, $metrics->kerning(1, 2));
+    }
+
+    public function testGposPairPosFormat2UsesClassKerningWithoutExpandingPairs(): void
+    {
+        $metrics = (new TtfParser())->parse($this->fontFixture($this->gposPairFormat2(-70)));
+
+        self::assertSame(-70, $metrics->kerning(1, 2));
+        self::assertNotEmpty($metrics->classKerning);
+    }
+
+    private function fontFixture(?string $gpos = null): string
     {
         $head = str_repeat("\0", 54);
         $head = substr_replace($head, pack('n', 1000), 18, 2);
@@ -64,6 +79,7 @@ final class TtfParserTest extends TestCase
             'cmap' => $cmap,
             'kern' => $kern,
         ];
+        if ($gpos !== null) $tables['GPOS'] = $gpos;
 
         $headerSize = 12 + count($tables) * 16;
         $offset = $headerSize;
@@ -77,4 +93,38 @@ final class TtfParserTest extends TestCase
 
         return pack('Nnnnn', 0x00010000, count($tables), 0, 0, 0) . $directory . $payload;
     }
+    private function gposPairFormat1(int $adjustment): string
+    {
+        $pairPos = pack('nnnnnn', 1, 18, 0x0004, 0, 1, 12)
+            . pack('nnn', 1, 2, $adjustment & 0xFFFF)
+            . pack('nnn', 1, 1, 1);
+
+        return $this->gposWithPairLookup($pairPos);
+    }
+
+    private function gposPairFormat2(int $adjustment): string
+    {
+        $matrix = pack('nnnn', 0, 0, 0, $adjustment & 0xFFFF);
+        $class1 = pack('nnn', 1, 1, 1);
+        $class2 = pack('nnn', 1, 2, 1);
+        $coverage = pack('nnn', 1, 1, 1);
+        $pairPos = pack('nnnnnnnn', 2, 36, 0x0004, 0, 24, 30, 2, 2)
+            . $matrix . $class1 . $class2 . $coverage;
+
+        return $this->gposWithPairLookup($pairPos);
+    }
+
+    private function gposWithPairLookup(string $pairPos): string
+    {
+        $featureList = pack('n', 1)
+            . 'kern' . pack('n', 8)
+            . pack('nnn', 0, 1, 0);
+        $lookup = pack('nnnn', 2, 0, 1, 8) . $pairPos;
+        $lookupList = pack('nn', 1, 4) . $lookup;
+
+        return pack('nnnnn', 1, 0, 0, 10, 10 + strlen($featureList))
+            . $featureList
+            . $lookupList;
+    }
+
 }
