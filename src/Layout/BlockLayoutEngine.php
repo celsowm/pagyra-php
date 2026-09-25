@@ -530,7 +530,7 @@ final class BlockLayoutEngine
                     $cursorY,
                     $contentWidth,
                     $fontSize,
-                    $this->exclusions,
+                    $this->floatContext->exclusions(),
                 );
                 if ($wrapsInlineInAnonymousBlocks) {
                     $children[] = $this->anonymousBlockOfLines($styled, $run->lines, $contentX, $cursorY, $contentWidth, $run->height, $fontSize);
