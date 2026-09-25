@@ -174,6 +174,18 @@ final class ZIndexPaintOrderTest extends TestCase
         self::assertSame(['NO-CONTEXT', 'OUTSIDE-2', 'ESCAPES-100'], $texts);
     }
 
+    public function testTransformCreatesAContextThatContainsHighZDescendants(): void
+    {
+        $texts = $this->paintedTexts(
+            '<div style="transform:translateX(0)">TRANSFORM-CONTEXT'
+            . '<div style="position:absolute;z-index:100">INSIDE-100</div>'
+            . '</div>'
+            . '<div style="position:relative;z-index:2">OUTSIDE-2</div>',
+        );
+
+        self::assertSame(['TRANSFORM-CONTEXT', 'INSIDE-100', 'OUTSIDE-2'], $texts);
+    }
+
     public function testNestedSiblingScopesAreResolvedRecursively(): void
     {
         $texts = $this->paintedTexts(
