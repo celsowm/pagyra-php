@@ -70,6 +70,34 @@ final class ZIndexPaintOrderTest extends TestCase
         self::assertSame(['A', 'B', 'C'], $texts);
     }
 
+    public function testPositionedGrandchildCompetesInNearestAncestorStackingContext(): void
+    {
+        $texts = $this->paintedTexts(
+            '<div>'
+            . '<div>NORMAL-ANCESTOR'
+            . '<div style="position:absolute;z-index:100">GRANDCHILD-100</div>'
+            . '</div>'
+            . '<div style="position:relative;z-index:2">SIBLING-2</div>'
+            . '</div>',
+        );
+
+        self::assertSame(['NORMAL-ANCESTOR', 'SIBLING-2', 'GRANDCHILD-100'], $texts);
+    }
+
+    public function testNegativeGrandchildEscapesNonContextAncestorIntoNegativePhase(): void
+    {
+        $texts = $this->paintedTexts(
+            '<div>'
+            . '<div>NORMAL-A'
+            . '<div style="position:absolute;z-index:-5">NEGATIVE-GRANDCHILD</div>'
+            . '</div>'
+            . '<div>NORMAL-B</div>'
+            . '</div>',
+        );
+
+        self::assertSame(['NEGATIVE-GRANDCHILD', 'NORMAL-A', 'NORMAL-B'], $texts);
+    }
+
     public function testNestedSiblingScopesAreResolvedRecursively(): void
     {
         $texts = $this->paintedTexts(
