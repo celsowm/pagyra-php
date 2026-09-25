@@ -468,44 +468,93 @@ final class InlineTextFormatter
      */
     private function applyTextOverflowEllipsis(LineBox $line, float $availableWidth): LineBox
     {
-        if ($line->atomicBoxes !== [] || $line->runs === [] || $line->width <= $availableWidth + 0.01) {
+        if ($line->runs === [] || $line->width <= $availableWidth + 0.01) {
             return $line;
         }
+
         $lastRun = $line->runs[array_key_last($line->runs)];
         $ellipsis = "\u{2026}";
         $ellipsisWidth = $this->metrics->measure($ellipsis, $lastRun->style, $lastRun->fontSize)->inlineSize;
-        $targetWidth = max(0.0, $availableWidth - $ellipsisWidth);
+        $targetRight = $line->x + max(0.0, $availableWidth - $ellipsisWidth);
 
         $runs = [];
+        $boxes = [];
         $cursorX = $line->x;
-        $usedWidth = 0.0;
-        foreach ($line->runs as $run) {
-            if ($usedWidth >= $targetWidth) {
+
+        foreach ($line->orderedItems() as $item) {
+            if ($cursorX >= $targetRight - self::EPSILON) {
                 break;
             }
-            $remaining = $targetWidth - $usedWidth;
-            if ($run->width <= $remaining) {
-                $runs[] = $run;
-                $cursorX = $run->x + $run->width;
-                $usedWidth += $run->width;
+
+            if ($item instanceof AtomicInlineBox) {
+                // Atomic inline boxes cannot be split. Keep one only when its whole margin box
+                // fits before the ellipsis; otherwise the ellipsis takes its place.
+                if ($item->x + $item->width > $targetRight + self::EPSILON) {
+                    break;
+                }
+                $boxes[] = $item;
+                $cursorX = max($cursorX, $item->x + $item->width);
                 continue;
             }
-            $fitted = $this->fitTextWithinWidth($run->text, $run->style, $run->fontSize, $remaining);
+
+            $remaining = max(0.0, $targetRight - $cursorX);
+            if ($item->width <= $remaining + self::EPSILON) {
+                $runs[] = $item;
+                $cursorX = max($cursorX, $item->x + $item->width);
+                continue;
+            }
+
+            $fitted = $this->fitTextWithinWidth($item->text, $item->style, $item->fontSize, $remaining);
             if ($fitted !== '') {
-                $fittedWidth = $this->metrics->measure($fitted, $run->style, $run->fontSize)->inlineSize;
-                $runs[] = new TextRun($run->x, $run->y, $fittedWidth, $run->height, $run->baseline, $fitted, $run->fontSize, $run->style, 0.0, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
-                $cursorX = $run->x + $fittedWidth;
-                $usedWidth += $fittedWidth;
+                $fittedWidth = $this->metrics->measure($fitted, $item->style, $item->fontSize)->inlineSize;
+                $runs[] = new TextRun(
+                    $item->x,
+                    $item->y,
+                    $fittedWidth,
+                    $item->height,
+                    $item->baseline,
+                    $fitted,
+                    $item->fontSize,
+                    $item->style,
+                    0.0,
+                    $item->inlineBackground,
+                    $item->inlineBorderColor,
+                    $item->inlineBorderWidth,
+                    $item->inlinePaddingLeft,
+                    $item->inlinePaddingRight,
+                );
+                $cursorX = $item->x + $fittedWidth;
             }
             break;
         }
-        // appendRun() merges this into the last kept run when it shares its style (the common
-        // case: one run truncated, the ellipsis glued right onto it), so the pair still reaches
-        // the paint layer as the single text-paint command a whole, unbroken line would be.
-        $this->appendRun($runs, new TextRun($cursorX, $lastRun->y, $ellipsisWidth, $lastRun->height, $lastRun->baseline, $ellipsis, $lastRun->fontSize, $lastRun->style, 0.0, $lastRun->inlineBackground));
+
+        // Use the line's final text style for the ellipsis, as the previous text-only path did.
+        // It remains an ordinary run, so extraction and paint order stay deterministic even when
+        // an atomic box was retained before it.
+        $this->appendRun($runs, new TextRun(
+            $cursorX,
+            $lastRun->y,
+            $ellipsisWidth,
+            $lastRun->height,
+            $lastRun->baseline,
+            $ellipsis,
+            $lastRun->fontSize,
+            $lastRun->style,
+            0.0,
+            $lastRun->inlineBackground,
+        ));
         $text = implode('', array_map(static fn(TextRun $r): string => $r->text, $runs));
 
-        return new LineBox($line->x, $line->y, ($cursorX + $ellipsisWidth) - $line->x, $line->height, $line->baseline, $text, $runs, []);
+        return new LineBox(
+            $line->x,
+            $line->y,
+            ($cursorX + $ellipsisWidth) - $line->x,
+            $line->height,
+            $line->baseline,
+            $text,
+            $runs,
+            $boxes,
+        );
     }
 
     /** The longest prefix of $text, measured character by character, that fits within $maxWidth. */
