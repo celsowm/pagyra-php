@@ -85,6 +85,61 @@ final class FloatLayoutTest extends TestCase
         self::assertGreaterThanOrEqual(30.0, $after->box->content->y);
     }
 
+    public function testClearRightDoesNotClearALeftFloatAndLinesStillWrapAroundIt(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<div style="margin:0;width:300px">'
+                . '<div style="float:left;width:60px;height:40px">L</div>'
+                . '<p style="margin:0;clear:right">texto</p>'
+                . '</div>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        [, $paragraph] = $prepared->layoutRoot->children[0]->children;
+        self::assertSame(0.0, $paragraph->box->content->y);
+        self::assertGreaterThanOrEqual(60.0, $paragraph->lineBoxes[0]->x);
+    }
+
+    public function testClearLeftClearsOnlyTheLeftFloatBottom(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<div style="margin:0;width:300px">'
+                . '<div style="float:left;width:50px;height:30px">L</div>'
+                . '<div style="float:right;width:50px;height:70px">R</div>'
+                . '<p style="margin:0;clear:left">texto</p>'
+                . '</div>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        [, , $paragraph] = $prepared->layoutRoot->children[0]->children;
+        self::assertEqualsWithDelta(30.0, $paragraph->box->content->y, 0.01);
+        // The taller right float still overlaps this y band and therefore shortens the line.
+        self::assertLessThanOrEqual(250.0, $paragraph->lineBoxes[0]->width + $paragraph->lineBoxes[0]->x);
+        self::assertLessThan(300.0, $paragraph->lineBoxes[0]->x + $paragraph->lineBoxes[0]->width);
+    }
+
+    public function testClearBothUsesTheTallestFloatBottom(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<div style="margin:0;width:300px">'
+                . '<div style="float:left;width:50px;height:30px">L</div>'
+                . '<div style="float:right;width:50px;height:70px">R</div>'
+                . '<p style="margin:0;clear:both">texto</p>'
+                . '</div>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        [, , $paragraph] = $prepared->layoutRoot->children[0]->children;
+        self::assertEqualsWithDelta(70.0, $paragraph->box->content->y, 0.01);
+        self::assertSame(0.0, $paragraph->lineBoxes[0]->x);
+    }
+
     public function testTwoLeftFloatsStackHorizontallySideBySideNotOnTopOfEachOther(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
