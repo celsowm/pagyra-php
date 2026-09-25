@@ -95,14 +95,14 @@ final class InlineTextFormatter
                 $lastWasCollapsedSpace = false;
             }
 
-            $lineWidth += $token['width'];
+            $lineWidth += $this->tokenAdvanceWidth($token);
 
             if (!$allowSoftWrap) {
                 continue;
             }
 
             if ($token['kind'] === 'box') {
-                $minContent = max($minContent, $token['width']);
+                $minContent = max($minContent, $this->tokenAdvanceWidth($token));
                 continue;
             }
 
@@ -119,11 +119,11 @@ final class InlineTextFormatter
                         $this->metrics->measure($char, $token['style'], $token['fontSize'])->inlineSize,
                     );
                 }
-                $minContent = max($minContent, $charWidth);
+                $minContent = max($minContent, $charWidth + $this->tokenInlineBefore($token) + $this->tokenInlineAfter($token));
                 continue;
             }
 
-            $minContent = max($minContent, $token['width']);
+            $minContent = max($minContent, $this->tokenAdvanceWidth($token));
         }
 
         $maxContent = max($maxContent, $lineWidth);
@@ -208,7 +208,9 @@ final class InlineTextFormatter
             [$insetLeft, $insetRight] = $exclusions === [] ? [0.0, 0.0] : $insets(count($lines));
             $lineRoom = $availableWidth - ($lines === [] ? max(0.0, $textIndent) : 0.0) - $insetLeft - $insetRight;
 
-            if ($allowSoftWrap && $lineRoom > 0.0 && $current !== [] && $currentWidth + $token['width'] > $lineRoom) {
+            $tokenAdvance = $this->tokenAdvanceWidth($token);
+
+            if ($allowSoftWrap && $lineRoom > 0.0 && $current !== [] && $currentWidth + $tokenAdvance > $lineRoom) {
                 if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
                     $lines[] = $current;
                     $current = [];
@@ -222,7 +224,7 @@ final class InlineTextFormatter
                 $lineRoom = $availableWidth - $insetLeft - $insetRight;
             }
 
-            if ($allowSoftWrap && $lineRoom > 0.0 && $token['kind'] === 'word' && $token['width'] > $lineRoom && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
+            if ($allowSoftWrap && $lineRoom > 0.0 && $token['kind'] === 'word' && $tokenAdvance > $lineRoom && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
                 foreach ($this->splitWordToken($token, $lineRoom) as $index => $chunk) {
                     if ($index > 0) {
                         $lines[] = $current;
@@ -230,13 +232,13 @@ final class InlineTextFormatter
                         $currentWidth = 0.0;
                     }
                     $current[] = $chunk;
-                    $currentWidth += $chunk['width'];
+                    $currentWidth += $this->tokenAdvanceWidth($chunk);
                 }
                 continue;
             }
 
             $current[] = $token;
-            $currentWidth += $token['width'];
+            $currentWidth += $tokenAdvance;
         }
 
         if ($current !== [] || $lines === []) {
@@ -246,7 +248,7 @@ final class InlineTextFormatter
         $lineBoxes = [];
         $cursorY = $y;
         foreach ($lines as $lineIndex => $lineTokens) {
-            $lineWidth = array_sum(array_column($lineTokens, 'width'));
+            $lineWidth = array_sum(array_map(fn(array $token): float => $this->tokenAdvanceWidth($token), $lineTokens));
             // A line that carries no text and only collapsed (zero-height) atomic boxes gets no
             // font strut: `<div style="display:inline-block;height:0"><img style="display:block"></div>`
             // alone on its line contributes nothing to the flow in browsers, so the following
@@ -321,18 +323,22 @@ final class InlineTextFormatter
 
             foreach ($placements as $placement) {
                 $token = $placement['token'];
-                $width = $token['width'] + (($justify && $token['kind'] === 'space') ? $extraPerSpace : 0.0);
+                $contentAdvance = $token['width'] + (($justify && $token['kind'] === 'space') ? $extraPerSpace : 0.0);
+                $edgeBefore = $this->tokenInlineBefore($token);
+                $edgeAfter = $this->tokenInlineAfter($token);
+                $advance = $edgeBefore + $contentAdvance + $edgeAfter;
+                $itemX = $runX + $edgeBefore;
                 $itemY = $cursorY + ($placement['top'] - $minTop);
 
                 if ($token['kind'] === 'box') {
-                    $contentX = $runX + $token['margin']['left'] + $token['border']['left'] + $token['padding']['left'];
+                    $contentX = $itemX + $token['margin']['left'] + $token['border']['left'] + $token['padding']['left'];
                     $contentY = $itemY + $token['margin']['top'] + $token['border']['top'] + $token['padding']['top'];
                     $contentLines = $this->translateLines($token['contentLines'], $contentX, $contentY);
                     $boxes[] = new AtomicInlineBox(
                         source: $token['source'],
-                        x: $runX,
+                        x: $itemX,
                         y: $itemY,
-                        width: $width,
+                        width: $token['width'],
                         height: $token['lineHeight'],
                         style: $token['style'],
                         contentWidth: $token['contentWidth'],
@@ -349,9 +355,9 @@ final class InlineTextFormatter
                     // arithmetic; carry it on the run so the serializer can reproduce it, or the
                     // drawn line keeps the font's own space width and stops short of the margin.
                     $this->appendRun($runs, new TextRun(
-                        $runX,
+                        $itemX,
                         $itemY,
-                        $width,
+                        $contentAdvance,
                         $token['lineHeight'],
                         $runBaseline,
                         $token['text'],
@@ -361,13 +367,15 @@ final class InlineTextFormatter
                         $token['inlineBackground'] ?? null,
                         $token['inlineBorder']['color'] ?? null,
                         $token['inlineBorder']['width'] ?? 0.0,
-                        $token['inlineBorder']['paddingLeft'] ?? 0.0,
-                        $token['inlineBorder']['paddingRight'] ?? 0.0,
+                        $token['inlinePaddingLeftEdge'] ?? 0.0,
+                        $token['inlinePaddingRightEdge'] ?? 0.0,
+                        (bool) ($token['inlineBorderStart'] ?? false),
+                        (bool) ($token['inlineBorderEnd'] ?? false),
                     ));
                 }
 
-                $runX += $width;
-                $usedWidth += $width;
+                $runX += $advance;
+                $usedWidth += $advance;
             }
 
             $text = implode('', array_map(static fn(TextRun $run): string => $run->text, $runs));
@@ -427,7 +435,7 @@ final class InlineTextFormatter
                 $properties[$property] = $value;
             }
 
-            return new TextRun($run->x, $run->y, $run->width, $run->height, $run->baseline, $run->text, $run->fontSize, new ComputedStyle($properties), $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
+            return new TextRun($run->x, $run->y, $run->width, $run->height, $run->baseline, $run->text, $run->fontSize, new ComputedStyle($properties), $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight, $run->inlineBorderStart, $run->inlineBorderEnd);
         }, $line->runs);
 
         return new LineBox($line->x, $line->y, $line->width, $line->height, $line->baseline, $line->text, $runs, $line->atomicBoxes);
@@ -644,15 +652,66 @@ final class InlineTextFormatter
                 continue;
             }
 
-            array_push($tokens, ...$this->collectTokens(
+            $ownInlineBorder = $this->inlineBorderDecoration($child->style, $fontSize, $referenceWidth);
+            $childTokens = $this->collectTokens(
                 $child,
                 $fontSize,
                 $referenceWidth,
                 $this->inlineBackground($child->style) ?? $inlineBackground,
-                $this->inlineBorderDecoration($child->style, $fontSize, $referenceWidth) ?? $inlineBorder,
-            ));
+                $ownInlineBorder ?? $inlineBorder,
+            );
+            if ($ownInlineBorder !== null) {
+                $childTokens = $this->applyInlineDecorationEdges($childTokens, $ownInlineBorder);
+            }
+            array_push($tokens, ...$childTokens);
         }
         return $tokens;
+    }
+
+    /**
+     * Adds the horizontal box edges of one inline element to the first/last real token it owns.
+     * Newlines are formatting controls, not boxes, so they never carry padding or border edges.
+     *
+     * @param list<array<string,mixed>> $tokens
+     * @param array{color:?string,width:float,paddingLeft:float,paddingRight:float} $decoration
+     * @return list<array<string,mixed>>
+     */
+    private function applyInlineDecorationEdges(array $tokens, array $decoration): array
+    {
+        $first = null;
+        $last = null;
+        foreach ($tokens as $index => $token) {
+            if (($token['kind'] ?? null) === 'newline') continue;
+            $first ??= $index;
+            $last = $index;
+        }
+        if ($first === null || $last === null) return $tokens;
+
+        $tokens[$first]['inlinePaddingLeftEdge'] = ($tokens[$first]['inlinePaddingLeftEdge'] ?? 0.0) + $decoration['paddingLeft'];
+        $tokens[$first]['inlineBorderStart'] = ($tokens[$first]['inlineBorderStart'] ?? false) || $decoration['width'] > 0.0;
+        $tokens[$last]['inlinePaddingRightEdge'] = ($tokens[$last]['inlinePaddingRightEdge'] ?? 0.0) + $decoration['paddingRight'];
+        $tokens[$last]['inlineBorderEnd'] = ($tokens[$last]['inlineBorderEnd'] ?? false) || $decoration['width'] > 0.0;
+
+        return $tokens;
+    }
+
+    private function tokenInlineBefore(array $token): float
+    {
+        $padding = (float) ($token['inlinePaddingLeftEdge'] ?? 0.0);
+        $border = ($token['inlineBorderStart'] ?? false) ? (float) ($token['inlineBorder']['width'] ?? 0.0) : 0.0;
+        return max(0.0, $padding) + max(0.0, $border);
+    }
+
+    private function tokenInlineAfter(array $token): float
+    {
+        $padding = (float) ($token['inlinePaddingRightEdge'] ?? 0.0);
+        $border = ($token['inlineBorderEnd'] ?? false) ? (float) ($token['inlineBorder']['width'] ?? 0.0) : 0.0;
+        return max(0.0, $padding) + max(0.0, $border);
+    }
+
+    private function tokenAdvanceWidth(array $token): float
+    {
+        return $this->tokenInlineBefore($token) + (float) ($token['width'] ?? 0.0) + $this->tokenInlineAfter($token);
     }
 
     /**
@@ -1127,7 +1186,7 @@ final class InlineTextFormatter
                 $line = 0.0;
                 continue;
             }
-            $line += $token['width'];
+            $line += $this->tokenAdvanceWidth($token);
         }
         return max($max, $line);
     }
@@ -1234,13 +1293,16 @@ final class InlineTextFormatter
 
     private function splitWordToken(array $token, float $availableWidth): array
     {
+        $before = $this->tokenInlineBefore($token);
+        $after = $this->tokenInlineAfter($token);
+        $textRoom = max(0.0, $availableWidth - $before - $after);
         $chars = preg_split('//u', $token['text'], -1, PREG_SPLIT_NO_EMPTY) ?: [$token['text']];
         $chunks = [];
         $buffer = '';
         foreach ($chars as $char) {
             $candidate = $buffer . $char;
             $candidateWidth = $this->metrics->measure($candidate, $token['style'], $token['fontSize'])->inlineSize;
-            if ($buffer !== '' && $candidateWidth > $availableWidth) {
+            if ($buffer !== '' && $candidateWidth > $textRoom) {
                 $chunks[] = $this->retoken($token, $buffer);
                 $buffer = $char;
             } else {
@@ -1248,7 +1310,24 @@ final class InlineTextFormatter
             }
         }
         if ($buffer !== '') $chunks[] = $this->retoken($token, $buffer);
-        return $chunks === [] ? [$token] : $chunks;
+        if ($chunks === []) return [$token];
+
+        foreach ($chunks as &$chunk) {
+            $chunk['inlinePaddingLeftEdge'] = 0.0;
+            $chunk['inlinePaddingRightEdge'] = 0.0;
+            $chunk['inlineBorderStart'] = false;
+            $chunk['inlineBorderEnd'] = false;
+        }
+        unset($chunk);
+
+        $first = array_key_first($chunks);
+        $last = array_key_last($chunks);
+        $chunks[$first]['inlinePaddingLeftEdge'] = $token['inlinePaddingLeftEdge'] ?? 0.0;
+        $chunks[$first]['inlineBorderStart'] = (bool) ($token['inlineBorderStart'] ?? false);
+        $chunks[$last]['inlinePaddingRightEdge'] = $token['inlinePaddingRightEdge'] ?? 0.0;
+        $chunks[$last]['inlineBorderEnd'] = (bool) ($token['inlineBorderEnd'] ?? false);
+
+        return $chunks;
     }
 
     private function retoken(array $token, string $text): array
@@ -1345,9 +1424,27 @@ final class InlineTextFormatter
             && $last->inlineBackground === $run->inlineBackground
             && $last->inlineBorderColor === $run->inlineBorderColor
             && abs($last->inlineBorderWidth - $run->inlineBorderWidth) < 1e-9
-            && abs($last->inlinePaddingLeft - $run->inlinePaddingLeft) < 1e-9
-            && abs($last->inlinePaddingRight - $run->inlinePaddingRight) < 1e-9) {
-            $runs[$key] = new TextRun($last->x, min($last->y, $run->y), $last->width + $run->width, max($last->height, $run->height), $run->baseline, $last->text . $run->text, $run->fontSize, $run->style, $run->justificationWordSpacing, $run->inlineBackground, $run->inlineBorderColor, $run->inlineBorderWidth, $run->inlinePaddingLeft, $run->inlinePaddingRight);
+            && !$last->inlineBorderEnd
+            && !$run->inlineBorderStart
+            && abs(($last->x + $last->width) - $run->x) < 1e-9) {
+            $runs[$key] = new TextRun(
+                $last->x,
+                min($last->y, $run->y),
+                $last->width + $run->width,
+                max($last->height, $run->height),
+                $run->baseline,
+                $last->text . $run->text,
+                $run->fontSize,
+                $run->style,
+                $run->justificationWordSpacing,
+                $run->inlineBackground,
+                $run->inlineBorderColor,
+                $run->inlineBorderWidth,
+                $last->inlinePaddingLeft,
+                $run->inlinePaddingRight,
+                $last->inlineBorderStart,
+                $run->inlineBorderEnd,
+            );
             return;
         }
         $runs[] = $run;
