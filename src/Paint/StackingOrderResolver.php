@@ -49,9 +49,9 @@ final class StackingOrderResolver
     /**
      * @param BlockFragment|PhysicalPageEntry $subject
      * @param list<BlockFragment|PhysicalPageEntry> $ancestors
-     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $negative
-     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $normal
-     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $positive
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int,context:bool}> $negative
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int,context:bool}> $normal
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int,context:bool}> $positive
      */
     private function collectInContext(
         BlockFragment|PhysicalPageEntry $subject,
@@ -61,17 +61,19 @@ final class StackingOrderResolver
         array &$positive,
         int &$order,
     ): void {
-        $z = $this->contextZIndex($subject);
+        [$establishesContext, $z] = $this->stackingFlags($subject);
         $entry = [
             'subject' => $subject,
             'ancestors' => $ancestors,
             'z' => $z ?? 0,
             'order' => $order++,
+            'context' => $establishesContext,
         ];
 
-        if ($z !== null) {
-            if ($z < 0) $negative[] = $entry;
-            else $positive[] = $entry;
+        if ($establishesContext) {
+            if ($z !== null && $z < 0) $negative[] = $entry;
+            elseif ($z !== null) $positive[] = $entry;
+            else $normal[] = $entry;
             return;
         }
 
@@ -83,9 +85,9 @@ final class StackingOrderResolver
     }
 
     /**
-     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $negative
-     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $normal
-     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int}> $positive
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int,context:bool}> $negative
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int,context:bool}> $normal
+     * @param list<array{subject:BlockFragment|PhysicalPageEntry,ancestors:list<BlockFragment|PhysicalPageEntry>,z:int,order:int,context:bool}> $positive
      * @return list<StackingPaintStep>
      */
     private function orderedSteps(array $negative, array $normal, array $positive): array
@@ -102,7 +104,11 @@ final class StackingOrderResolver
             array_push($steps, ...$this->contextSteps($entry['subject'], $entry['ancestors']));
         }
         foreach ($normal as $entry) {
-            $steps[] = new StackingPaintStep($entry['subject'], $entry['ancestors']);
+            if ($entry['context'] ?? false) {
+                array_push($steps, ...$this->contextSteps($entry['subject'], $entry['ancestors']));
+            } else {
+                $steps[] = new StackingPaintStep($entry['subject'], $entry['ancestors']);
+            }
         }
         foreach ($positive as $entry) {
             array_push($steps, ...$this->contextSteps($entry['subject'], $entry['ancestors']));
@@ -149,19 +155,31 @@ final class StackingOrderResolver
             : $subject->node;
     }
 
-    private function contextZIndex(BlockFragment|PhysicalPageEntry $subject): ?int
+    /**
+     * @return array{0:bool,1:?int} establishesContext, positioned numeric z-index
+     */
+    private function stackingFlags(BlockFragment|PhysicalPageEntry $subject): array
     {
         $style = $this->nodeOf($subject)->source->style;
         $position = strtolower(trim($style->get('position', 'static') ?? 'static'));
-        if (!in_array($position, ['relative', 'absolute', 'fixed', 'sticky'], true)) {
-            return null;
+        $positioned = in_array($position, ['relative', 'absolute', 'fixed', 'sticky'], true);
+
+        $rawZ = strtolower(trim($style->get('z-index', 'auto') ?? 'auto'));
+        $numericZ = $positioned && preg_match('/^-?\d+$/', $rawZ) === 1
+            ? (int) $rawZ
+            : null;
+
+        // CSS Color: any own opacity below 1 creates a stacking context. Use the authored/computed
+        // opacity property, not x-opacity, because x-opacity is the inherited product used by the
+        // current per-command alpha fallback; an ancestor's opacity must not make every descendant
+        // establish another context.
+        $rawOpacity = strtolower(trim($style->get('opacity', '1') ?? '1'));
+        $ownOpacity = 1.0;
+        if (preg_match('/^(\d*\.?\d+)(%)?$/', $rawOpacity, $m) === 1) {
+            $ownOpacity = max(0.0, min(1.0, (float) $m[1] / (isset($m[2]) && $m[2] !== '' ? 100.0 : 1.0)));
         }
 
-        $raw = strtolower(trim($style->get('z-index', 'auto') ?? 'auto'));
-        if ($raw === 'auto' || preg_match('/^-?\d+$/', $raw) !== 1) {
-            return null;
-        }
-
-        return (int) $raw;
+        return [$numericZ !== null || $ownOpacity < 1.0, $numericZ];
     }
+
 }
