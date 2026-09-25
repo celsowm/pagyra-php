@@ -194,7 +194,7 @@ The main structural gaps currently are:
 - repeated table header/footer groups with multi-row `rowspan` packing;
 - named grid lines;
 - true isolated PDF transparency-group compositing for opacity contexts (stacking-context ordering/flattening is implemented);
-- general CSS transforms;
+- 3D/perspective CSS transforms and transformed link annotation geometry (2D transform paint is implemented);
 - full SVG vector paint and WebP PDF paint;
 - Adam7 PNG;
 - paged first/even/odd headers and footers;
