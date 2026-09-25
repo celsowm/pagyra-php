@@ -138,6 +138,18 @@ final class ZIndexPaintOrderTest extends TestCase
         self::assertTrue($openBefore, 'promoted descendant must still paint inside its overflow ancestor clip');
     }
 
+    public function testDescendantOfTopLevelNormalEntryCompetesWithAnotherTopLevelContext(): void
+    {
+        $texts = $this->paintedTexts(
+            '<div>TOP-NORMAL'
+            . '<div style="position:absolute;z-index:100">TOP-GRANDCHILD-100</div>'
+            . '</div>'
+            . '<div style="position:relative;z-index:2">TOP-SIBLING-2</div>',
+        );
+
+        self::assertSame(['TOP-NORMAL', 'TOP-SIBLING-2', 'TOP-GRANDCHILD-100'], $texts);
+    }
+
     public function testNestedSiblingScopesAreResolvedRecursively(): void
     {
         $texts = $this->paintedTexts(
