@@ -53,42 +53,108 @@ final class DisplayListBuilder
         foreach ($pagination->pages as $page) {
             $commands = [];
             $pageMargins = $this->marginsForPage($margins, $page->pageIndex);
-            foreach ($page->entries as $entry) {
-                $this->appendEntry($commands, $entry, $pagination, $pageMargins);
-            }
+            $this->appendPageStackingContext($commands, $page->entries, $pagination, $pageMargins);
             $pages[] = new PageDisplayList($page->pageIndex, $pageWidth, $pageHeight, $commands);
         }
         return new DisplayList($pages);
     }
 
-    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
-    private function appendEntry(array &$commands, PhysicalPageEntry $entry, PaginationResult $pagination, array $margins): void
-    {
-        $node = $entry->placement->node;
-        $pageIndex = $entry->fragment->pageIndex;
-        $clip = $this->appendTopLevelBox($commands, $entry, $pagination, $margins);
-        $this->appendLines($commands, $entry->fragment->lines, $margins);
-        $this->appendStackedBlocks($commands, $entry->fragment->blocks, $margins);
-        if ($clip) $commands[] = new ClipPaintCommand($pageIndex);
+    /**
+     * Resolve the physical page itself as the root stacking context. Top-level placements and
+     * descendant BlockFragments participate in the same plan, so a positioned grandchild can
+     * compete with a different top-level sibling exactly like pagyra-js's RenderBox graph.
+     *
+     * @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands
+     * @param list<PhysicalPageEntry> $entries
+     */
+    private function appendPageStackingContext(
+        array &$commands,
+        array $entries,
+        PaginationResult $pagination,
+        array $margins,
+    ): void {
+        foreach ($this->stackingOrder->plan($entries) as $step) {
+            $openedClips = 0;
+            foreach ($step->ancestors as $ancestor) {
+                $opened = $ancestor instanceof PhysicalPageEntry
+                    ? $this->openTopLevelEntryClip($commands, $ancestor, $pagination, $margins)
+                    : $this->openBlockFragmentClip($commands, $ancestor, $margins);
+                if ($opened) $openedClips++;
+            }
+
+            if ($step->subject instanceof PhysicalPageEntry) {
+                $this->appendEntrySelf($commands, $step->subject, $pagination, $margins);
+            } else {
+                $this->appendBlockSelf($commands, $step->subject, $margins);
+            }
+
+            for ($i = 0; $i < $openedClips; $i++) {
+                $commands[] = new ClipPaintCommand(
+                    $step->subject instanceof PhysicalPageEntry
+                        ? $step->subject->fragment->pageIndex
+                        : $step->subject->pageIndex,
+                );
+            }
+        }
     }
 
-    /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
-    private function appendTopLevelBox(
+    /** @param list<object> $commands */
+    private function appendEntrySelf(
         array &$commands,
         PhysicalPageEntry $entry,
         PaginationResult $pagination,
         array $margins,
-    ): bool {
+    ): void {
+        $geometry = $this->topLevelPaintGeometry($entry, $pagination, $margins);
+        if ($geometry !== null) {
+            [$x, $y, $width, $height, $drawTop, $drawBottom] = $geometry;
+            $node = $entry->placement->node;
+            $pageIndex = $entry->fragment->pageIndex;
+            $border = $node->box->borderBox();
+            $radius = $this->fragmentRadius(
+                BorderRadiusResolver::resolve($node->source->style, $border->width, $border->height),
+                $drawTop,
+                $drawBottom,
+            );
+
+            $this->appendBoxShadows($commands, $node, $node->source->style, $pageIndex, $x, $y, $width, $height, BorderRadiusResolver::normalize($radius, $width, $height));
+            $commands[] = new BoxPaintCommand(
+                node: $node,
+                pageIndex: $pageIndex,
+                x: $x,
+                y: $y,
+                width: $width,
+                height: $height,
+                backgroundColor: Opacity::apply(ColorParser::parse($node->source->style->get('background-color')), $node->source->style),
+                borderRadius: BorderRadiusResolver::normalize($radius, $width, $height),
+            );
+            $this->appendBackgroundImage($commands, $node->source, $node->source->style, $pageIndex, $x, $y, $width, $height, $node->box->border, $node->fontSize);
+            $this->appendBorders($commands, $node, $pageIndex, $x, $y, $width, $height, $drawTop, $drawBottom);
+            $this->appendOutline($commands, $node, $node->source->style, $pageIndex, $x, $y, $width, $height);
+        }
+
+        $selfClip = $this->openTopLevelEntryClip($commands, $entry, $pagination, $margins);
+        $this->appendLines($commands, $entry->fragment->lines, $margins);
+        if ($selfClip) {
+            $commands[] = new ClipPaintCommand($entry->fragment->pageIndex);
+        }
+    }
+
+    /**
+     * @return array{0:float,1:float,2:float,3:float,4:bool,5:bool}|null
+     * x, y, width, height, drawTop, drawBottom
+     */
+    private function topLevelPaintGeometry(
+        PhysicalPageEntry $entry,
+        PaginationResult $pagination,
+        array $margins,
+    ): ?array {
         $node = $entry->placement->node;
         $pageIndex = $entry->fragment->pageIndex;
         $border = $node->box->borderBox();
         $display = strtolower(trim($node->source->style->get('display', 'block') ?? 'block'));
 
         if ($display === 'table') {
-            // A repeated thead/tfoot can make the paginated table taller than its original
-            // continuous layout box. Its PageFragment is therefore the source of truth for the
-            // per-page table fragment geometry; using borderBox()->bottom() would stop painting
-            // the table itself on continuation pages introduced by repetition.
             $x = $border->x + $margins['left'];
             $y = $entry->fragment->pageY + $margins['top'];
             $width = $border->width;
@@ -102,7 +168,7 @@ final class DisplayListBuilder
             $pageEnd = $pageStart + $pagination->flow->usableHeightForPage($pageIndex);
             $start = max($continuousStart, $pageStart);
             $end = min($continuousEnd, $pageEnd);
-            if ($end <= $start) return false;
+            if ($end <= $start) return null;
 
             $x = $border->x + $margins['left'];
             $y = ($start - $pageStart) + $margins['top'];
@@ -112,30 +178,32 @@ final class DisplayListBuilder
             $drawBottom = abs($end - $continuousEnd) <= self::EPSILON;
         }
 
-        if ($height <= self::EPSILON) return false;
+        if ($height <= self::EPSILON) return null;
+        return [$x, $y, $width, $height, $drawTop, $drawBottom];
+    }
 
-        $radius = $this->fragmentRadius(
-            BorderRadiusResolver::resolve($node->source->style, $border->width, $border->height),
+    /** @param list<object> $commands */
+    private function openTopLevelEntryClip(
+        array &$commands,
+        PhysicalPageEntry $entry,
+        PaginationResult $pagination,
+        array $margins,
+    ): bool {
+        $geometry = $this->topLevelPaintGeometry($entry, $pagination, $margins);
+        if ($geometry === null) return false;
+
+        [$x, $y, $width, $height, $drawTop, $drawBottom] = $geometry;
+        return $this->openOverflowClip(
+            $commands,
+            $entry->placement->node,
+            $entry->fragment->pageIndex,
+            $x,
+            $y,
+            $width,
+            $height,
             $drawTop,
             $drawBottom,
         );
-
-        $this->appendBoxShadows($commands, $node, $node->source->style, $pageIndex, $x, $y, $width, $height, BorderRadiusResolver::normalize($radius, $width, $height));
-        $commands[] = new BoxPaintCommand(
-            node: $node,
-            pageIndex: $pageIndex,
-            x: $x,
-            y: $y,
-            width: $width,
-            height: $height,
-            backgroundColor: Opacity::apply(ColorParser::parse($node->source->style->get('background-color')), $node->source->style),
-            borderRadius: BorderRadiusResolver::normalize($radius, $width, $height),
-        );
-        $this->appendBackgroundImage($commands, $node->source, $node->source->style, $pageIndex, $x, $y, $width, $height, $node->box->border, $node->fontSize);
-        $this->appendBorders($commands, $node, $pageIndex, $x, $y, $width, $height, $drawTop, $drawBottom);
-        $this->appendOutline($commands, $node, $node->source->style, $pageIndex, $x, $y, $width, $height);
-
-        return $this->openOverflowClip($commands, $node, $pageIndex, $x, $y, $width, $height, $drawTop, $drawBottom);
     }
 
     /**
