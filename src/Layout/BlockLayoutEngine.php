@@ -45,6 +45,14 @@ final class BlockLayoutEngine
         $metrics = $textMetrics ?? new HeuristicTextMetrics();
         $this->inlineTextFormatter = new InlineTextFormatter($metrics);
         $this->intrinsicSizeResolver = new IntrinsicSizeResolver($this->inlineTextFormatter);
+        $this->inlineTextFormatter->setIntrinsicSizeHandler(
+            fn(StyledNode $node, float $referenceWidth, float $fontSize): IntrinsicInlineSize
+                => $this->intrinsicSizeResolver->measure($node, $referenceWidth, $fontSize),
+        );
+        $this->inlineTextFormatter->setBlockContentLayoutHandler(
+            fn(StyledNode $node, float $contentWidth, float $fontSize): AtomicContentLayout
+                => $this->layoutAtomicContent($node, $contentWidth, $fontSize),
+        );
     }
 
     public function layout(StyledNode $root): LayoutNode
@@ -308,6 +316,96 @@ final class BlockLayoutEngine
      *        pixels; the table then reports a height that does not cover its own content, and
      *        pagination drops everything past the first page because no fragment claims it.
      */
+    /**
+     * Lays out the inside of an atomic inline box through the real block engine. The wrapper's
+     * own margin/padding/border/size belong to AtomicInlineBox, so a synthetic flow-root carries
+     * only the children and inherited/text formatting state. This is the formatting-context
+     * boundary that replaces InlineTextFormatter's former "skip block child" special case.
+     */
+    private function layoutAtomicContent(StyledNode $source, float $contentWidth, float $fontSize): AtomicContentLayout
+    {
+        $properties = $source->style->properties;
+        $properties['display'] = 'flow-root';
+        $properties['width'] = max(0.0, $contentWidth) . 'px';
+        $properties['height'] = 'auto';
+        $properties['font-size'] = $fontSize . 'px';
+        $properties['box-sizing'] = 'content-box';
+        $properties['margin'] = '0';
+        $properties['padding'] = '0';
+        $properties['border-width'] = '0';
+        $properties['border-style'] = 'none';
+        $properties['position'] = 'static';
+        $properties['float'] = 'none';
+        $properties['clear'] = 'none';
+
+        foreach (array_keys($properties) as $property) {
+            if (
+                preg_match('/^(?:margin|padding)-(?:top|right|bottom|left)$/', $property) === 1
+                || preg_match('/^border-(?:top|right|bottom|left)-(?:width|style|color)$/', $property) === 1
+                || in_array($property, ['min-width', 'max-width', 'min-height', 'max-height', 'aspect-ratio', 'top', 'right', 'bottom', 'left', 'inset'], true)
+            ) {
+                unset($properties[$property]);
+            }
+        }
+
+        $synthetic = new StyledNode(
+            Node::element(self::ANONYMOUS_TAG, [], []),
+            new ComputedStyle($properties),
+            $source->children,
+        );
+        $layout = $this->layoutBlock(
+            $synthetic,
+            0.0,
+            0.0,
+            max(0.0, $contentWidth),
+            $this->viewportHeight,
+            $fontSize,
+        );
+
+        $baseline = $this->lastInFlowLineBaseline($layout);
+        if ($baseline !== null) {
+            $baseline -= $layout->box->content->y;
+        }
+
+        return new AtomicContentLayout(
+            height: $layout->box->content->height,
+            lines: $layout->lineBoxes,
+            blocks: $layout->children,
+            baseline: $baseline,
+        );
+    }
+
+    /**
+     * Baseline of the last genuine line box in normal flow. Replaced block boxes expose a
+     * synthetic LineBox only so the paint pipeline can carry their AtomicInlineBox; that is not
+     * an inline-block baseline. Floats and positioned descendants are outside normal flow too.
+     */
+    private function lastInFlowLineBaseline(LayoutNode $node): ?float
+    {
+        if ($node->source->node->isImage() || $node->source->node->isSvg()) {
+            return null;
+        }
+
+        $position = strtolower(trim($node->source->style->get('position') ?? 'static'));
+        $float = strtolower(trim($node->source->style->get('float') ?? 'none'));
+        if (in_array($position, ['absolute', 'fixed'], true) || in_array($float, ['left', 'right'], true)) {
+            return null;
+        }
+
+        $baseline = null;
+        foreach ($node->lineBoxes as $line) {
+            $baseline = $line->baseline;
+        }
+        foreach ($node->children as $child) {
+            $candidate = $this->lastInFlowLineBaseline($child);
+            if ($candidate !== null) {
+                $baseline = $candidate;
+            }
+        }
+
+        return $baseline;
+    }
+
     private function layoutBlock(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize, bool $heightIsMinimum = false): LayoutNode
     {
         // Floats placed inside this block stop mattering to lines once the block is done.
