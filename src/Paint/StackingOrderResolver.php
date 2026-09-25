@@ -7,54 +7,136 @@ namespace Pagyra\Paint;
 use Pagyra\Pagination\BlockFragment;
 
 /**
- * Resolves the paint phases of sibling block fragments inside one local stacking scope.
+ * Resolves the simplified stacking-context model already used by pagyra-js:
  *
- * This is deliberately structural rather than a global display-list sort: each positioned box
- * with a numeric z-index remains atomic with its subtree, clips and nested ordering. The next
- * stacking slice can flatten non-context ancestors to match the reference's full context graph;
- * this class establishes the stable negative / normal / non-negative phase semantics first.
+ * - a positioned element with numeric z-index establishes a context;
+ * - context roots compete in negative / normal-auto / non-negative phases;
+ * - descendants whose ancestors do not establish a context participate directly in the nearest
+ *   ancestor context instead of being trapped in recursive DOM paint order;
+ * - equal z-index values keep document order.
+ *
+ * The output is structural paint steps rather than a reordered tree. That lets DisplayListBuilder
+ * paint a promoted descendant independently while re-applying overflow clips from the ancestors
+ * it crossed.
  */
 final class StackingOrderResolver
 {
     /**
+     * Resolve all descendants of one already-painted stacking-context root.
+     *
      * @param list<BlockFragment> $fragments
-     * @return list<BlockFragment>
+     * @return list<StackingPaintStep>
      */
-    public function order(array $fragments): array
+    public function plan(array $fragments): array
     {
-        if (count($fragments) < 2) return $fragments;
-
         $negative = [];
         $normal = [];
         $positive = [];
+        $order = 0;
 
-        foreach ($fragments as $index => $fragment) {
-            $z = $this->numericPositionedZIndex($fragment);
-            $entry = ['index' => $index, 'z' => $z ?? 0, 'fragment' => $fragment];
-
-            if ($z === null) {
-                $normal[] = $entry;
-            } elseif ($z < 0) {
-                $negative[] = $entry;
-            } else {
-                $positive[] = $entry;
-            }
+        foreach ($fragments as $fragment) {
+            $this->collectInContext($fragment, [], $negative, $normal, $positive, $order);
         }
 
+        return $this->orderedSteps($negative, $normal, $positive);
+    }
+
+    /**
+     * @param list<BlockFragment> $ancestors
+     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $negative
+     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $normal
+     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $positive
+     */
+    private function collectInContext(
+        BlockFragment $fragment,
+        array $ancestors,
+        array &$negative,
+        array &$normal,
+        array &$positive,
+        int &$order,
+    ): void {
+        $z = $this->contextZIndex($fragment);
+        $entry = [
+            'fragment' => $fragment,
+            'ancestors' => $ancestors,
+            'z' => $z ?? 0,
+            'order' => $order++,
+        ];
+
+        if ($z !== null) {
+            if ($z < 0) $negative[] = $entry;
+            else $positive[] = $entry;
+            // A nested context is atomic to this context. Its descendants are resolved only when
+            // that context itself is emitted.
+            return;
+        }
+
+        $normal[] = $entry;
+        $nextAncestors = [...$ancestors, $fragment];
+        foreach ($fragment->children as $child) {
+            $this->collectInContext($child, $nextAncestors, $negative, $normal, $positive, $order);
+        }
+    }
+
+    /**
+     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $negative
+     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $normal
+     * @param list<array{fragment:BlockFragment,ancestors:list<BlockFragment>,z:int,order:int}> $positive
+     * @return list<StackingPaintStep>
+     */
+    private function orderedSteps(array $negative, array $normal, array $positive): array
+    {
         $byZThenDocumentOrder = static function (array $a, array $b): int {
             $z = $a['z'] <=> $b['z'];
-            return $z !== 0 ? $z : ($a['index'] <=> $b['index']);
+            return $z !== 0 ? $z : ($a['order'] <=> $b['order']);
         };
         usort($negative, $byZThenDocumentOrder);
         usort($positive, $byZThenDocumentOrder);
 
-        return array_map(
-            static fn(array $entry): BlockFragment => $entry['fragment'],
-            [...$negative, ...$normal, ...$positive],
-        );
+        $steps = [];
+        foreach ($negative as $entry) {
+            array_push($steps, ...$this->contextSteps($entry['fragment'], $entry['ancestors']));
+        }
+        foreach ($normal as $entry) {
+            $steps[] = new StackingPaintStep($entry['fragment'], $entry['ancestors']);
+        }
+        foreach ($positive as $entry) {
+            array_push($steps, ...$this->contextSteps($entry['fragment'], $entry['ancestors']));
+        }
+
+        return $steps;
     }
 
-    private function numericPositionedZIndex(BlockFragment $fragment): ?int
+    /**
+     * Resolve one nested stacking context. Its root paints atomically as the context anchor, then
+     * its descendants are resolved against that root as a fresh context.
+     *
+     * @param list<BlockFragment> $ancestors
+     * @return list<StackingPaintStep>
+     */
+    private function contextSteps(BlockFragment $root, array $ancestors): array
+    {
+        $steps = [new StackingPaintStep($root, $ancestors)];
+
+        $negative = [];
+        $normal = [];
+        $positive = [];
+        $order = 0;
+        $nextAncestors = [...$ancestors, $root];
+
+        foreach ($root->children as $child) {
+            $this->collectInContext($child, $nextAncestors, $negative, $normal, $positive, $order);
+        }
+
+        array_push($steps, ...$this->orderedSteps($negative, $normal, $positive));
+        return $steps;
+    }
+
+    /**
+     * Numeric z-index only creates a context on positioned boxes, matching the current
+     * pagyra-js getStackingFlags() contract.
+     */
+    private function contextZIndex(BlockFragment $fragment): ?int
     {
         $style = $fragment->node->source->style;
         $position = strtolower(trim($style->get('position', 'static') ?? 'static'));
