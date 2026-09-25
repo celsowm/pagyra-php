@@ -74,6 +74,19 @@ final class FontRegistryVariantSelectionTest extends TestCase
         self::assertSame($metrics, $registry->resolve('Missing, "Fixture", serif', 400, 'normal'));
     }
 
+    public function testCodepointResolutionFallsThroughWhenFirstFamilyLacksGlyph(): void
+    {
+        $registry = new FontRegistry();
+        $primary = new TtfFontMetrics(1000, 800, -200, 0, [0 => 500, 1 => 600], [65 => 1]);
+        $fallback = new TtfFontMetrics(1000, 800, -200, 0, [0 => 500, 1 => 800], [937 => 1]);
+        $registry->register('Primary', $primary);
+        $registry->register('Fallback', $fallback);
+
+        self::assertSame($primary, $registry->resolveFaceForCodePoint('Primary, Fallback', 65)?->metrics);
+        self::assertSame($fallback, $registry->resolveFaceForCodePoint('Primary, Fallback', 937)?->metrics);
+        self::assertNull($registry->resolveFaceForCodePoint('Primary, Fallback', 0x4E00));
+    }
+
     public function testResolvedFaceRetainsBinaryAndNormalizedVariant(): void
     {
         $registry = new FontRegistry();
