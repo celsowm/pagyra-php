@@ -103,6 +103,10 @@ final class CssFontFaceLoadingTest extends TestCase
         }
 
         $offset = 44 + $numTables * 20;
+        $totalSfntSize = 12 + $numTables * 16;
+        foreach ($records as $record) {
+            $totalSfntSize += $record['length'] + ((4 - ($record['length'] % 4)) % 4);
+        }
         $directory = '';
         $payload = '';
         foreach ($records as $record) {
@@ -120,14 +124,13 @@ final class CssFontFaceLoadingTest extends TestCase
 
         $length = 44 + strlen($directory) + strlen($payload);
         $header = pack(
-            'NNNnnNNnnNNNNN',
+            'NNNnnNnnNNNNN',
             0x774F4646,
             unpack('N', substr($sfnt, 0, 4))[1],
             $length,
             $numTables,
             0,
-            strlen($sfnt),
-            0,
+            $totalSfntSize,
             0,
             0,
             0,
