@@ -64,7 +64,7 @@ final class DisplayListBuilder
     {
         $node = $entry->placement->node;
         $pageIndex = $entry->fragment->pageIndex;
-        $clip = $this->appendTopLevelBox($commands, $node, $pageIndex, $entry->placement->offsetY, $pagination, $margins);
+        $clip = $this->appendTopLevelBox($commands, $entry, $pagination, $margins);
         $this->appendLines($commands, $entry->fragment->lines, $margins);
         foreach ($entry->fragment->blocks as $block) $this->appendBlock($commands, $block, $margins);
         if ($clip) $commands[] = new ClipPaintCommand($pageIndex);
@@ -73,27 +73,45 @@ final class DisplayListBuilder
     /** @param list<BoxPaintCommand|BorderPaintCommand|RoundedBorderPaintCommand|TextPaintCommand|ImagePaintCommand> $commands */
     private function appendTopLevelBox(
         array &$commands,
-        LayoutNode $node,
-        int $pageIndex,
-        float $offsetY,
+        PhysicalPageEntry $entry,
         PaginationResult $pagination,
         array $margins,
     ): bool {
+        $node = $entry->placement->node;
+        $pageIndex = $entry->fragment->pageIndex;
         $border = $node->box->borderBox();
-        $continuousStart = $border->y + $offsetY;
-        $continuousEnd = $border->bottom() + $offsetY;
-        $pageStart = $pagination->flow->contentStartForPage($pageIndex);
-        $pageEnd = $pageStart + $pagination->flow->usableHeightForPage($pageIndex);
-        $start = max($continuousStart, $pageStart);
-        $end = min($continuousEnd, $pageEnd);
-        if ($end <= $start) return false;
+        $display = strtolower(trim($node->source->style->get('display', 'block') ?? 'block'));
 
-        $x = $border->x + $margins['left'];
-        $y = ($start - $pageStart) + $margins['top'];
-        $width = $border->width;
-        $height = $end - $start;
-        $drawTop = abs($start - $continuousStart) <= self::EPSILON;
-        $drawBottom = abs($end - $continuousEnd) <= self::EPSILON;
+        if ($display === 'table') {
+            // A repeated thead/tfoot can make the paginated table taller than its original
+            // continuous layout box. Its PageFragment is therefore the source of truth for the
+            // per-page table fragment geometry; using borderBox()->bottom() would stop painting
+            // the table itself on continuation pages introduced by repetition.
+            $x = $border->x + $margins['left'];
+            $y = $entry->fragment->pageY + $margins['top'];
+            $width = $border->width;
+            $height = $entry->fragment->height;
+            $drawTop = $pageIndex === $entry->placement->pageIndex;
+            $drawBottom = $pageIndex === $entry->placement->endPageIndex;
+        } else {
+            $continuousStart = $border->y + $entry->placement->offsetY;
+            $continuousEnd = $border->bottom() + $entry->placement->offsetY;
+            $pageStart = $pagination->flow->contentStartForPage($pageIndex);
+            $pageEnd = $pageStart + $pagination->flow->usableHeightForPage($pageIndex);
+            $start = max($continuousStart, $pageStart);
+            $end = min($continuousEnd, $pageEnd);
+            if ($end <= $start) return false;
+
+            $x = $border->x + $margins['left'];
+            $y = ($start - $pageStart) + $margins['top'];
+            $width = $border->width;
+            $height = $end - $start;
+            $drawTop = abs($start - $continuousStart) <= self::EPSILON;
+            $drawBottom = abs($end - $continuousEnd) <= self::EPSILON;
+        }
+
+        if ($height <= self::EPSILON) return false;
+
         $radius = $this->fragmentRadius(
             BorderRadiusResolver::resolve($node->source->style, $border->width, $border->height),
             $drawTop,
