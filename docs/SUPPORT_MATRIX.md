@@ -39,8 +39,8 @@ Status levels:
 | Borders / radius | Partial | Solid/dashed/dotted and rounded geometry are painted. `double`, `groove`, `ridge`, `inset`, `outset` and complete asymmetric rounded combinations remain. |
 | Text decoration | P3 | Underline, line-through, overline, solid/double/dashed/dotted/wavy and decoration color are implemented. |
 | Overflow clipping | P3 | `hidden`/`clip` paint clipping and text-overflow ellipsis exist; ellipsis preserves atomic inline boxes that fully fit before the truncation point. |
-| Opacity | Partial | Element/ancestor opacity reaches paint through per-command alpha. True isolated-group compositing for overlapping child paint is still open. |
-| Stacking contexts / z-index | P3 ordering | The physical page is the root stacking context; positioned numeric z-index roots are flattened through non-context ancestors and paint in stable negative / normal-auto / non-negative phases, including across top-level page entries. `opacity < 1` also establishes an isolating context. True PDF transparency-group compositing remains open, so opacity is still applied per command. |
+| Opacity | P3 for layout/atomic boxes | `opacity < 1` boxes/atomic inline boxes render through isolated PDF Transparency Group Form XObjects, so overlapping descendants composite first and group alpha is applied once. Nested groups are supported and primitive alpha is normalized out of the group factor. Normal non-atomic inline spans still use the per-run alpha fallback because they have no independent paint box yet. |
+| Stacking contexts / z-index | P3 | The physical page is the root stacking context; positioned numeric z-index roots flatten through non-context ancestors and paint in stable negative / normal-auto / non-negative phases across top-level entries. `opacity < 1` and 2D transforms establish contexts; opacity contexts for layout/atomic boxes are materialized as isolated PDF transparency groups. |
 | CSS transforms | P3 2D | Paint-only 2D transforms support `matrix()`, `translate*()`, `scale*()`, `rotate()`, `skew*()` and function lists, with CSS angle units, percentage translation and `transform-origin`. Transform scopes apply to blocks and atomic inline boxes, are re-opened across flattened stacking descendants, and establish stacking contexts. 3D/perspective and transformed link-annotation hit rectangles remain open. |
 | JPEG / PNG PDF paint | P3 | JPEG direct embedding and multiple PNG color/transparency forms are supported. Adam7 remains open. |
 | WebP | Partial | Metadata/intrinsic sizing is implemented; PDF paint/decoding is not. |
@@ -55,7 +55,7 @@ Status levels:
 ## Next implementation order
 
 1. Reuse recursive intrinsic sizing in flex and grid paths (inline-block, table and float paths already consume it).
-4. Add true isolated PDF transparency-group compositing for opacity contexts.
+4. Give normal non-atomic inline opacity its own fragment/group identity instead of the per-run fallback.
 5. Reuse the 2D transform primitives for SVG paint and add 3D only if reference/corpus requires it.
 6. Port WOFF/WOFF2 decoding and the JS GPOS PairPos format-1 subset.
 7. Port the independent paged header/footer subsystem.
