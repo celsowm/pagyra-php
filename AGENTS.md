@@ -191,7 +191,7 @@ The main structural gaps currently are:
 - real mixed block/inline formatting contexts inside atomic boxes;
 - complete BFC/float interactions;
 - reusing recursive min/max intrinsic sizing across the remaining intrinsic paths (tables and floats already use it);
-- per-column `<col>` table hints and complete fragmented table header/footer semantics;
+- complete fragmented/repeated table header/footer semantics;
 - named grid lines;
 - stacking contexts / `z-index`;
 - general CSS transforms;
