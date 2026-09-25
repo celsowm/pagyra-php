@@ -114,6 +114,27 @@ final class SvgVectorPaintTest extends TestCase
         }
     }
 
+    public function testBlockLevelSvgUsesTheSameVectorPaintPath(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'margins' => 0.0,
+            'html' => '<svg style="display:block" width="80" height="40" viewBox="0 0 8 4">'
+                . '<rect width="8" height="4" fill="red"/>'
+                . '</svg>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        $paths = array_values(array_filter(
+            $prepared->displayList->pages[0]->commands,
+            static fn(object $command): bool => $command instanceof SvgPathPaintCommand,
+        ));
+
+        self::assertCount(1, $paths);
+        self::assertSame('M', $paths[0]->segments[0]['type']);
+    }
+
     public function testSvgFillAndStrokeAreSerializedAsPdfVectorOperators(): void
     {
         $pdf = Pagyra::renderHtmlToPdf([
