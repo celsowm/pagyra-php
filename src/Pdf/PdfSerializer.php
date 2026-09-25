@@ -275,13 +275,19 @@ final class PdfSerializer
 
             if (!$command instanceof TextPaintCommand) continue;
 
-            [$key] = $this->fontChoice($command, $fontRegistry);
-            $resource = $fontResources[$key];
-            $usedFonts[$resource['name']] = $resource['id'];
+            $segments = $this->fontSegments($command, $fontRegistry);
+            foreach ($segments as $segment) {
+                $resource = $fontResources[$segment['key']];
+                $usedFonts[$resource['name']] = $resource['id'];
+            }
             $graphicsState = $this->graphicsStateName($command->color, $extGStateResources);
-            $content .= $resource['face'] instanceof RegisteredFont
-                ? $this->serializeEmbeddedText($command, $pageHeightPx, $resource['name'], $resource['face'], $graphicsState)
-                : $this->serializeBase14Text($command, $pageHeightPx, $resource['name'], $graphicsState);
+            $content .= $this->serializeSegmentedText(
+                $command,
+                $pageHeightPx,
+                $segments,
+                $fontResources,
+                $graphicsState,
+            );
             $content .= $this->serializeTextDecorations($command, $pageHeightPx, $graphicsState);
 
             if ($command->linkHref !== null && $command->linkHref !== '') {
@@ -632,24 +638,68 @@ final class PdfSerializer
         foreach ($displayList->pages as $page) {
             foreach ($page->commands as $command) {
                 if (!$command instanceof TextPaintCommand) continue;
-                [$key, $face, $base14] = $this->fontChoice($command, $fontRegistry);
-                if (!isset($usage[$key])) $usage[$key] = ['face' => $face, 'base14' => $base14, 'glyphs' => []];
-                if ($face === null) continue;
-                foreach ($this->codePoints($command->text) as $codePoint) {
-                    $gid = $face->metrics->glyphId($codePoint);
-                    if (!isset($usage[$key]['glyphs'][$gid])) $usage[$key]['glyphs'][$gid] = $codePoint;
+                foreach ($this->fontSegments($command, $fontRegistry) as $segment) {
+                    $key = $segment['key'];
+                    $face = $segment['face'];
+                    $base14 = $segment['base14'];
+                    if (!isset($usage[$key])) $usage[$key] = ['face' => $face, 'base14' => $base14, 'glyphs' => []];
+                    if (!$face instanceof RegisteredFont) continue;
+                    foreach ($this->codePoints($segment['text']) as $codePoint) {
+                        $gid = $face->metrics->glyphId($codePoint);
+                        if (!isset($usage[$key]['glyphs'][$gid])) $usage[$key]['glyphs'][$gid] = $codePoint;
+                    }
                 }
             }
         }
         return $usage;
     }
 
-    private function fontChoice(TextPaintCommand $command, ?FontRegistry $registry): array
+    /**
+     * Split one paint command into contiguous font-resource segments. Registered fallback faces are
+     * selected per Unicode codepoint; uncovered characters stay on the existing Base14 fallback.
+     *
+     * @return list<array{key:string,face:?RegisteredFont,base14:?string,text:string}>
+     */
+    private function fontSegments(TextPaintCommand $command, ?FontRegistry $registry): array
     {
-        $face = $registry?->resolveFace($command->fontFamily, $command->fontWeight, $command->fontStyle);
-        if ($face !== null && $face->binary !== '' && $this->isTrueType($face->binary)) return ['embedded:' . spl_object_id($face), $face, null];
+        $chars = preg_split('//u', $command->text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($chars === []) return [];
+
+        $segments = [];
         $base14 = $this->base14Font($command);
-        return ['base14:' . $base14, null, $base14];
+
+        foreach ($chars as $char) {
+            $codePoint = $this->codePoints($char)[0] ?? 0;
+            $face = $registry?->resolveFaceForCodePoint(
+                $command->fontFamily,
+                $codePoint,
+                $command->fontWeight,
+                $command->fontStyle,
+            );
+            if ($face !== null && ($face->binary === '' || !$this->isTrueType($face->binary))) {
+                $face = null;
+            }
+
+            $key = $face instanceof RegisteredFont
+                ? 'embedded:' . spl_object_id($face)
+                : 'base14:' . $base14;
+            $segmentBase14 = $face instanceof RegisteredFont ? null : $base14;
+
+            $last = array_key_last($segments);
+            if ($last !== null && $segments[$last]['key'] === $key) {
+                $segments[$last]['text'] .= $char;
+                continue;
+            }
+
+            $segments[] = [
+                'key' => $key,
+                'face' => $face,
+                'base14' => $segmentBase14,
+                'text' => $char,
+            ];
+        }
+
+        return $segments;
     }
 
     private function isTrueType(string $binary): bool
@@ -1012,6 +1062,85 @@ final class PdfSerializer
         $content .= $this->number($width) . ' 0 0 ' . $this->number($height) . ' '
             . $this->number($x) . ' ' . $this->number($y) . " cm\n/" . $resourceName . " Do\nQ\n";
         return $content;
+    }
+
+    /**
+     * Paints fallback segments in a single PDF text object, switching Tf as coverage changes.
+     *
+     * @param list<array{key:string,face:?RegisteredFont,base14:?string,text:string}> $segments
+     * @param array<string,array{name:string,id:int,face:?RegisteredFont}> $fontResources
+     */
+    private function serializeSegmentedText(
+        TextPaintCommand $command,
+        float $pageHeightPx,
+        array $segments,
+        array $fontResources,
+        ?string $graphicsState = null,
+    ): string {
+        if ($segments === [] || ($command->color instanceof Rgba && $command->color->a <= 0.0)) return '';
+
+        $x = Units::pxToPt($command->x);
+        $y = Units::pxToPt($pageHeightPx - $command->baseline);
+        $fontSize = Units::pxToPt($command->fontSize);
+        $letterSpacingPt = Units::pxToPt($this->spacingPx($command, 'letter-spacing'));
+        $wordSpacingPx = $this->spacingPx($command, 'word-spacing') + $command->run->justificationWordSpacing;
+        $wordSpacingPt = Units::pxToPt($wordSpacingPx);
+        [$r, $g, $b] = $command->color?->toPdfRgb() ?? [0.0, 0.0, 0.0];
+
+        $text = "BT\n"
+            . $this->number($letterSpacingPt) . " Tc\n0 Tw\n"
+            . $this->number($r) . ' ' . $this->number($g) . ' ' . $this->number($b) . " rg\n1 0 0 1 "
+            . $this->number($x) . ' ' . $this->number($y) . " Tm\n";
+
+        foreach ($segments as $segment) {
+            $resource = $fontResources[$segment['key']] ?? null;
+            if ($resource === null) continue;
+            $text .= '/' . $resource['name'] . ' ' . $this->number($fontSize) . " Tf\n";
+
+            $face = $segment['face'];
+            if ($face instanceof RegisteredFont) {
+                $text .= "0 Tw\n" . $this->embeddedTextItems(
+                    $segment['text'],
+                    $face,
+                    $wordSpacingPx,
+                    $command->fontSize,
+                ) . "\n";
+                continue;
+            }
+
+            $encoded = $this->encodeWinAnsi($segment['text']);
+            $text .= $this->number($wordSpacingPt) . " Tw\n(" . $this->escapePdfString($encoded) . ") Tj\n";
+        }
+
+        $text .= "ET\n";
+        return $graphicsState !== null ? "q\n/" . $graphicsState . " gs\n" . $text . "Q\n" : $text;
+    }
+
+    private function embeddedTextItems(
+        string $text,
+        RegisteredFont $face,
+        float $wordSpacingPx,
+        float $fontSizePx,
+    ): string {
+        $codePoints = $this->codePoints($text);
+        $glyphs = array_map(fn (int $cp): int => $face->metrics->glyphId($cp), $codePoints);
+        $items = [];
+        $last = count($glyphs) - 1;
+
+        foreach ($glyphs as $i => $gid) {
+            $items[] = '<' . sprintf('%04X', $gid & 0xFFFF) . '>';
+            if ($i >= $last) continue;
+
+            $adjustment = 0.0;
+            $kern = $face->metrics->kerning($gid, $glyphs[$i + 1]);
+            if ($kern !== 0) $adjustment += -$kern * 1000.0 / $face->metrics->unitsPerEm;
+            if (($codePoints[$i] ?? null) === 0x20 && $wordSpacingPx !== 0.0 && $fontSizePx > 0.0) {
+                $adjustment += -$wordSpacingPx * 1000.0 / $fontSizePx;
+            }
+            if (abs($adjustment) > 0.0000001) $items[] = $this->number($adjustment);
+        }
+
+        return '[' . implode(' ', $items) . '] TJ';
     }
 
     private function serializeEmbeddedText(
