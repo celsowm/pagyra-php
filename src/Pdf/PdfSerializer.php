@@ -448,21 +448,25 @@ final class PdfSerializer
         $index = 1;
         foreach ($displayList->pages as $page) {
             foreach ($page->commands as $command) {
-                $color = match (true) {
-                    $command instanceof BoxPaintCommand => $command->backgroundColor,
-                    $command instanceof RoundedBorderPaintCommand => $command->color,
-                    $command instanceof BorderPaintCommand => $command->color,
-                    $command instanceof TextPaintCommand => $command->color,
-                    $command instanceof ImagePaintCommand => new Rgba(0, 0, 0, $command->opacity),
+                $alpha = match (true) {
+                    $command instanceof OpacityGroupPaintCommand && $command->opens() => $command->normalizedOpacity(),
+                    $command instanceof BoxPaintCommand => $command->backgroundColor?->a,
+                    $command instanceof RoundedBorderPaintCommand => $command->color->a,
+                    $command instanceof BorderPaintCommand => $command->color->a,
+                    $command instanceof TextPaintCommand => $command->color?->a,
+                    $command instanceof ImagePaintCommand => $command->opacity,
                     default => null,
                 };
-                if (!$color instanceof Rgba || $color->a <= 0.0 || $color->a >= 1.0) continue;
-                $key = $this->alphaKey($color->a);
+                if ($alpha === null || $alpha >= 1.0) continue;
+                // Primitive alpha=0 never emits paint, but an opacity:0 group still needs a
+                // graphics state so the whole transparency Form disappears at invocation time.
+                if ($alpha <= 0.0 && !$command instanceof OpacityGroupPaintCommand) continue;
+                $key = $this->alphaKey($alpha);
                 if (isset($resources[$key])) continue;
                 $id = $reserve();
                 $name = 'GS' . $index++;
-                $alpha = $this->number($color->a);
-                $objects[$id] = '<< /Type /ExtGState /ca ' . $alpha . ' /CA ' . $alpha . ' >>';
+                $serializedAlpha = $this->number($alpha);
+                $objects[$id] = '<< /Type /ExtGState /ca ' . $serializedAlpha . ' /CA ' . $serializedAlpha . ' >>';
                 $resources[$key] = ['name' => $name, 'id' => $id];
             }
         }
@@ -534,6 +538,14 @@ final class PdfSerializer
     {
         if (!$color instanceof Rgba || $color->a <= 0.0 || $color->a >= 1.0) return null;
         return $resources[$this->alphaKey($color->a)]['name'] ?? null;
+    }
+
+    private function graphicsStateNameForAlpha(float $alpha, array $resources): ?string
+    {
+        $alpha = max(0.0, min(1.0, $alpha));
+        if ($alpha >= 1.0) return null;
+
+        return $resources[$this->alphaKey($alpha)]['name'] ?? null;
     }
 
     private function alphaKey(float $alpha): string
