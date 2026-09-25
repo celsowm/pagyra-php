@@ -20,6 +20,8 @@ final readonly class FloatRun
         public float $startY = 0.0,
         public ?float $leftBottom = null,
         public ?float $rightBottom = null,
+        public ?float $originLeftX = null,
+        public ?float $originRightX = null,
     ) {
     }
 
@@ -28,7 +30,7 @@ final readonly class FloatRun
         $startY = $this->active ? $this->startY : $rowY;
         $leftBottom = max($this->leftBottom ?? 0.0, $childBottom);
         $bottom = max($leftBottom, $this->rightBottom ?? 0.0);
-        return new self($newLeftX, $this->rightX, true, $bottom, $startY, $leftBottom, $this->rightBottom);
+        return new self($newLeftX, $this->rightX, true, $bottom, $startY, $leftBottom, $this->rightBottom, $this->containingLeft(), $this->containingRight());
     }
 
     public function withRight(float $newRightX, float $childBottom, float $rowY): self
@@ -36,11 +38,38 @@ final readonly class FloatRun
         $startY = $this->active ? $this->startY : $rowY;
         $rightBottom = max($this->rightBottom ?? 0.0, $childBottom);
         $bottom = max($this->leftBottom ?? 0.0, $rightBottom);
-        return new self($this->leftX, $newRightX, true, $bottom, $startY, $this->leftBottom, $rightBottom);
+        return new self($this->leftX, $newRightX, true, $bottom, $startY, $this->leftBottom, $rightBottom, $this->containingLeft(), $this->containingRight());
     }
 
     public function reset(float $leftX, float $rightX): self
     {
-        return new self($leftX, $rightX, false, 0.0, 0.0);
+        return new self($leftX, $rightX, false, 0.0, 0.0, null, null, $leftX, $rightX);
+    }
+
+    public function nextRow(): self
+    {
+        $left = $this->containingLeft();
+        $right = $this->containingRight();
+        return new self($left, $right, false, 0.0, 0.0, null, null, $left, $right);
+    }
+
+    public function containingLeft(): float
+    {
+        return $this->originLeftX ?? $this->leftX;
+    }
+
+    public function containingRight(): float
+    {
+        return $this->originRightX ?? $this->rightX;
+    }
+
+    public function containingWidth(): float
+    {
+        return max(0.0, $this->containingRight() - $this->containingLeft());
+    }
+
+    public function availableWidth(): float
+    {
+        return max(0.0, $this->rightX - $this->leftX);
     }
 }
