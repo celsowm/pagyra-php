@@ -146,6 +146,18 @@ final class TableColumnWidthTest extends TestCase
         self::assertEqualsWithDelta(100.0, $right->box->borderBox()->width, 1.0);
     }
 
+    public function testLegacyColgroupWidthAttributeFallsBackToChildColumns(): void
+    {
+        [$left, $right] = $this->cells(
+            '<table style="width:200px"><colgroup width="100">'
+            . '<col><col>'
+            . '</colgroup><tr><td>a</td><td>b</td></tr></table>'
+        );
+
+        self::assertEqualsWithDelta(100.0, $left->box->borderBox()->width, 1.0);
+        self::assertEqualsWithDelta(100.0, $right->box->borderBox()->width, 1.0);
+    }
+
     public function testIntrinsicSizingWalksBlockDescendantsInsideCells(): void
     {
         [$short, $long] = $this->cells(
