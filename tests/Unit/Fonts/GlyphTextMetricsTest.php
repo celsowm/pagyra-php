@@ -34,6 +34,38 @@ final class GlyphTextMetricsTest extends TestCase
         self::assertSame(24.0, $measurement->blockSize);
     }
 
+    public function testMeasuresMixedCoverageAcrossFamilyStackAndSpacingOnce(): void
+    {
+        $primary = new TtfFontMetrics(
+            unitsPerEm: 1000,
+            ascent: 800,
+            descent: -200,
+            lineGap: 0,
+            advanceWidths: [0 => 500, 1 => 600],
+            cmap: [65 => 1],
+        );
+        $fallback = new TtfFontMetrics(
+            unitsPerEm: 1000,
+            ascent: 800,
+            descent: -200,
+            lineGap: 0,
+            advanceWidths: [0 => 500, 1 => 800],
+            cmap: [937 => 1],
+        );
+        $registry = new FontRegistry();
+        $registry->register('Primary', $primary);
+        $registry->register('Fallback', $fallback);
+        $metrics = new GlyphTextMetrics($registry);
+        $style = new ComputedStyle([
+            'font-family' => 'Primary, Fallback',
+            'letter-spacing' => '1px',
+        ]);
+
+        $measurement = $metrics->measure("AΩA", $style, 10.0);
+
+        self::assertEqualsWithDelta(22.0, $measurement->inlineSize, 0.0001);
+    }
+
     public function testFallsBackWhenFamilyIsMissing(): void
     {
         $metrics = new GlyphTextMetrics(new FontRegistry());
