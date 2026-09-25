@@ -193,7 +193,7 @@ The main structural gaps currently are:
 - reusing recursive min/max intrinsic sizing across the remaining intrinsic paths (tables and floats already use it);
 - repeated table header/footer groups with multi-row `rowspan` packing;
 - named grid lines;
-- true isolated PDF transparency-group compositing for opacity contexts (stacking-context ordering/flattening is implemented);
+- isolated opacity grouping for normal non-atomic inline spans (layout/atomic boxes already use PDF Transparency Group Forms);
 - 3D/perspective CSS transforms and transformed link annotation geometry (2D transform paint is implemented);
 - full SVG vector paint and WebP PDF paint;
 - Adam7 PNG;
@@ -201,7 +201,7 @@ The main structural gaps currently are:
 - WOFF/WOFF2 decoding;
 - GPOS PairPos parity with the JS reference and richer glyph fallback chains;
 - `::marker` and the remaining CSS long tail;
-- full isolated-group opacity compositing;
+- isolated-group opacity for normal inline spans;
 - the remaining border styles and inset box shadows.
 
 Some historically listed gaps are implemented now: sibling combinators and structural selectors,
