@@ -15,9 +15,8 @@ use PHPUnit\Framework\TestCase;
  * badge or a tag styled with a border — a common pattern editors and CSS frameworks emit on a
  * `<span>` — rendered as plain, unbordered text.
  *
- * Like the background it is painted alongside, this stays a paint-only decoration: it widens the
- * band drawn around the text rather than the box the text is laid out in, so the padding does not
- * actually push neighbouring inline content aside (TextRun's own docblock explains why).
+ * The horizontal edges are part of inline layout, not merely paint: padding and border reserve
+ * advance width, move the glyphs inward and can therefore change wrapping exactly like a browser.
  */
 final class InlineBorderAndPaddingTest extends TestCase
 {
@@ -45,7 +44,7 @@ final class InlineBorderAndPaddingTest extends TestCase
         }
     }
 
-    public function testPaddingWidensTheBackgroundBandWithoutMovingTheText(): void
+    public function testPaddingWidensTheBackgroundBandAndKeepsItsOuterEdge(): void
     {
         $withoutPadding = $this->textRunBoxes('<p style="margin:0"><span style="background:yellow">badge</span></p>');
         $withPadding = $this->textRunBoxes('<p style="margin:0"><span style="background:yellow;padding-left:10px;padding-right:6px">badge</span></p>');
@@ -53,7 +52,7 @@ final class InlineBorderAndPaddingTest extends TestCase
         self::assertCount(1, $withoutPadding);
         self::assertCount(1, $withPadding);
         self::assertEqualsWithDelta($withoutPadding[0]->width + 16.0, $withPadding[0]->width, 0.5);
-        self::assertEqualsWithDelta($withoutPadding[0]->x - 10.0, $withPadding[0]->x, 0.5);
+        self::assertEqualsWithDelta($withoutPadding[0]->x, $withPadding[0]->x, 0.5);
     }
 
     public function testBorderAndPaddingCombineIntoOneWiderBand(): void
@@ -64,6 +63,56 @@ final class InlineBorderAndPaddingTest extends TestCase
         self::assertCount(0, $backgroundless);
         $borders = array_values(array_filter($boxes, static fn(BoxPaintCommand $b) => $b->decorative));
         self::assertCount(4, $borders);
+    }
+
+    public function testPaddingAndBorderPushFollowingInlineContentAside(): void
+    {
+        $plain = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'margins' => 0.0,
+            'html' => '<p style="margin:0">A<span>B</span>C</p>',
+        ]);
+        $decorated = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'margins' => 0.0,
+            'html' => '<p style="margin:0">A<span style="padding:0 10px;border:2px solid red">B</span>C</p>',
+        ]);
+
+        $plainRuns = $plain->layoutRoot->children[0]->lineBoxes[0]->runs;
+        $decoratedRuns = $decorated->layoutRoot->children[0]->lineBoxes[0]->runs;
+        self::assertCount(3, $plainRuns);
+        self::assertCount(3, $decoratedRuns);
+
+        // 10px padding + 2px border on each horizontal side reserves 24px of real advance.
+        self::assertEqualsWithDelta(
+            $plainRuns[2]->x + 24.0,
+            $decoratedRuns[2]->x,
+            0.5,
+        );
+        self::assertEqualsWithDelta(
+            $plainRuns[1]->x + 12.0,
+            $decoratedRuns[1]->x,
+            0.5,
+        );
+    }
+
+    public function testInlineEdgesParticipateInWrapping(): void
+    {
+        $plain = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<p style="margin:0;width:50px;font-size:16px">A<span>B</span>C</p>',
+            'viewportWidth' => 100,
+            'viewportHeight' => 200,
+        ]);
+        $decorated = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<p style="margin:0;width:50px;font-size:16px">A<span style="padding:0 12px;border:1px solid">B</span>C</p>',
+            'viewportWidth' => 100,
+            'viewportHeight' => 200,
+        ]);
+
+        self::assertCount(1, $plain->layoutRoot->children[0]->lineBoxes);
+        self::assertGreaterThan(1, count($decorated->layoutRoot->children[0]->lineBoxes));
     }
 
     public function testPlainSpanWithNeitherIsUnaffected(): void
