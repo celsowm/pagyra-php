@@ -10,7 +10,7 @@ use PHPUnit\Framework\TestCase;
 
 final class TableHeaderFooterPaginationTest extends TestCase
 {
-    private function prepared(string $table, string $after = ''): \Pagyra\PreparedHtmlRender
+    private function prepared(string $table, string $after = ''): \Pagyra\Core\PreparedRender
     {
         return Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
@@ -30,7 +30,7 @@ final class TableHeaderFooterPaginationTest extends TestCase
     }
 
     /** @return list<list<string>> */
-    private function textsByPage(\Pagyra\PreparedHtmlRender $prepared): array
+    private function textsByPage(\Pagyra\Core\PreparedRender $prepared): array
     {
         $pages = [];
         foreach ($prepared->displayList->pages as $page) {
