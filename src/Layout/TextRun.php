@@ -62,8 +62,6 @@ final readonly class TextRun implements \JsonSerializable
             'inlineBorderWidth' => $this->inlineBorderWidth,
             'inlinePaddingLeft' => $this->inlinePaddingLeft,
             'inlinePaddingRight' => $this->inlinePaddingRight,
-            'inlineBorderStart' => $this->inlineBorderStart,
-            'inlineBorderEnd' => $this->inlineBorderEnd,
         ];
     }
 }
