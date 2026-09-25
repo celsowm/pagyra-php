@@ -25,8 +25,7 @@ final class BlockLayoutEngine
      */
     public const ANONYMOUS_TAG = '#anonymous';
 
-    /** @var list<array{top:float,bottom:float,left:float,right:float}> floats that lines wrap around */
-    private array $exclusions = [];
+    private FloatExclusionContext $floatContext;
 
     private const ROOT_FONT_SIZE = 16.0;
 
@@ -42,6 +41,7 @@ final class BlockLayoutEngine
         ?TextMetrics $textMetrics = null,
     ) {
         $this->lengthParser = new LengthParser($viewportWidth, $viewportHeight);
+        $this->floatContext = new FloatExclusionContext();
         $metrics = $textMetrics ?? new HeuristicTextMetrics();
         $this->inlineTextFormatter = new InlineTextFormatter($metrics);
         $this->intrinsicSizeResolver = new IntrinsicSizeResolver($this->inlineTextFormatter);
@@ -201,7 +201,7 @@ final class BlockLayoutEngine
      */
     private function layoutDocument(StyledNode $root): LayoutNode
     {
-        $this->exclusions = [];
+        $this->floatContext = new FloatExclusionContext();
         // The root carries the body's computed style (StyleComputer::computeTree), and the body is
         // a block box like any other: its margin (8px from the UA sheet), border and padding
         // inset the content, `width`/`max-width` narrow it and auto side margins centre it. The
@@ -258,7 +258,7 @@ final class BlockLayoutEngine
                     $cursorY,
                     $contentWidth,
                     $fontSize,
-                    $this->exclusions,
+                    $this->floatContext->exclusions(),
                 );
                 // Always an anonymous block here, never lines on the root itself: the pagination
                 // walk starts at the root's children, so anything left on the root node was laid
@@ -408,17 +408,18 @@ final class BlockLayoutEngine
 
     private function layoutBlock(StyledNode $styled, float $containingX, float $flowY, float $containingWidth, float $containingHeight, float $parentFontSize, bool $heightIsMinimum = false): LayoutNode
     {
-        // Floats placed inside this block stop mattering to lines once the block is done.
-        $outerExclusions = $this->exclusions;
-        // A block that starts a new formatting context (overflow other than visible, and the
-        // table cells, flex and grid items laid out through here) keeps outside floats out.
-        if (!$this->wrapsAroundFloats($styled)) {
-            $this->exclusions = [];
-        }
+        // Every descendant gets its own mutable float-context frame. Ordinary blocks inherit a
+        // copy of the surrounding exclusions so their lines can wrap around outside floats;
+        // boxes that establish a BFC start empty. Either way, floats created inside this block
+        // stop affecting siblings once the block returns.
+        $outerFloatContext = $this->floatContext;
+        $this->floatContext = $this->wrapsAroundFloats($styled)
+            ? $outerFloatContext->copy()
+            : new FloatExclusionContext();
         try {
             return $this->layoutBlockContent($styled, $containingX, $flowY, $containingWidth, $containingHeight, $parentFontSize, $heightIsMinimum);
         } finally {
-            $this->exclusions = $outerExclusions;
+            $this->floatContext = $outerFloatContext;
         }
     }
 
@@ -1886,13 +1887,10 @@ final class BlockLayoutEngine
         return in_array($value, ['normal', 'stretch', 'legacy'], true) ? 'stretch' : $value;
     }
 
-    /** Registers the band a run of floats occupies, for the lines that follow to go around. */
+    /** Registers a float run in the current block-formatting-context frame. */
     private function excludeFloat(FloatRun $float): void
     {
-        $exclusion = ['top' => $float->startY, 'bottom' => $float->bottom, 'left' => $float->leftX, 'right' => $float->rightX];
-        if (!in_array($exclusion, $this->exclusions, true)) {
-            $this->exclusions[] = $exclusion;
-        }
+        $this->floatContext->register($float);
     }
 
     /**
