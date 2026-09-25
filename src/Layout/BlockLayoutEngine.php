@@ -2307,10 +2307,14 @@ final class BlockLayoutEngine
     private function layoutFloatChild(StyledNode $styled, string $side, FloatRun $float, float $runY, float $containingHeight, float $parentFontSize): array
     {
         $fontSize = $this->resolveFontSize($styled, $parentFontSize);
-        $available = max(0.0, $float->rightX - $float->leftX);
-        $margin = $this->resolveEdges($styled, 'margin', $available, $containingHeight, $fontSize);
-        $padding = $this->resolveEdges($styled, 'padding', $available, $containingHeight, $fontSize);
-        $border = $this->resolveBorderEdges($styled, $available, $containingHeight, $fontSize);
+        // Width resolution belongs to the containing block, not to whatever narrow slot the
+        // preceding floats happened to leave on the current row. Placement decides afterward
+        // whether that resolved margin box still fits beside them.
+        $containingAvailable = $float->containingWidth();
+        $slotAvailable = $float->availableWidth();
+        $margin = $this->resolveEdges($styled, 'margin', $containingAvailable, $containingHeight, $fontSize);
+        $padding = $this->resolveEdges($styled, 'padding', $containingAvailable, $containingHeight, $fontSize);
+        $border = $this->resolveBorderEdges($styled, $containingAvailable, $containingHeight, $fontSize);
         $horizontalNonContent = $margin->horizontal() + $padding->horizontal() + $border->horizontal();
 
         $isReplaced = $styled->node->isImage() || $styled->node->isSvg();
@@ -2318,18 +2322,27 @@ final class BlockLayoutEngine
             // An <img align="left"> has no markup content for the ordinary block box model to
             // measure, so width:auto and height:auto (below) resolved to the full available
             // width and zero height instead of the image's own intrinsic size.
-            [$contentWidth, $contentHeight] = $this->inlineTextFormatter->replacedContentSize($styled, $available, $fontSize);
+            [$contentWidth, $contentHeight] = $this->inlineTextFormatter->replacedContentSize($styled, $containingAvailable, $fontSize);
         } else {
             $widthValue = $styled->style->get('width', 'auto') ?? 'auto';
             if ($this->isAuto($widthValue)) {
-                $contentWidth = $this->shrinkToFitWidth($styled, max(0.0, $available - $horizontalNonContent), $fontSize);
+                $contentWidth = $this->shrinkToFitWidth($styled, max(0.0, $containingAvailable - $horizontalNonContent), $fontSize);
             } else {
-                $resolvedWidth = $this->resolveLength($widthValue, $available, $fontSize, $available, $containingHeight, 'zero');
+                $resolvedWidth = $this->resolveLength($widthValue, $containingAvailable, $fontSize, $containingAvailable, $containingHeight, 'zero');
                 $contentWidth = ($styled->style->get('box-sizing') ?? 'content-box') === 'border-box' ? max(0.0, $resolvedWidth - $horizontalNonContent) : max(0.0, $resolvedWidth);
             }
-            $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $available, $containingHeight, $fontSize);
+            $contentWidth = $this->applyHorizontalConstraints($styled, $contentWidth, $horizontalNonContent, $containingAvailable, $containingHeight, $fontSize);
         }
         $marginBoxWidth = $contentWidth + $horizontalNonContent;
+
+        // CSS 2.1 float placement retries lower when the current row has insufficient horizontal
+        // room. Register the finished row before resetting its left/right cursors, so following
+        // line boxes and clear still see it through the BFC context.
+        if ($float->active && $marginBoxWidth > $slotAvailable + 0.01) {
+            $this->excludeFloat($float);
+            $runY = max($runY, $float->bottom);
+            $float = $float->nextRow();
+        }
 
         $containingX = $side === 'left' ? $float->leftX : $float->rightX - $marginBoxWidth;
         if ($isReplaced) {
