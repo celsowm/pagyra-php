@@ -13,12 +13,14 @@ final class RecursivePaginationOffsets
     /** @var array<int,float> */
     private array $forcedOffsets = [];
     private float $forcedGlobalOffset = 0.0;
+    private int $lastForcedBreakPage = -1;
 
     /** @return array<int,float> keyed by spl_object_id(LayoutNode) */
     public function resolve(LayoutNode $root, PageFlow $flow): array
     {
         $this->forcedOffsets = [];
         $this->forcedGlobalOffset = 0.0;
+        $this->lastForcedBreakPage = -1;
 
         foreach ($root->children as $child) {
             $this->visitForced($child, $flow);
@@ -31,6 +33,12 @@ final class RecursivePaginationOffsets
         }
 
         return $finalOffsets;
+    }
+
+    /** Highest page index a `break-before`/`break-after` sent content to in the last resolve(), or -1. */
+    public function lastForcedBreakPage(): int
+    {
+        return $this->lastForcedBreakPage;
     }
 
     private function visitForced(LayoutNode $node, PageFlow $flow): void
@@ -163,6 +171,7 @@ final class RecursivePaginationOffsets
         $target = abs($coordinate - $currentStart) <= self::EPSILON ? $currentPage : $currentPage + 1;
         if ($value === 'left' && $target % 2 === 0) $target++;
         elseif ($value === 'right' && $target % 2 !== 0) $target++;
+        $this->lastForcedBreakPage = max($this->lastForcedBreakPage, $target);
         return max(0.0, $flow->contentStartForPage($target) - $coordinate);
     }
 

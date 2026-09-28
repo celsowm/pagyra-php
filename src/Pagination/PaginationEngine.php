@@ -29,7 +29,8 @@ final class PaginationEngine
         $flow = $contentHeightOrFlow instanceof PageFlow
             ? $contentHeightOrFlow
             : new PageFlow($contentHeightOrFlow);
-        $baseOffsets = (new RecursivePaginationOffsets())->resolve($root, $flow);
+        $forcedBreaks = new RecursivePaginationOffsets();
+        $baseOffsets = $forcedBreaks->resolve($root, $flow);
         $this->tablePlans = [];
         $nodeOffsets = $this->applyTablePaginationOffsets($root, $flow, $baseOffsets);
         $this->subtreeExtents = [];
@@ -70,6 +71,7 @@ final class PaginationEngine
             placements: $placements,
             pageCount: $pageCount,
             pages: $this->buildPhysicalPages($placements, $flow, $pageCount),
+            lastForcedBreakPage: $forcedBreaks->lastForcedBreakPage(),
         );
     }
 

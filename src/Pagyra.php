@@ -21,6 +21,7 @@ use Pagyra\Pagination\PaginationEngine;
 use Pagyra\Paint\BorderPatternExpander;
 use Pagyra\Paint\DisplayListBuilder;
 use Pagyra\Paint\OpacityGroupNormalizer;
+use Pagyra\Paint\TrailingBlankPageTrimmer;
 use Pagyra\Paint\VisibilityFilter;
 use Pagyra\Pdf\PdfSerializer;
 use Pagyra\Style\StyleComputer;
@@ -87,6 +88,7 @@ final class Pagyra
         $displayList = (new BorderPatternExpander())->expand($displayList, $pagination);
         $displayList = (new OpacityGroupNormalizer())->normalize($displayList);
         $displayList = (new VisibilityFilter())->apply($displayList);
+        $displayList = (new TrailingBlankPageTrimmer())->trim($displayList, $pagination->lastForcedBreakPage);
 
         return new PreparedRender(
             domRoot: $document->root,
