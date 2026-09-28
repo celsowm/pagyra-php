@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Fonts\Base14;
 
+use Pagyra\Fonts\FontFamilyList;
 use Pagyra\Fonts\WinAnsiEncoding;
 use Pagyra\Style\ComputedStyle;
 
@@ -84,22 +85,35 @@ final class Base14WidthTable
         $bold = self::normalizedWeight($style->get('font-weight')) >= self::BOLD_THRESHOLD;
         $italic = in_array(strtolower(trim($style->get('font-style', 'normal') ?? 'normal')), ['italic', 'oblique'], true);
 
-        $family = null;
-        foreach (explode(',', strtolower($style->get('font-family', '') ?? '')) as $token) {
-            $token = trim($token, " \t\n\r\0\x0B\"'");
-            if ($token === '') continue;
-            if (str_contains($token, 'courier') || str_contains($token, 'mono')) { $family = 'Courier'; break; }
-            if (str_contains($token, 'helvetica') || str_contains($token, 'arial') || str_contains($token, 'sans')) { $family = 'Helvetica'; break; }
-            if (str_contains($token, 'times') || str_contains($token, 'georgia') || str_contains($token, 'serif')) { $family = 'Times'; break; }
-            // Unknown family name — keep looking at the next fallback in the stack.
-        }
-        $family ??= 'Times';
-
-        return match ($family) {
+        return match (self::base14Family($style->get('font-family', ''))) {
             'Helvetica' => $bold && $italic ? 'Helvetica-BoldOblique' : ($bold ? 'Helvetica-Bold' : ($italic ? 'Helvetica-Oblique' : 'Helvetica')),
             'Courier' => $bold && $italic ? 'Courier-BoldOblique' : ($bold ? 'Courier-Bold' : ($italic ? 'Courier-Oblique' : 'Courier')),
             default => $bold && $italic ? 'Times-BoldItalic' : ($bold ? 'Times-Bold' : ($italic ? 'Times-Italic' : 'Times-Roman')),
         };
+    }
+
+    /**
+     * Base14 family (Helvetica, Times or Courier) for a `font-family` value; the one place both
+     * resolveFont() and PdfSerializer::base14Font() decide it, so measurement and drawing agree.
+     * Walks the whole stack and takes the first name it recognises by substring; unknown names
+     * fall through to the next one, and a stack with nothing recognisable ends in Times.
+     *
+     * A name with a comma in it can only come from quotes (`"Calibri, sans-serif"`) and is one
+     * family no system has: it is skipped like any unknown name instead of being read as
+     * "Calibri" plus a sans-serif fallback, which would draw in Helvetica what browsers draw in
+     * their default serif face.
+     */
+    public static function base14Family(?string $fontFamily): string
+    {
+        foreach (FontFamilyList::names($fontFamily) as $name) {
+            $name = strtolower($name);
+            if (str_contains($name, ',')) continue;
+            if (str_contains($name, 'courier') || str_contains($name, 'mono')) return 'Courier';
+            if (str_contains($name, 'helvetica') || str_contains($name, 'arial') || str_contains($name, 'sans')) return 'Helvetica';
+            if (str_contains($name, 'times') || str_contains($name, 'georgia') || str_contains($name, 'serif')) return 'Times';
+            // Unknown family name — keep looking at the next fallback in the stack.
+        }
+        return 'Times';
     }
 
     /** Decodes one UTF-8 character without requiring ext-mbstring, which this package does not. */

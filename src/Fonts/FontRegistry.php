@@ -127,15 +127,7 @@ final class FontRegistry
     /** @return list<string> */
     private function families(?string $value): array
     {
-        if ($value === null || trim($value) === '') return [];
-        $parts = array_map(static function (string $family): string {
-            $family = trim($family);
-            if (strlen($family) >= 2 && (($family[0] === '"' && $family[-1] === '"') || ($family[0] === "'" && $family[-1] === "'"))) {
-                $family = substr($family, 1, -1);
-            }
-            return $family;
-        }, explode(',', $value));
-        return array_values(array_filter($parts, static fn (string $v): bool => $v !== ''));
+        return FontFamilyList::names($value);
     }
 
     private function familyKey(string $family): string

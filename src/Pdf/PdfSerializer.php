@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pagyra\Pdf;
 
 use Pagyra\Css\Color\Rgba;
+use Pagyra\Fonts\Base14\Base14WidthTable;
 use Pagyra\Fonts\FontRegistry;
 use Pagyra\Fonts\RegisteredFont;
 use Pagyra\Fonts\WinAnsiEncoding;
@@ -1220,16 +1221,7 @@ final class PdfSerializer
         // the fallback. Picking a bucket from the first name alone sent every `Calibri, …`
         // (i.e. every eproc/TJRJ document) to Times while the width table — which does fall
         // through — measured it as Helvetica, so justified lines never reached the margin.
-        $base = null;
-        foreach (explode(',', strtolower($command->fontFamily ?? '')) as $name) {
-            $name = trim($name, " \t\n\r\0\x0B\"'");
-            if ($name === '') continue;
-            if (str_contains($name, 'courier') || str_contains($name, 'mono')) { $base = 'Courier'; break; }
-            if (str_contains($name, 'helvetica') || str_contains($name, 'arial') || str_contains($name, 'sans')) { $base = 'Helvetica'; break; }
-            if (str_contains($name, 'times') || str_contains($name, 'georgia') || str_contains($name, 'serif')) { $base = 'Times'; break; }
-            // Unknown family name — keep looking at the next fallback in the stack.
-        }
-        $base ??= 'Times';
+        $base = Base14WidthTable::base14Family($command->fontFamily);
         $bold = $command->fontWeight >= 600;
         $italic = str_contains($command->fontStyle, 'italic') || str_contains($command->fontStyle, 'oblique');
         return match ($base) {

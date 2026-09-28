@@ -9,12 +9,12 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * When no `@font-face` covers the requested family, the Base14 fallback must read the whole
- * `font-family` stack, not just its first name. Every eproc / TJRJ document ships
- * `font-family: "Calibri, sans-serif"` (or the unquoted list); Calibri is not embedded here,
- * so the trailing generic is what decides the face. Picking the bucket from the first name
- * alone drew those documents in Times while the width table — which does fall through — had
- * measured them as Helvetica, so justified lines were spaced for the wrong font and never
- * reached the margin.
+ * `font-family` stack, not just its first name. eproc and PJe documents ship
+ * `font-family: "Calibri",sans-serif` or the unquoted `Calibri, Arial, Helvetica, sans-serif`;
+ * Calibri is not embedded here, so the trailing generic is what decides the face. Picking the
+ * bucket from the first name alone drew those documents in Times while the width table — which
+ * does fall through — had measured them as Helvetica, so justified lines were spaced for the
+ * wrong font and never reached the margin.
  */
 final class Base14FallbackWalksFontStackTest extends TestCase
 {
@@ -33,13 +33,22 @@ final class Base14FallbackWalksFontStackTest extends TestCase
         self::assertStringNotContainsString('/BaseFont /Times-Roman', $pdf);
     }
 
-    public function testWholeListQuotedAsOneStringStillFallsThrough(): void
+    public function testQuotedFirstNameThenGenericFallsThrough(): void
     {
-        // Malformed but common in the wild: the entire list sits inside one pair of quotes.
-        $pdf = $this->pdf('&quot;Calibri, sans-serif&quot;');
+        $pdf = $this->pdf('&quot;Calibri&quot;,sans-serif');
 
         self::assertStringContainsString('/BaseFont /Helvetica', $pdf);
         self::assertStringNotContainsString('/BaseFont /Times-Roman', $pdf);
+    }
+
+    public function testWholeListQuotedAsOneStringIsOneUnknownFamily(): void
+    {
+        // The entire list inside one pair of quotes is a single family name, as browsers read it;
+        // see QuotedFontFamilyWithCommaTest.
+        $pdf = $this->pdf('&quot;Calibri, sans-serif&quot;');
+
+        self::assertStringContainsString('/BaseFont /Times-Roman', $pdf);
+        self::assertStringNotContainsString('/BaseFont /Helvetica', $pdf);
     }
 
     public function testSerifGenericStillResolvesToTimes(): void
