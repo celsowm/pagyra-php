@@ -15,12 +15,24 @@ final class RecursivePaginationOffsets
     private float $forcedGlobalOffset = 0.0;
     private int $lastForcedBreakPage = -1;
 
+    /** @var array<int,float> extra shift of each moved line box, keyed by spl_object_id(LineBox) */
+    private array $lineShifts = [];
+
+    /** @var array<int,float> space moved lines added inside each node's box, keyed by spl_object_id(LayoutNode) */
+    private array $growths = [];
+
+    /** Running total of the space added by moved lines so far, to size each node's growth. */
+    private float $lineShiftTotal = 0.0;
+
     /** @return array<int,float> keyed by spl_object_id(LayoutNode) */
     public function resolve(LayoutNode $root, PageFlow $flow): array
     {
         $this->forcedOffsets = [];
         $this->forcedGlobalOffset = 0.0;
         $this->lastForcedBreakPage = -1;
+        $this->lineShifts = [];
+        $this->growths = [];
+        $this->lineShiftTotal = 0.0;
 
         foreach ($root->children as $child) {
             $this->visitForced($child, $flow);
@@ -41,9 +53,41 @@ final class RecursivePaginationOffsets
         return $this->lastForcedBreakPage;
     }
 
-    private function visitForced(LayoutNode $node, PageFlow $flow): void
+    /**
+     * How far each line box that straddled a page break was moved down in the last resolve(),
+     * keyed by spl_object_id(LineBox). A line not listed stays where layout put it, plus its
+     * node's offset.
+     *
+     * @return array<int,float>
+     */
+    public function lineShifts(): array
+    {
+        return $this->lineShifts;
+    }
+
+    /**
+     * How much taller each node's box became in the last resolve() because lines inside it were
+     * moved down, keyed by spl_object_id(LayoutNode).
+     *
+     * @return array<int,float>
+     */
+    public function growths(): array
+    {
+        return $this->growths;
+    }
+
+    /**
+     * @param bool $placedWhole true below a table (TablePaginationPlanner places rows whole) or an
+     *                          out-of-flow box, where moving a line would shift unrelated content
+     */
+    private function visitForced(LayoutNode $node, PageFlow $flow, bool $placedWhole = false): void
     {
         $participates = $this->participatesInPageFlow($node);
+        $shiftTotalBefore = $this->lineShiftTotal;
+        $display = strtolower(trim($node->source->style->get('display', 'block') ?? 'block'));
+        $childrenPlacedWhole = $placedWhole
+            || in_array($display, ['table', 'inline-table'], true)
+            || ($display !== 'none' && !str_starts_with($display, 'inline') && !$participates);
 
         if ($participates) {
             $start = $node->box->marginBox()->y + $this->forcedGlobalOffset;
@@ -56,7 +100,7 @@ final class RecursivePaginationOffsets
         $this->forcedOffsets[spl_object_id($node)] = $this->forcedGlobalOffset;
 
         foreach ($node->children as $child) {
-            $this->visitForced($child, $flow);
+            $this->visitForced($child, $flow, $childrenPlacedWhole);
         }
 
         if (!$participates) return;
@@ -67,6 +111,18 @@ final class RecursivePaginationOffsets
         if ($widowOrphan > self::EPSILON) {
             $this->addOffsetToVisitedSubtree($node, $widowOrphan);
             $this->forcedGlobalOffset += $widowOrphan;
+        }
+
+        if (!$placedWhole) {
+            $shift = $this->straddlingLineShift($node, $this->forcedOffsets[spl_object_id($node)] ?? 0.0, $flow);
+            if ($shift > self::EPSILON) {
+                $this->forcedGlobalOffset += $shift;
+                $this->lineShiftTotal += $shift;
+            }
+        }
+        $growth = $this->lineShiftTotal - $shiftTotalBefore;
+        if ($growth > self::EPSILON) {
+            $this->growths[spl_object_id($node)] = $growth;
         }
 
         $end = $this->absoluteForcedSubtreeBottom($node);
@@ -135,6 +191,40 @@ final class RecursivePaginationOffsets
         return max(0.0, $flow->contentStartForPage($currentPage + 1) - $start);
     }
 
+    /**
+     * Moves each of the node's lines that holds an image (or another atomic inline box) and would
+     * straddle a page break to the top of the next page, and returns the space added. Each later
+     * line carries the shifts of the lines before it. Such a line goes to the page its baseline is
+     * on, so left in place it is painted across the break and loses its top or its bottom off the
+     * sheet. A text-only line crossing the break loses nothing (at most part of a line runs into
+     * the page margin) and keeps its place, which is also what keeps page counts in step with
+     * wkhtmltopdf. A line taller than a page (a scanned page as an inline image) straddles a break
+     * wherever it goes and loses its bottom anyway; it moves to the top of the next page only when
+     * less than half a page is left for it, which is when staying would hide most of it.
+     */
+    private function straddlingLineShift(LayoutNode $node, float $offset, PageFlow $flow): float
+    {
+        $shift = 0.0;
+        foreach ($node->lineBoxes as $line) {
+            if ($line->atomicBoxes === []) {
+                if ($shift > self::EPSILON) $this->lineShifts[spl_object_id($line)] = $shift;
+                continue;
+            }
+            $top = $line->y + $offset + $shift;
+            $topPage = $flow->pageIndexAt($top + self::EPSILON);
+            $bottomPage = $flow->pageIndexAt(max($top, $top + $line->height - self::EPSILON));
+            $room = $flow->contentStartForPage($topPage + 1) - $top;
+            $fits = $line->height <= $flow->usableHeightForPage($topPage + 1) + self::EPSILON;
+            if ($bottomPage > $topPage && ($fits || $room < $flow->usableHeightForPage($topPage) / 2)) {
+                $shift += $room;
+            }
+            if ($shift > self::EPSILON) {
+                $this->lineShifts[spl_object_id($line)] = $shift;
+            }
+        }
+        return $shift;
+    }
+
     private function breakInsideAvoidOffset(LayoutNode $node, float $offset, PageFlow $flow): float
     {
         $value = strtolower(trim(
@@ -146,7 +236,7 @@ final class RecursivePaginationOffsets
 
         $border = $node->box->borderBox();
         $top = $border->y + $offset;
-        $bottom = $border->bottom() + $offset;
+        $bottom = $border->bottom() + $offset + ($this->growths[spl_object_id($node)] ?? 0.0);
         $startPage = $flow->pageIndexAt($top);
         $endPage = $flow->pageIndexAt(max($top, $bottom - self::EPSILON));
         if ($startPage === $endPage) return 0.0;
@@ -201,7 +291,7 @@ final class RecursivePaginationOffsets
     private function absoluteForcedSubtreeBottom(LayoutNode $node): float
     {
         $offset = $this->forcedOffsets[spl_object_id($node)] ?? 0.0;
-        $bottom = $node->box->marginBox()->bottom() + $offset;
+        $bottom = $node->box->marginBox()->bottom() + $offset + ($this->growths[spl_object_id($node)] ?? 0.0);
         foreach ($node->children as $child) {
             $bottom = max($bottom, $this->absoluteForcedSubtreeBottom($child));
         }

@@ -24,6 +24,12 @@ final class PaginationEngine
     /** @var array<int,TablePaginationPlan> keyed by spl_object_id(LayoutNode) */
     private array $tablePlans = [];
 
+    /** @var array<int,float> see RecursivePaginationOffsets::lineShifts() */
+    private array $lineShifts = [];
+
+    /** @var array<int,float> see RecursivePaginationOffsets::growths() */
+    private array $growths = [];
+
     public function paginate(LayoutNode $root, float|PageFlow $contentHeightOrFlow): PaginationResult
     {
         $flow = $contentHeightOrFlow instanceof PageFlow
@@ -31,6 +37,8 @@ final class PaginationEngine
             : new PageFlow($contentHeightOrFlow);
         $forcedBreaks = new RecursivePaginationOffsets();
         $baseOffsets = $forcedBreaks->resolve($root, $flow);
+        $this->lineShifts = $forcedBreaks->lineShifts();
+        $this->growths = $forcedBreaks->growths();
         $this->tablePlans = [];
         $nodeOffsets = $this->applyTablePaginationOffsets($root, $flow, $baseOffsets);
         $this->subtreeExtents = [];
@@ -114,7 +122,7 @@ final class PaginationEngine
 
         $box = $placement->node->box->marginBox();
         $ownStart = $box->y + $placement->offsetY;
-        $ownEnd = $box->bottom() + $placement->offsetY;
+        $ownEnd = $box->bottom() + $placement->offsetY + $this->growthOf($placement->node);
         $pageStart = $flow->contentStartForPage($fragment->pageIndex);
         $pageEnd = $pageStart + $flow->usableHeightForPage($fragment->pageIndex);
 
@@ -181,9 +189,14 @@ final class PaginationEngine
 
     private function lineFragmentForPage(int $lineIndex, float $lineY, float $baseline, LineBox $line, float $offset, PageFlow $flow): LineFragment
     {
-        $continuousY = $lineY + $offset;
-        $continuousBaseline = $baseline + $offset;
-        $pageIndex = $flow->pageIndexAt(max(0.0, $continuousBaseline - self::EPSILON));
+        $shift = $this->lineShifts[spl_object_id($line)] ?? 0.0;
+        $continuousY = $lineY + $offset + $shift;
+        $continuousBaseline = $baseline + $offset + $shift;
+        // A line taller than a page has its baseline pages below its top, and by its baseline it
+        // would be painted far above the page it lands on: it belongs to the page its top is on.
+        $pageIndex = $line->height > $flow->minimumUsableHeight()
+            ? $flow->pageIndexAt($continuousY + self::EPSILON)
+            : $flow->pageIndexAt(max(0.0, $continuousBaseline - self::EPSILON));
         $pageStart = $flow->contentStartForPage($pageIndex);
 
         return new LineFragment(
@@ -219,7 +232,7 @@ final class PaginationEngine
         $offset = $this->offsetFor($node, $nodeOffsets);
         $border = $node->box->borderBox();
         $start = $border->y + $offset;
-        $end = $border->bottom() + $offset;
+        $end = $border->bottom() + $offset + $this->growthOf($node);
         $pageStart = $flow->contentStartForPage($pageIndex);
         $pageEnd = $pageStart + $flow->usableHeightForPage($pageIndex);
 
@@ -460,6 +473,12 @@ final class PaginationEngine
         );
     }
 
+    /** Extra height the node's box gained from lines moved past a page break inside it. */
+    private function growthOf(LayoutNode $node): float
+    {
+        return $this->growths[spl_object_id($node)] ?? 0.0;
+    }
+
     /** @param array<int,float> $nodeOffsets */
     private function offsetFor(LayoutNode $node, array $nodeOffsets): float
     {
@@ -492,10 +511,11 @@ final class PaginationEngine
         $offset = $this->offsetFor($node, $nodeOffsets);
         $box = $node->box->marginBox();
         $top = $box->y + $offset;
-        $bottom = $box->bottom() + $offset;
+        $bottom = $box->bottom() + $offset + $this->growthOf($node);
         foreach ($node->lineBoxes as $line) {
-            $top = min($top, $line->y + $offset);
-            $bottom = max($bottom, $line->y + $line->height + $offset);
+            $shift = $this->lineShifts[spl_object_id($line)] ?? 0.0;
+            $top = min($top, $line->y + $offset + $shift);
+            $bottom = max($bottom, $line->y + $line->height + $offset + $shift);
         }
         foreach ($node->children as $child) {
             [$childTop, $childBottom] = $this->measureSubtree($child, $nodeOffsets);
@@ -514,7 +534,7 @@ final class PaginationEngine
             return $tablePlan->flowEndY;
         }
 
-        $bottom = $node->box->marginBox()->bottom() + $this->offsetFor($node, $nodeOffsets);
+        $bottom = $node->box->marginBox()->bottom() + $this->offsetFor($node, $nodeOffsets) + $this->growthOf($node);
         foreach ($node->children as $child) {
             $bottom = max($bottom, $this->absoluteSubtreeBottom($child, $nodeOffsets));
         }
