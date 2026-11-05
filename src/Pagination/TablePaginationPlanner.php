@@ -19,29 +19,11 @@ final class TablePaginationPlanner
 
     public function plan(LayoutNode $table, float $offsetY, PageFlow $flow): ?TablePaginationPlan
     {
-        $display = strtolower(trim($table->source->style->get('display', 'block') ?? 'block'));
-        if ($display !== 'table' || $table->children === []) {
+        $sections = $this->sections($table);
+        if ($sections === null) {
             return null;
         }
-
-        $headers = [];
-        $bodies = [];
-        $footers = [];
-        foreach ($table->children as $row) {
-            if ($this->hasRowSpan($row)) {
-                return null;
-            }
-            $section = strtolower(trim($row->source->style->get('x-table-section', 'body') ?? 'body'));
-            match ($section) {
-                'header' => $headers[] = $row,
-                'footer' => $footers[] = $row,
-                default => $bodies[] = $row,
-            };
-        }
-
-        if (($headers === [] && $footers === []) || $bodies === []) {
-            return null;
-        }
+        [$headers, $bodies, $footers] = $sections;
 
         $headerHeight = $this->rowsHeight($headers);
         $footerHeight = $this->rowsHeight($footers);
@@ -190,6 +172,46 @@ final class TablePaginationPlanner
             flowEndY: $flowEnd,
             slices: $slices,
         );
+    }
+
+    /** Whether plan() places this table's rows itself, whatever the page they fall on. */
+    public function managesRowsOf(LayoutNode $table): bool
+    {
+        return $this->sections($table) !== null;
+    }
+
+    /**
+     * The table's header, body and footer rows, or null when plan() does not apply: not a table,
+     * no repeatable header or footer, no body row, or a rowspan cell.
+     *
+     * @return array{list<LayoutNode>,list<LayoutNode>,list<LayoutNode>}|null
+     */
+    private function sections(LayoutNode $table): ?array
+    {
+        $display = strtolower(trim($table->source->style->get('display', 'block') ?? 'block'));
+        if ($display !== 'table' || $table->children === []) {
+            return null;
+        }
+
+        $headers = [];
+        $bodies = [];
+        $footers = [];
+        foreach ($table->children as $row) {
+            if ($this->hasRowSpan($row)) {
+                return null;
+            }
+            $section = strtolower(trim($row->source->style->get('x-table-section', 'body') ?? 'body'));
+            match ($section) {
+                'header' => $headers[] = $row,
+                'footer' => $footers[] = $row,
+                default => $bodies[] = $row,
+            };
+        }
+
+        if (($headers === [] && $footers === []) || $bodies === []) {
+            return null;
+        }
+        return [$headers, $bodies, $footers];
     }
 
     private function rowHeight(LayoutNode $row): float

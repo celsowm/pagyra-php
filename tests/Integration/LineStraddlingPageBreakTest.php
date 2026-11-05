@@ -174,6 +174,73 @@ final class LineStraddlingPageBreakTest extends TestCase
         self::assertEqualsWithDelta(-10.0, $eight->pageY, 0.01);
     }
 
+    public function testTableRowWithImageCrossingTheBreakMovesWhole(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<style>' . self::PAGE . ' p { margin:0; font-size:16px; line-height:20px; }'
+                . ' table { border-spacing:0; } td { padding:0; }</style>'
+                . '<p>one</p><p>two</p><p>three</p><p>four</p>'
+                . '<table><tr><td>label</td><td><img src="' . $this->pngDataUrl(100, 120) . '" style="width:100px;height:120px"></td></tr>'
+                . '<tr><td>next</td><td>row</td></tr></table><p>after</p>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        $image = $this->images($prepared);
+        self::assertCount(1, $image);
+        self::assertSame(1, $image[0]->pageIndex);
+        self::assertEqualsWithDelta(20.0, $image[0]->y, 0.01, 'the row starts at the top of the content area');
+
+        $label = $this->textCommand($prepared, 'label');
+        self::assertSame(1, $label->pageIndex, 'the cell beside the image goes with it');
+        self::assertLessThan($image[0]->y + $image[0]->height, $label->y);
+
+        $next = $this->textCommand($prepared, 'next');
+        self::assertSame(1, $next->pageIndex);
+        self::assertGreaterThanOrEqual($image[0]->y + $image[0]->height - 0.01, $next->y, 'the rows after it follow');
+    }
+
+    public function testRowspanCellCrossingTheBreakMovesItsRow(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<style>' . self::PAGE . ' p { margin:0; font-size:16px; line-height:20px; }'
+                . ' table { border-spacing:0; } td { padding:0; }</style>'
+                . '<p>one</p><p>two</p><p>three</p>'
+                . '<table><tr><td>a</td><td rowspan="2"><img src="' . $this->pngDataUrl(100, 120) . '" style="width:100px;height:120px"></td></tr>'
+                . '<tr><td>b</td></tr></table>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        $image = $this->images($prepared);
+        self::assertSame(1, $image[0]->pageIndex);
+        self::assertEqualsWithDelta(20.0, $image[0]->y, 0.01);
+        self::assertSame(1, $this->textCommand($prepared, 'a')->pageIndex);
+    }
+
+    public function testImageInACellTallerThanAPageMovesAlone(): void
+    {
+        $prepared = Pagyra::prepareHtmlRender([
+            'pagedBodyMargin' => 'zero',
+            'html' => '<style>' . self::PAGE . ' p { margin:0; font-size:16px; line-height:20px; }'
+                . ' table { border-spacing:0; } td { padding:0; }</style>'
+                . '<table><tr><td><p>one</p><p>two</p><p>three</p><p>four</p>'
+                . '<p><img src="' . $this->pngDataUrl(100, 120) . '" style="width:100px;height:120px"></p>'
+                . '<p>after</p><p>x</p><p>y</p><p>z</p></td></tr></table>',
+            'viewportWidth' => 300,
+            'viewportHeight' => 200,
+        ]);
+
+        $image = $this->images($prepared);
+        self::assertSame(1, $image[0]->pageIndex);
+        self::assertEqualsWithDelta(20.0, $image[0]->y, 0.01);
+        self::assertSame(0, $this->textCommand($prepared, 'four')->pageIndex, 'the lines before it stay where they were');
+        $after = $this->textCommand($prepared, 'after');
+        self::assertGreaterThanOrEqual($image[0]->y + $image[0]->height - 0.01, $after->y);
+    }
+
     /** @return list<ImagePaintCommand> */
     private function images(object $prepared): array
     {

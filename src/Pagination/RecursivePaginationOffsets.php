@@ -24,6 +24,13 @@ final class RecursivePaginationOffsets
     /** Running total of the space added by moved lines so far, to size each node's growth. */
     private float $lineShiftTotal = 0.0;
 
+    private readonly TablePaginationPlanner $tablePlanner;
+
+    public function __construct()
+    {
+        $this->tablePlanner = new TablePaginationPlanner();
+    }
+
     /** @return array<int,float> keyed by spl_object_id(LayoutNode) */
     public function resolve(LayoutNode $root, PageFlow $flow): array
     {
@@ -77,10 +84,13 @@ final class RecursivePaginationOffsets
     }
 
     /**
-     * @param bool $placedWhole true below a table (TablePaginationPlanner places rows whole) or an
-     *                          out-of-flow box, where moving a line would shift unrelated content
+     * @param bool $placedWhole true below a table or an out-of-flow box, where moving a single line
+     *                          would shift unrelated content (the cells beside it)
+     * @param bool $movableRow  true for a row of a table this class paginates itself, short enough
+     *                          to move whole to the next page when an image inside it would straddle
+     *                          the break
      */
-    private function visitForced(LayoutNode $node, PageFlow $flow, bool $placedWhole = false): void
+    private function visitForced(LayoutNode $node, PageFlow $flow, bool $placedWhole = false, bool $movableRow = false): void
     {
         $participates = $this->participatesInPageFlow($node);
         $shiftTotalBefore = $this->lineShiftTotal;
@@ -88,6 +98,9 @@ final class RecursivePaginationOffsets
         $childrenPlacedWhole = $placedWhole
             || in_array($display, ['table', 'inline-table'], true)
             || ($display !== 'none' && !str_starts_with($display, 'inline') && !$participates);
+        // TablePaginationPlanner places the rows of a table with a repeatable header or footer
+        // whole; any other table is paginated here, one row at a time.
+        $rowsHandledHere = $display === 'table' && !$placedWhole && !$this->tablePlanner->managesRowsOf($node);
 
         if ($participates) {
             $start = $node->box->marginBox()->y + $this->forcedGlobalOffset;
@@ -100,6 +113,15 @@ final class RecursivePaginationOffsets
         $this->forcedOffsets[spl_object_id($node)] = $this->forcedGlobalOffset;
 
         foreach ($node->children as $child) {
+            if ($rowsHandledHere && $this->isTableRow($child)) {
+                // A row that fits a page moves whole, which keeps its cells side by side. A taller
+                // one (a whole document laid out in a single cell) cannot, so the lines inside its
+                // cells move on their own, as in any block. A rowspan cell belongs to the row it
+                // starts in and counts in that row's height.
+                $short = $this->subtreeBottom($child) - $child->box->borderBox()->y <= $flow->minimumUsableHeight() + self::EPSILON;
+                $this->visitForced($child, $flow, $short, $short);
+                continue;
+            }
             $this->visitForced($child, $flow, $childrenPlacedWhole);
         }
 
@@ -123,6 +145,16 @@ final class RecursivePaginationOffsets
         $growth = $this->lineShiftTotal - $shiftTotalBefore;
         if ($growth > self::EPSILON) {
             $this->growths[spl_object_id($node)] = $growth;
+        }
+
+        // After the growth: the row itself moves, it does not get taller; the table around it does.
+        if ($movableRow) {
+            $shift = $this->straddlingRowShift($node, $flow);
+            if ($shift > self::EPSILON) {
+                $this->addOffsetToVisitedSubtree($node, $shift);
+                $this->forcedGlobalOffset += $shift;
+                $this->lineShiftTotal += $shift;
+            }
         }
 
         $end = $this->absoluteForcedSubtreeBottom($node);
@@ -223,6 +255,42 @@ final class RecursivePaginationOffsets
             }
         }
         return $shift;
+    }
+
+    /**
+     * How far a table row that fits a page has to move down to start the next page, when a line
+     * inside it holding an image (or another atomic inline box) would straddle the break; 0 when
+     * none would. The row moves whole, since moving the line alone would leave the cells beside it
+     * behind.
+     */
+    private function straddlingRowShift(LayoutNode $row, PageFlow $flow): float
+    {
+        if (!$this->hasStraddlingAtomicLine($row, $flow)) return 0.0;
+
+        $top = $row->box->borderBox()->y + ($this->forcedOffsets[spl_object_id($row)] ?? 0.0);
+        $topPage = $flow->pageIndexAt($top + self::EPSILON);
+        return max(0.0, $flow->contentStartForPage($topPage + 1) - $top);
+    }
+
+    private function hasStraddlingAtomicLine(LayoutNode $node, PageFlow $flow): bool
+    {
+        $offset = $this->forcedOffsets[spl_object_id($node)] ?? 0.0;
+        foreach ($node->lineBoxes as $line) {
+            if ($line->atomicBoxes === []) continue;
+            $top = $line->y + $offset;
+            if ($flow->pageIndexAt(max($top, $top + $line->height - self::EPSILON)) > $flow->pageIndexAt($top + self::EPSILON)) {
+                return true;
+            }
+        }
+        foreach ($node->children as $child) {
+            if ($this->hasStraddlingAtomicLine($child, $flow)) return true;
+        }
+        return false;
+    }
+
+    private function isTableRow(LayoutNode $node): bool
+    {
+        return strtolower(trim($node->source->style->get('display', '') ?? '')) === 'table-row';
     }
 
     private function breakInsideAvoidOffset(LayoutNode $node, float $offset, PageFlow $flow): float
