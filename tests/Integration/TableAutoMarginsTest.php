@@ -22,17 +22,17 @@ final class TableAutoMarginsTest extends TestCase
 
     public function testCenteredByAutoMarginsAndByTheAlignAttribute(): void
     {
-        self::assertEqualsWithDelta(100.0, $this->firstTextX('<table style="width:200px;margin:0 auto"><tr><td style="padding:0">x</td></tr></table>'), 0.01);
-        self::assertEqualsWithDelta(100.0, $this->firstTextX('<table align="center" width="200"><tr><td style="padding:0">x</td></tr></table>'), 0.01);
+        self::assertEqualsWithDelta(100.0, $this->firstTextX('<table cellspacing="0" style="width:200px;margin:0 auto"><tr><td style="padding:0">x</td></tr></table>'), 0.01);
+        self::assertEqualsWithDelta(100.0, $this->firstTextX('<table cellspacing="0" align="center" width="200"><tr><td style="padding:0">x</td></tr></table>'), 0.01);
     }
 
     public function testPushedRightByAnAutoLeftMargin(): void
     {
-        self::assertEqualsWithDelta(300.0, $this->firstTextX('<table style="width:100px;margin-left:auto"><tr><td style="padding:0">x</td></tr></table>'), 0.01);
+        self::assertEqualsWithDelta(300.0, $this->firstTextX('<table cellspacing="0" style="width:100px;margin-left:auto"><tr><td style="padding:0">x</td></tr></table>'), 0.01);
     }
 
     public function testFullWidthTableIsUnaffected(): void
     {
-        self::assertEqualsWithDelta(0.0, $this->firstTextX('<table style="margin:0 auto"><tr><td style="padding:0">x</td></tr></table>'), 0.01);
+        self::assertEqualsWithDelta(0.0, $this->firstTextX('<table cellspacing="0" style="margin:0 auto"><tr><td style="padding:0">x</td></tr></table>'), 0.01);
     }
 }

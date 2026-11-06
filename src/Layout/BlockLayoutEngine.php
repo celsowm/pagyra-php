@@ -825,9 +825,20 @@ final class BlockLayoutEngine
             return $this->wrapWithCaptions($styled, $table, $wrapperMargin, $captionLayouts, $bottomCaptions, $containingHeight, $fontSize);
         }
 
+        // In the separated borders model `border-spacing` (CSS 2.1 17.6.1) sits between the
+        // cells and between the outer cells and the table's border: n columns take n + 1 gaps
+        // across and n rows n + 1 gaps down. It was computed (the UA's 2px, `cellspacing`) but
+        // never laid out, so the cells touched and a `<table border="1">` drew single rules where
+        // browsers and wkhtmltopdf draw every cell in its own frame. The collapsing model has no
+        // spacing at all.
+        $spacingX = 0.0;
+        $spacingY = 0.0;
         if ($this->isBorderCollapse($styled)) {
             $placements = $this->collapseCellBorders($placements, $contentWidth, $containingHeight, $fontSize);
+        } else {
+            [$spacingX, $spacingY] = $this->borderSpacing($styled, $containingWidth, $containingHeight, $fontSize);
         }
+        $columnSpace = max(0.0, $contentWidth - $spacingX * ($columnCount + 1));
 
         $minColumnWidths = array_fill(0, $columnCount, 0.0);
         $maxColumnWidths = array_fill(0, $columnCount, 0.0);
@@ -860,8 +871,10 @@ final class BlockLayoutEngine
                 $cellMax = max($cellMin, $intrinsic->maxContent + $horizontalExtras);
             }
 
-            $minShare = $cellMin / $p['colSpan'];
-            $maxShare = $cellMax / $p['colSpan'];
+            // A spanning cell also covers the spacing between the columns it spans.
+            $spanned = $spacingX * ($p['colSpan'] - 1);
+            $minShare = max(0.0, $cellMin - $spanned) / $p['colSpan'];
+            $maxShare = max(0.0, $cellMax - $spanned) / $p['colSpan'];
             for ($k = 0; $k < $p['colSpan']; $k++) {
                 $column = $p['col'] + $k;
                 $minColumnWidths[$column] = max($minColumnWidths[$column], $minShare);
@@ -872,19 +885,19 @@ final class BlockLayoutEngine
         $totalMin = array_sum($minColumnWidths);
         $totalMax = array_sum($maxColumnWidths);
         if ($totalMax <= 0.0) {
-            $columnWidths = array_fill(0, $columnCount, $contentWidth / $columnCount);
-        } elseif ($totalMax <= $contentWidth) {
-            $slack = $contentWidth - $totalMax;
+            $columnWidths = array_fill(0, $columnCount, $columnSpace / $columnCount);
+        } elseif ($totalMax <= $columnSpace) {
+            $slack = $columnSpace - $totalMax;
             $columnWidths = array_map(
                 static fn (float $w): float => $w + $slack * ($w / $totalMax),
                 $maxColumnWidths,
             );
-        } elseif ($totalMin <= $contentWidth) {
+        } elseif ($totalMin <= $columnSpace) {
             $growthRoom = $totalMax - $totalMin;
             if ($growthRoom <= 0.0) {
                 $columnWidths = $minColumnWidths;
             } else {
-                $fraction = ($contentWidth - $totalMin) / $growthRoom;
+                $fraction = ($columnSpace - $totalMin) / $growthRoom;
                 $columnWidths = array_map(
                     static fn (float $min, int $i): float => $min + ($maxColumnWidths[$i] - $min) * $fraction,
                     $minColumnWidths,
@@ -892,16 +905,16 @@ final class BlockLayoutEngine
                 );
             }
         } elseif ($totalMin > 0.0) {
-            $scale = $contentWidth / $totalMin;
+            $scale = $columnSpace / $totalMin;
             $columnWidths = array_map(static fn (float $w): float => $w * $scale, $minColumnWidths);
         } else {
-            $columnWidths = array_fill(0, $columnCount, $contentWidth / $columnCount);
+            $columnWidths = array_fill(0, $columnCount, $columnSpace / $columnCount);
         }
         $columnX = [];
-        $x = $contentX;
+        $x = $contentX + $spacingX;
         foreach ($columnWidths as $w) {
             $columnX[] = $x;
-            $x += $w;
+            $x += $w + $spacingX;
         }
 
         $rowCount = count($rows);
@@ -909,14 +922,14 @@ final class BlockLayoutEngine
         foreach ($placements as $p) $placementsByRow[$p['row']][] = $p;
 
         $rowHeights = array_fill(0, $rowCount, 0.0);
-        $rowY = array_fill(0, $rowCount + 1, $contentY);
+        $rowY = array_fill(0, $rowCount + 1, $contentY + $spacingY);
         $cellLayoutsByRow = array_fill(0, $rowCount, []);
         $spanningByEndRow = array_fill(0, $rowCount, []);
 
         for ($r = 0; $r < $rowCount; $r++) {
             $singleRowHeight = 0.0;
             foreach ($placementsByRow[$r] as $p) {
-                $spanWidth = array_sum(array_slice($columnWidths, $p['col'], $p['colSpan']));
+                $spanWidth = array_sum(array_slice($columnWidths, $p['col'], $p['colSpan'])) + $spacingX * ($p['colSpan'] - 1);
                 $cellLayout = $this->layoutBlock($this->withUsedWidth($p['cell'], $spanWidth), $columnX[$p['col']], $rowY[$r], $spanWidth, $containingHeight, $fontSize, heightIsMinimum: true);
                 $cellLayoutsByRow[$r][] = ['layout' => $cellLayout, 'placement' => $p];
                 $height = $cellLayout->box->borderBox()->height;
@@ -928,19 +941,19 @@ final class BlockLayoutEngine
             }
             $rowHeights[$r] = $singleRowHeight;
             foreach ($spanningByEndRow[$r] as $spanning) {
-                $spannedSoFar = array_sum(array_slice($rowHeights, $spanning['startRow'], $r - $spanning['startRow'] + 1));
+                $spannedSoFar = array_sum(array_slice($rowHeights, $spanning['startRow'], $r - $spanning['startRow'] + 1)) + $spacingY * ($r - $spanning['startRow']);
                 if ($spanning['height'] > $spannedSoFar) {
                     $rowHeights[$r] += $spanning['height'] - $spannedSoFar;
                 }
             }
-            $rowY[$r + 1] = $rowY[$r] + $rowHeights[$r];
+            $rowY[$r + 1] = $rowY[$r] + $rowHeights[$r] + $spacingY;
         }
 
         $rowLayouts = [];
         foreach ($rows as $r => $tr) {
             $cellLayouts = [];
             foreach ($cellLayoutsByRow[$r] as ['layout' => $cellLayout, 'placement' => $p]) {
-                $spanHeight = $rowY[$r + $p['rowSpan']] - $rowY[$r];
+                $spanHeight = $rowY[$r + $p['rowSpan']] - $rowY[$r] - $spacingY;
                 $box = $cellLayout->box;
                 $extra = max(0.0, $spanHeight - $box->borderBox()->height);
                 // CSS 2.1 17.5.3: a cell shorter than its row places its content by
@@ -2273,6 +2286,23 @@ final class BlockLayoutEngine
             $columnCount = max($columnCount, $c);
         }
         return [$placements, $columnCount];
+    }
+
+    /**
+     * The table's `border-spacing` as [horizontal, vertical] pixels: one length for both, or two
+     * (CSS 2.1 17.6.1). Percentages and negative lengths are invalid there and count as zero.
+     *
+     * @return array{float, float}
+     */
+    private function borderSpacing(StyledNode $table, float $containingWidth, float $containingHeight, float $fontSize): array
+    {
+        $parts = preg_split('/\s+/', trim($table->style->get('border-spacing', '0') ?? '0')) ?: [];
+        $lengths = [];
+        foreach (array_slice($parts, 0, 2) as $part) {
+            $lengths[] = str_contains($part, '%') ? 0.0 : max(0.0, $this->resolveLength($part, $containingWidth, $fontSize, $containingWidth, $containingHeight, 'zero'));
+        }
+
+        return [$lengths[0] ?? 0.0, $lengths[1] ?? $lengths[0] ?? 0.0];
     }
 
     private function isBorderCollapse(StyledNode $table): bool

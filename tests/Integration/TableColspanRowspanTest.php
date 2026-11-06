@@ -12,7 +12,7 @@ final class TableColspanRowspanTest extends TestCase
     public function testColspanCellSpansTheCombinedWidthOfTheColumnsItCovers(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<table style="width:300px">'
+            'html' => '<table cellspacing="0" style="width:300px">'
                 . '<tr><td colspan="2" style="padding:0">span</td></tr>'
                 . '<tr><td style="padding:0">a</td><td style="padding:0">b</td></tr>'
                 . '</table>',
@@ -33,7 +33,7 @@ final class TableColspanRowspanTest extends TestCase
     public function testColspanCellDoesNotCompressTheCellsInFollowingRows(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<table style="width:300px">'
+            'html' => '<table cellspacing="0" style="width:300px">'
                 . '<tr><td colspan="2" style="padding:0">span</td></tr>'
                 . '<tr><td style="padding:0">a</td><td style="padding:0">b</td></tr>'
                 . '</table>',
@@ -50,7 +50,7 @@ final class TableColspanRowspanTest extends TestCase
     public function testRowspanCellSpansTheCombinedHeightOfTheRowsItCoversAndKeepsThemAsSeparateRows(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<table>'
+            'html' => '<table cellspacing="0">'
                 . '<tr><td rowspan="2" style="padding:0;height:5px">tall</td><td style="padding:0;height:20px">a</td></tr>'
                 . '<tr><td style="padding:0;height:30px">b</td></tr>'
                 . '</table>',
@@ -74,7 +74,7 @@ final class TableColspanRowspanTest extends TestCase
     public function testInvalidOrZeroSpanValuesFallBackToOneInsteadOfBreakingTheGrid(): void
     {
         $prepared = Pagyra::prepareHtmlRender([
-            'html' => '<table>'
+            'html' => '<table cellspacing="0">'
                 . '<tr><td colspan="0" style="padding:0">a</td><td rowspan="abc" style="padding:0">b</td></tr>'
                 . '</table>',
             'viewportWidth' => 300,

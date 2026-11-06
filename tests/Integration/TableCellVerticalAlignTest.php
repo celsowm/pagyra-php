@@ -30,7 +30,7 @@ final class TableCellVerticalAlignTest extends TestCase
     public function testCellsAlignTheirContentWithinTheRow(): void
     {
         $texts = $this->texts(
-            '<table style="border-collapse:collapse"><tr>'
+            '<table cellspacing="0" style="border-collapse:collapse"><tr>'
             . '<td style="padding:0;height:100px;vertical-align:top">topo</td>'
             . '<td style="padding:0">meio</td>'
             . '<td style="padding:0;vertical-align:bottom">base</td>'
@@ -47,14 +47,14 @@ final class TableCellVerticalAlignTest extends TestCase
 
     public function testDeclaredHeightLeavesRoomThatValignUses(): void
     {
-        $texts = $this->texts('<table><tr><td valign="bottom" height="80" style="padding:0">x</td></tr></table>');
+        $texts = $this->texts('<table cellspacing="0"><tr><td valign="bottom" height="80" style="padding:0">x</td></tr></table>');
 
         self::assertEqualsWithDelta(80.0 - $texts['x']->run->height, $texts['x']->y, 0.01);
     }
 
     public function testLinesInsideACellKeepTheParagraphLinePitch(): void
     {
-        $cell = $this->texts('<table><tr><td style="padding:0">um<br>dois<br>tres</td></tr></table>');
+        $cell = $this->texts('<table cellspacing="0"><tr><td style="padding:0">um<br>dois<br>tres</td></tr></table>');
         $paragraph = $this->texts('<p style="margin:0">um<br>dois<br>tres</p>');
 
         self::assertEqualsWithDelta($paragraph['dois']->y - $paragraph['um']->y, $cell['dois']->y - $cell['um']->y, 0.01);

@@ -26,7 +26,9 @@ final class UserAgentStyles
             'blockquote', 'figure', 'figcaption', 'pre', 'address', 'dl', 'dt', 'dd',
             'fieldset', 'form', 'aside', 'hgroup', 'center', 'details', 'summary',
             'dir', 'menu', 'legend', 'search', 'dialog', 'listing', 'xmp', 'plaintext' => ['display' => 'block'],
-            'table' => ['display' => 'table'],
+            // CSS 2.1's default stylesheet (and every browser's) separates the cells by 2px; a
+            // `cellspacing` hint or an author `border-spacing` replaces it.
+            'table' => ['display' => 'table', 'border-spacing' => '2px'],
             // The table-internal displays, which the reference spells out the same way
             // (pagyra-js `src/css/ua-defaults/element-defaults.ts`). `tr` used to resolve to
             // `block` here and the group wrappers to `inline`, which forced the table engine to

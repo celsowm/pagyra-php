@@ -13,7 +13,7 @@ final class TableLayoutTest extends TestCase
     {
         $prepared = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
-            'html' => '<table style="border-spacing:0"><tr><td style="padding:0">a</td><td style="padding:0">bbbbbbbbbb</td></tr></table>',
+            'html' => '<table cellspacing="0" style="border-spacing:0"><tr><td style="padding:0">a</td><td style="padding:0">bbbbbbbbbb</td></tr></table>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
         ]);
@@ -35,7 +35,7 @@ final class TableLayoutTest extends TestCase
     {
         $prepared = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
-            'html' => '<table><tr><td style="padding:0">um</td></tr><tr><td style="padding:0">dois</td></tr></table>',
+            'html' => '<table cellspacing="0"><tr><td style="padding:0">um</td></tr><tr><td style="padding:0">dois</td></tr></table>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
         ]);
@@ -52,7 +52,7 @@ final class TableLayoutTest extends TestCase
     {
         $prepared = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
-            'html' => '<table style="width:400px"><tr><td style="padding:0">Local: Rio de Janeiro</td><td style="padding:0">Data: 20/08/2026</td></tr></table>',
+            'html' => '<table cellspacing="0" style="width:400px"><tr><td style="padding:0">Local: Rio de Janeiro</td><td style="padding:0">Data: 20/08/2026</td></tr></table>',
             'viewportWidth' => 400,
             'viewportHeight' => 200,
         ]);
@@ -68,7 +68,7 @@ final class TableLayoutTest extends TestCase
     {
         $prepared = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
-            'html' => '<table><tr><td style="padding:0;height:10px">a</td><td style="padding:0;height:40px">b</td></tr></table>',
+            'html' => '<table cellspacing="0"><tr><td style="padding:0;height:10px">a</td><td style="padding:0;height:40px">b</td></tr></table>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
         ]);
@@ -81,7 +81,7 @@ final class TableLayoutTest extends TestCase
     {
         $prepared = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
-            'html' => '<table><tbody><tr><td>a</td></tr></tbody></table>',
+            'html' => '<table cellspacing="0"><tbody><tr><td>a</td></tr></tbody></table>',
             'viewportWidth' => 300,
             'viewportHeight' => 200,
         ]);
@@ -95,7 +95,7 @@ final class TableLayoutTest extends TestCase
     {
         $prepared = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
-            'html' => '<table style="width:100px;font-size:16px">'
+            'html' => '<table cellspacing="0" style="width:100px;font-size:16px">'
                 . '<tr><td>uma coluna com bastante texto que não caberia</td>'
                 . '<td>outra coluna também bem longa de conteúdo</td></tr>'
                 . '</table>',
@@ -115,7 +115,7 @@ final class TableLayoutTest extends TestCase
         // Mirrors the pattern found in the real-world corpus that motivated this fix: a
         // two-cell header row (place/date) that previously had its two cells' text
         // concatenated into one illegible run.
-        $html = '<table border="0" width="100%"><tr width="100%">'
+        $html = '<table cellspacing="0" border="0" width="100%"><tr width="100%">'
             . '<td width="50%"><p><b>Local: </b>Rio de Janeiro</p></td>'
             . '<td width="50%"><p><b>Data: </b>20/08/2026</p></td>'
             . '</tr></table>';

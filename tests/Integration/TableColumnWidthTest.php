@@ -26,7 +26,7 @@ final class TableColumnWidthTest extends TestCase
         // The requisição grid of the real corpus: the table is width:100% and the proportion lives
         // entirely in the cells' width attributes, 378 against 227, i.e. 62.5% / 37.5%.
         [$left, $right] = $this->cells(
-            '<table style="width:600px"><tr>'
+            '<table cellspacing="0" style="width:600px"><tr>'
             . '<td width="378">esquerda</td><td width="227">direita</td>'
             . '</tr></table>'
         );
@@ -44,7 +44,7 @@ final class TableColumnWidthTest extends TestCase
         // the leftover space is distributed the cell has to fill the column, or the grid is drawn
         // with an unpainted strip between the columns.
         [$left, $right] = $this->cells(
-            '<table style="width:600px"><tr>'
+            '<table cellspacing="0" style="width:600px"><tr>'
             . '<td width="100">esquerda</td><td width="100">direita</td>'
             . '</tr></table>'
         );
@@ -56,7 +56,7 @@ final class TableColumnWidthTest extends TestCase
     public function testPercentageWidthAttributeIsHonoured(): void
     {
         [$left, $right] = $this->cells(
-            '<table style="width:600px"><tr>'
+            '<table cellspacing="0" style="width:600px"><tr>'
             . '<td width="25%">esquerda</td><td width="75%">direita</td>'
             . '</tr></table>'
         );
@@ -68,7 +68,7 @@ final class TableColumnWidthTest extends TestCase
     public function testColumnsWithoutADeclaredWidthStillComeFromTheirContent(): void
     {
         [$short, $long] = $this->cells(
-            '<table style="width:600px"><tr>'
+            '<table cellspacing="0" style="width:600px"><tr>'
             . '<td style="padding:0">a</td>'
             . '<td style="padding:0">um conteúdo bem mais longo nesta coluna</td>'
             . '</tr></table>'
@@ -81,7 +81,7 @@ final class TableColumnWidthTest extends TestCase
     public function testMinContentProtectsAnUnbreakableColumnWhenPreferredWidthsOverflow(): void
     {
         [$unbreakable, $wrappable] = $this->cells(
-            '<table style="width:200px;font-family:Courier;font-size:10px"><tr>'
+            '<table cellspacing="0" style="width:200px;font-family:Courier;font-size:10px"><tr>'
             . '<td style="padding:0">ABCDEFGHIJ</td>'
             . '<td style="padding:0">' . str_repeat('aa ', 30) . '</td>'
             . '</tr></table>'
@@ -100,7 +100,7 @@ final class TableColumnWidthTest extends TestCase
     public function testColElementsConstrainColumnProportions(): void
     {
         [$left, $right] = $this->cells(
-            '<table style="width:600px"><colgroup>'
+            '<table cellspacing="0" style="width:600px"><colgroup>'
             . '<col style="width:100px"><col style="width:200px">'
             . '</colgroup><tr><td>a</td><td>b</td></tr></table>'
         );
@@ -112,7 +112,7 @@ final class TableColumnWidthTest extends TestCase
     public function testColSpanRepeatsTheColumnWidthHint(): void
     {
         [$first, $second, $third] = $this->cells(
-            '<table style="width:400px"><colgroup>'
+            '<table cellspacing="0" style="width:400px"><colgroup>'
             . '<col span="2" style="width:100px"><col style="width:200px">'
             . '</colgroup><tr><td>a</td><td>b</td><td>c</td></tr></table>'
         );
@@ -125,7 +125,7 @@ final class TableColumnWidthTest extends TestCase
     public function testLegacyColWidthAttributeParticipatesInSizing(): void
     {
         [$left, $right] = $this->cells(
-            '<table style="width:600px"><colgroup>'
+            '<table cellspacing="0" style="width:600px"><colgroup>'
             . '<col width="25%"><col width="75%">'
             . '</colgroup><tr><td>a</td><td>b</td></tr></table>'
         );
@@ -137,7 +137,7 @@ final class TableColumnWidthTest extends TestCase
     public function testColgroupWidthFallsBackToItsChildColumns(): void
     {
         [$left, $right] = $this->cells(
-            '<table style="width:200px"><colgroup style="width:100px">'
+            '<table cellspacing="0" style="width:200px"><colgroup style="width:100px">'
             . '<col><col>'
             . '</colgroup><tr><td>a</td><td>b</td></tr></table>'
         );
@@ -149,7 +149,7 @@ final class TableColumnWidthTest extends TestCase
     public function testLegacyColgroupWidthAttributeFallsBackToChildColumns(): void
     {
         [$left, $right] = $this->cells(
-            '<table style="width:200px"><colgroup width="100">'
+            '<table cellspacing="0" style="width:200px"><colgroup width="100">'
             . '<col><col>'
             . '</colgroup><tr><td>a</td><td>b</td></tr></table>'
         );
@@ -161,7 +161,7 @@ final class TableColumnWidthTest extends TestCase
     public function testIntrinsicSizingWalksBlockDescendantsInsideCells(): void
     {
         [$short, $long] = $this->cells(
-            '<table style="width:300px;font-family:Courier;font-size:10px"><tr>'
+            '<table cellspacing="0" style="width:300px;font-family:Courier;font-size:10px"><tr>'
             . '<td style="padding:0"><div>aa</div></td>'
             . '<td style="padding:0"><div>ABCDEFGHIJKLMNO</div></td>'
             . '</tr></table>'
