@@ -206,6 +206,7 @@ final class Pagyra
         string $mediaType = 'print',
     ): FontRegistry {
         $registry = new FontRegistry();
+        $registry->registerLastResortFile('DejaVu Sans', dirname(__DIR__) . '/assets/fonts/dejavu/DejaVuSans.ttf');
         $defs = $config['fontFaceDefs'] ?? [];
         if (!is_array($defs)) $defs = [];
 

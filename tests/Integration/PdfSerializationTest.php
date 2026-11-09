@@ -88,11 +88,12 @@ final class PdfSerializationTest extends TestCase
         self::assertStringContainsString('(emoji ?) Tj', $pdf);
     }
 
-    public function testWordGeneratedEmSpaceFallsBackToAQuestionMarkInsteadOfFailing(): void
+    public function testWordGeneratedEmSpaceIsDrawnFromTheLastResortFontInsteadOfFailing(): void
     {
         // U+2003 EM SPACE is not part of the WinAnsi/CP1252 codepage but routinely shows up
-        // in Word-exported HTML used for indentation; it must degrade instead of aborting
-        // the whole conversion.
+        // in Word-exported HTML used for indentation; it must not abort the whole conversion,
+        // and it no longer degrades to a `?` either: the bundled DejaVu Sans draws it (see
+        // LastResortFontForNonWinAnsiTest).
         $pdf = Pagyra::renderHtmlToPdf([
             'html' => "<p>antes\u{2003}depois</p>",
             'viewportWidth' => 200,
@@ -100,6 +101,9 @@ final class PdfSerializationTest extends TestCase
         ]);
 
         self::assertStringStartsWith('%PDF-1.4', $pdf);
-        self::assertStringContainsString('(antes?depois) Tj', $pdf);
+        self::assertStringContainsString('(antes) Tj', $pdf);
+        self::assertStringContainsString('(depois) Tj', $pdf);
+        self::assertStringNotContainsString('(antes?depois) Tj', $pdf);
+        self::assertMatchesRegularExpression('/<[0-9A-F]{4}> <2003>/', $pdf);
     }
 }

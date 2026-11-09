@@ -13,6 +13,25 @@ final class FontRegistry
     /** @var array<string,array<string,RegisteredFont>> */
     private array $fonts = [];
 
+    /**
+     * Last-resort faces for code points the Base14 fallback cannot draw, kept apart from
+     * $fonts so that naming one of these families in CSS does not move ordinary text off
+     * Base14. Files are only parsed the first time such a code point shows up.
+     *
+     * @var array<int,array{family:string,path:string,face:?RegisteredFont}>
+     */
+    private array $lastResort = [];
+
+    /**
+     * Registers a TrueType file as a last-resort face: it is consulted only after the CSS font
+     * stack, and only for code points outside WinAnsi, which the Base14 fallback would
+     * otherwise write as a literal `?`.
+     */
+    public function registerLastResortFile(string $family, string $path): void
+    {
+        $this->lastResort[] = ['family' => $family, 'path' => $path, 'face' => null];
+    }
+
     public function register(string $family, TtfFontMetrics $metrics, int $weight = 400, string $style = 'normal', string $binary = ''): void
     {
         $normalizedWeight = $this->normalizedWeight($weight);
@@ -92,6 +111,44 @@ final class FontRegistry
             if ($face !== null && $face->metrics->glyphId($codePoint) !== 0) {
                 return $face;
             }
+        }
+
+        return $this->resolveLastResortFace($codePoint);
+    }
+
+    /**
+     * A code point the CSS stack does not cover falls back to Base14, which can only write
+     * WinAnsi. Anything outside it (Greek letters, math signs, bullets, Cyrillic, but also the
+     * U+2003 em space or the U+202F narrow no-break space) used to come out as `?`; a
+     * last-resort face draws it instead.
+     */
+    private function resolveLastResortFace(int $codePoint): ?RegisteredFont
+    {
+        if ($this->lastResort === [] || WinAnsiEncoding::byteFor($codePoint) !== null) return null;
+
+        foreach ($this->lastResort as $i => $entry) {
+            $face = $entry['face'];
+            if ($face === null) {
+                $binary = @file_get_contents($entry['path']);
+                if ($binary === false) {
+                    unset($this->lastResort[$i]);
+                    continue;
+                }
+                try {
+                    $face = new RegisteredFont(
+                        family: $entry['family'],
+                        weight: 400,
+                        style: 'normal',
+                        metrics: (new TtfParser())->parse($binary),
+                        binary: $binary,
+                    );
+                } catch (\InvalidArgumentException|\RuntimeException) {
+                    unset($this->lastResort[$i]);
+                    continue;
+                }
+                $this->lastResort[$i]['face'] = $face;
+            }
+            if ($face->metrics->glyphId($codePoint) !== 0) return $face;
         }
 
         return null;
