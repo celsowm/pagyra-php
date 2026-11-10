@@ -219,8 +219,14 @@ final class RecursivePaginationOffsets
         $height = max($node->box->marginBox()->bottom(), $this->subtreeBottom($node)) - $node->box->marginBox()->y;
         if ($height > $flow->maximumUsableHeight() + self::EPSILON) return 0.0;
 
+        // CSS 2.1 13.3.3 (and CSS Fragmentation 5.2): at an unforced break the margin that
+        // adjoins it is truncated, so the block moves until its border box, not its margin box,
+        // starts the next page. Aligning the margin box carried the paragraph's whole top margin
+        // (5mm in the eproc template) to the top of the page, which wkhtmltopdf does not do, and
+        // that was often the last bit of space that sent a document footer to a page of its own.
+        $borderTop = $node->box->borderBox()->y + $offset;
         $currentPage = $flow->pageIndexAt($start);
-        return max(0.0, $flow->contentStartForPage($currentPage + 1) - $start);
+        return max(0.0, $flow->contentStartForPage($currentPage + 1) - $borderTop);
     }
 
     /**
