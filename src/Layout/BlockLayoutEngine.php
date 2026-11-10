@@ -303,7 +303,27 @@ final class BlockLayoutEngine
                 $float = $float->reset($contentX, $contentRight);
             }
 
-            $childTopMargin = $this->resolveMarginSide($child, 'top', $contentWidth, $this->viewportHeight, $childFontSize);
+            if ($this->collapsesThrough($child, $contentWidth, $this->viewportHeight, $childFontSize)) {
+                // Same as in layoutBlock(): an empty block takes no room and its margins join the
+                // ones around it. Before the first box the body's own top margin is the one it
+                // meets, with the content edge at y=0 (no top border or padding).
+                $throughMargins = $this->collapseThroughMargins($child, $contentWidth, $this->viewportHeight, $childFontSize);
+                if ($previousBorderBottom === null) {
+                    $atBodyTop = $children === [] && $collapsesTop;
+                    $previousBorderBottom = $atBodyTop ? 0.0 : $cursorY;
+                    $previousBottomMargin = $atBodyTop ? $margin->top : 0.0;
+                }
+                $flowY = $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $throughMargins[0]]) - $throughMargins[0];
+                $children[] = $this->layoutBlockLevelChild($child, $contentX, $flowY, $contentWidth, $this->viewportHeight, $fontSize);
+                $previousBottomMargin = BlockMath::collapseMarginSet([$previousBottomMargin, ...$throughMargins]);
+                $cursorY = $previousBorderBottom + $previousBottomMargin;
+                continue;
+            }
+
+            // The used top margin, already raised by the leading descendants that collapse into it,
+            // as layoutBlock() gives the child box; its own value alone left the child that much
+            // lower whenever a nested first child carried the larger margin.
+            $childTopMargin = $this->collapsedTopMargin($child, $contentWidth, $this->viewportHeight, $childFontSize);
             $flowY = $previousBorderBottom === null ? $cursorY : $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $childTopMargin]) - $childTopMargin;
             $layout = $this->layoutBlockLevelChild($child, $contentX, $flowY, $contentWidth, $this->viewportHeight, $fontSize);
             $children[] = $layout;
@@ -584,6 +604,30 @@ final class BlockLayoutEngine
                 $previousBottomMargin = 0.0;
                 $firstInFlowChild = false;
                 $float = $float->reset($contentX, $contentX + $contentWidth);
+            }
+
+            if ($this->collapsesThrough($child, $contentWidth, $containingHeight, $childFontSize)) {
+                // An empty block takes no room: its margins join the ones on either side of it.
+                // At the start of a block whose top collapses they already went into this
+                // block's own top margin (leadingChildTopMargin), so the next child still counts
+                // as the first in-flow one.
+                $throughMargins = $this->collapseThroughMargins($child, $contentWidth, $containingHeight, $childFontSize);
+                if ($previousBorderBottom === null && $firstInFlowChild && $collapsesTop) {
+                    $children[] = $this->layoutBlockLevelChild($child, $contentX, $contentY - $throughMargins[0], $contentWidth, $containingHeight, $fontSize);
+                    continue;
+                }
+                if ($previousBorderBottom === null) {
+                    $previousBorderBottom = $cursorY;
+                    $previousBottomMargin = 0.0;
+                }
+                $childFlowY = $previousBorderBottom + BlockMath::collapseMarginSet([$previousBottomMargin, $throughMargins[0]]) - $throughMargins[0];
+                $children[] = $this->layoutBlockLevelChild($child, $contentX, $childFlowY, $contentWidth, $containingHeight, $fontSize);
+                $firstInFlowChild = false;
+                $previousBottomMargin = BlockMath::collapseMarginSet([$previousBottomMargin, ...$throughMargins]);
+                $lastChildBorderBottom = $previousBorderBottom;
+                $lastChildBottomMargin = $previousBottomMargin;
+                $cursorY = $previousBorderBottom + $previousBottomMargin;
+                continue;
             }
 
             $childTopMargin = $this->collapsedTopMargin($child, $contentWidth, $containingHeight, $childFontSize);
@@ -2576,13 +2620,88 @@ final class BlockLayoutEngine
      */
     private function leadingChildTopMargin(array $segments, float $containingWidth, float $containingHeight, float $fontSize, int $depth = 0): float
     {
-        $first = $segments[0] ?? null;
-        if ($first === null || $first[0] !== 'block') return 0.0;
+        // Leading empty blocks (`<p></p>`) are transparent to the collapse: their own top and
+        // bottom margins join the set and the walk goes on to the next sibling (CSS 2.1 8.3.1).
+        $margins = [];
+        foreach ($segments as $segment) {
+            if ($segment[0] !== 'block') break;
+            $child = $segment[1];
+            if ($this->floatSide($child) !== null) break;
+            $childFontSize = $this->resolveFontSize($child, $fontSize);
+            if ($this->collapsesThrough($child, $containingWidth, $containingHeight, $childFontSize, $depth + 1)) {
+                array_push($margins, ...$this->collapseThroughMargins($child, $containingWidth, $containingHeight, $childFontSize, $depth + 1));
+                continue;
+            }
+            $margins[] = $this->collapsedTopMargin($child, $containingWidth, $containingHeight, $childFontSize, $depth + 1);
+            break;
+        }
 
-        $child = $first[1];
-        if ($this->floatSide($child) !== null) return 0.0;
+        return BlockMath::collapseMarginSet($margins);
+    }
 
-        return $this->collapsedTopMargin($child, $containingWidth, $containingHeight, $this->resolveFontSize($child, $fontSize), $depth + 1);
+    /**
+     * CSS 2.1 8.3.1: "top and bottom margins of a box that does not establish a new block
+     * formatting context and that has zero computed 'min-height', zero or 'auto' computed
+     * 'height', and no in-flow children" collapse with each other, and the margins on either
+     * side collapse through it. Browsers and wkhtmltopdf give such a box no room at all; here it
+     * was a zero-height border box between two margins, so an empty `<p></p>` cost one full
+     * paragraph margin. The eproc template writes `<p class="identificacao_processo"><p ...>`,
+     * which the parser turns into an empty paragraph followed by the real one, and that alone
+     * was enough to push the document footer onto a page of its own.
+     */
+    private function collapsesThrough(StyledNode $node, float $containingWidth, float $containingHeight, float $fontSize, int $depth = 0): bool
+    {
+        if ($depth >= 32) return false;
+        if ($node->node->type !== 'element') return false;
+        if ($node->node->isImage() || $node->node->isSvg()) return false;
+        if ($this->display($node) !== 'block') return false;
+        if ($this->floatSide($node) !== null || $this->isOutOfFlow($node)) return false;
+        $overflow = strtolower(trim($node->style->get('overflow') ?? 'visible'));
+        if (!in_array($overflow, ['', 'visible', 'clip'], true)) return false;
+        if (!$this->isZeroOrAutoLength($node->style->get('height', 'auto'))) return false;
+        if (!$this->isZeroOrAutoLength($node->style->get('min-height', 'auto'))) return false;
+
+        $padding = $this->resolveEdges($node, 'padding', $containingWidth, $containingHeight, $fontSize);
+        $border = $this->resolveBorderEdges($node, $containingWidth, $containingHeight, $fontSize);
+        if ($padding->top > 0.0 || $padding->bottom > 0.0 || $border->top > 0.0 || $border->bottom > 0.0) return false;
+
+        foreach ($this->flowSegments($node) as $segment) {
+            if ($segment[0] === 'inline') return false;
+            $child = $segment[1];
+            if (!$this->collapsesThrough($child, $containingWidth, $containingHeight, $this->resolveFontSize($child, $fontSize), $depth + 1)) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Every margin that meets inside a collapse-through box: its own two and those of the empty
+     * blocks nested in it, all of which adjoin one another.
+     *
+     * @return list<float>
+     */
+    private function collapseThroughMargins(StyledNode $node, float $containingWidth, float $containingHeight, float $fontSize, int $depth = 0): array
+    {
+        $margins = [
+            $this->resolveMarginSide($node, 'top', $containingWidth, $containingHeight, $fontSize),
+            $this->resolveMarginSide($node, 'bottom', $containingWidth, $containingHeight, $fontSize),
+        ];
+        if ($depth >= 32) return $margins;
+        foreach ($this->flowSegments($node) as $segment) {
+            $child = $segment[1];
+            if ($child instanceof StyledNode) {
+                array_push($margins, ...$this->collapseThroughMargins($child, $containingWidth, $containingHeight, $this->resolveFontSize($child, $fontSize), $depth + 1));
+            }
+        }
+
+        return $margins;
+    }
+
+    private function isZeroOrAutoLength(?string $value): bool
+    {
+        $value = strtolower(trim($value ?? 'auto'));
+
+        return $value === '' || $value === 'auto' || $value === 'none' || preg_match('/^[+-]?0*\.?0*(?:[a-z]+|%)?$/', $value) === 1;
     }
 
     /**
