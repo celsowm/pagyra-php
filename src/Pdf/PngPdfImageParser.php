@@ -8,7 +8,61 @@ final class PngPdfImageParser
 {
     private const SIGNATURE = "\x89PNG\r\n\x1a\n";
 
+    /** Limites do cache entre renderizacoes: quantidade de imagens e bytes guardados. */
+    private const CACHE_MAX_ENTRIES = 32;
+    private const CACHE_MAX_BYTES = 32 * 1024 * 1024;
+
+    /**
+     * Resultado ja calculado por hash dos bytes do PNG. Separar o canal alfa (e a mascara de
+     * paleta com tRNS) desfaz o filtro de cada linha em PHP, byte a byte, e custa cerca de 1 s
+     * numa imagem de 1182x1182 RGBA. Documentos gerados em serie costumam repetir a mesma
+     * imagem (brasao do cabecalho), entao o processo so paga esse custo na primeira vez.
+     *
+     * @var array<string, PngPdfImageData|false>
+     */
+    private static array $cache = [];
+    private static int $cacheBytes = 0;
+
     public function parse(string $bytes): ?PngPdfImageData
+    {
+        $key = hash('sha256', $bytes);
+        if (array_key_exists($key, self::$cache)) {
+            $cached = self::$cache[$key];
+            return $cached === false ? null : $cached;
+        }
+
+        $result = $this->parseUncached($bytes);
+        self::remember($key, $result);
+        return $result;
+    }
+
+    public static function clearCache(): void
+    {
+        self::$cache = [];
+        self::$cacheBytes = 0;
+    }
+
+    private static function remember(string $key, ?PngPdfImageData $result): void
+    {
+        $size = self::sizeOf($result);
+        if ($size > self::CACHE_MAX_BYTES) return;
+
+        while (self::$cache !== [] && (count(self::$cache) >= self::CACHE_MAX_ENTRIES || self::$cacheBytes + $size > self::CACHE_MAX_BYTES)) {
+            $oldestKey = array_key_first(self::$cache);
+            self::$cacheBytes -= self::sizeOf(self::$cache[$oldestKey] ?: null);
+            unset(self::$cache[$oldestKey]);
+        }
+
+        self::$cache[$key] = $result ?? false;
+        self::$cacheBytes += $size;
+    }
+
+    private static function sizeOf(?PngPdfImageData $data): int
+    {
+        return $data === null ? 0 : strlen($data->compressedData) + strlen($data->alphaCompressedData ?? '');
+    }
+
+    private function parseUncached(string $bytes): ?PngPdfImageData
     {
         if (!str_starts_with($bytes, self::SIGNATURE) || strlen($bytes) < 33) {
             return null;
