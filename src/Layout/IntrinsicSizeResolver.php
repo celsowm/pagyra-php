@@ -7,7 +7,9 @@ namespace Pagyra\Layout;
 use Pagyra\Css\Length\FontSizeKeywords;
 use Pagyra\Css\Length\LengthParser;
 use Pagyra\Css\Length\LengthResolver;
+use Pagyra\Dom\Node;
 use Pagyra\Style\ComputedStyle;
+use Pagyra\Style\StyleComputer;
 use Pagyra\Style\StyledNode;
 use Pagyra\Units\Units;
 
@@ -40,6 +42,22 @@ final class IntrinsicSizeResolver
         }
 
         $fontSize = $this->resolveFontSize($node->style, $parentFontSize);
+
+        // A flex row or a grid places its items side by side, so its intrinsic width is the sum of
+        // the items (and the gaps between them), not the widest item as for a block. Treating
+        // them as blocks made a `display:flex` brand with a logo and a name, or a two-column
+        // `grid` of labels and values, report the width of one child: the container was then
+        // laid out too narrow and wrapped its text or spilled past its edge.
+        $display = $this->display($node);
+        $laidOut = match ($display) {
+            'flex', 'inline-flex' => $this->measureFlexRow($node, $referenceWidth, $fontSize),
+            'grid', 'inline-grid' => $this->measureGrid($node, $referenceWidth, $fontSize),
+            default => null,
+        };
+        if ($laidOut !== null) {
+            return $laidOut;
+        }
+
         $own = $this->inlineFormatter->intrinsicInlineSize($node, $referenceWidth, $fontSize);
         $minContent = $own->minContent;
         $maxContent = $own->maxContent;
@@ -105,6 +123,198 @@ final class IntrinsicSizeResolver
         }
 
         return new IntrinsicInlineSize(max(0.0, $min), max(0.0, $max));
+    }
+
+    /**
+     * Min/max-content width of a row flex container (CSS Flexbox 1 §9.9.1): the items' outer
+     * contributions side by side plus the column gaps. A single-line container cannot get
+     * narrower than all its items' min-content widths together; a multi-line one only than the
+     * widest item. A column container stacks its items like a block, so it returns null and the
+     * block measurement applies.
+     */
+    private function measureFlexRow(StyledNode $node, float $referenceWidth, float $fontSize): ?IntrinsicInlineSize
+    {
+        $direction = strtolower(trim($node->style->get('flex-direction') ?? ''));
+        $wrap = strtolower(trim($node->style->get('flex-wrap') ?? ''));
+        foreach (preg_split('/\s+/', strtolower(trim($node->style->get('flex-flow') ?? ''))) ?: [] as $token) {
+            if ($direction === '' && in_array($token, ['row', 'row-reverse', 'column', 'column-reverse'], true)) $direction = $token;
+            if ($wrap === '' && in_array($token, ['nowrap', 'wrap', 'wrap-reverse'], true)) $wrap = $token;
+        }
+        if (str_starts_with($direction, 'column')) {
+            return null;
+        }
+
+        $items = $this->itemContributions($node, $referenceWidth, $fontSize);
+        if ($items === []) {
+            return null;
+        }
+
+        $gaps = $this->columnGap($node, $referenceWidth, $fontSize) * (count($items) - 1);
+        $max = $gaps;
+        $min = $gaps;
+        $widestMin = 0.0;
+        foreach ($items as $item) {
+            $max += $item->maxContent;
+            $min += $item->minContent;
+            $widestMin = max($widestMin, $item->minContent);
+        }
+        if ($wrap === 'wrap' || $wrap === 'wrap-reverse') {
+            $min = $widestMin;
+        }
+
+        return new IntrinsicInlineSize($min, max($min, $max));
+    }
+
+    /**
+     * Min/max-content width of a grid (CSS Grid 1 §12.3, for auto-placed items in single cells):
+     * each column takes its widest item, fixed tracks their length, and the columns and gaps add
+     * up. Grids this does not model (named areas, explicit placement, column auto-flow,
+     * `auto-fill`/`auto-fit`) return null and keep the block measurement.
+     */
+    private function measureGrid(StyledNode $node, float $referenceWidth, float $fontSize): ?IntrinsicInlineSize
+    {
+        if (str_contains(strtolower($node->style->get('grid-auto-flow') ?? ''), 'column')) return null;
+        $areas = strtolower(trim($node->style->get('grid-template-areas') ?? 'none'));
+        if ($areas !== '' && $areas !== 'none') return null;
+
+        $tracks = $this->gridTracks($node->style->get('grid-template-columns') ?? 'none', $referenceWidth, $fontSize);
+        if ($tracks === null || count($tracks) < 2) return null;
+
+        foreach ($node->children as $child) {
+            if ($child->node->type === 'text') continue;
+            foreach (['grid-area', 'grid-column', 'grid-column-start', 'grid-column-end', 'grid-row', 'grid-row-start', 'grid-row-end'] as $property) {
+                $value = strtolower(trim($child->style->get($property) ?? 'auto'));
+                if ($value !== '' && $value !== 'auto' && $value !== 'auto / auto') return null;
+            }
+        }
+
+        $items = $this->itemContributions($node, $referenceWidth, $fontSize);
+        $count = count($tracks);
+        $minimums = array_map(static fn(?float $fixed): float => $fixed ?? 0.0, $tracks);
+        $maximums = $minimums;
+        foreach ($items as $index => $item) {
+            $column = $index % $count;
+            if ($tracks[$column] !== null) continue;
+            $minimums[$column] = max($minimums[$column], $item->minContent);
+            $maximums[$column] = max($maximums[$column], $item->maxContent);
+        }
+
+        $gaps = $this->columnGap($node, $referenceWidth, $fontSize) * ($count - 1);
+        $min = array_sum($minimums) + $gaps;
+
+        return new IntrinsicInlineSize($min, max($min, array_sum($maximums) + $gaps));
+    }
+
+    /**
+     * The outer contributions of a flex or grid container's items, in document order: every
+     * in-flow child element, and each run of non-blank text as one anonymous item.
+     *
+     * @return list<IntrinsicInlineSize>
+     */
+    private function itemContributions(StyledNode $node, float $referenceWidth, float $fontSize): array
+    {
+        $items = [];
+        $text = [];
+        $flush = function () use (&$text, &$items, $node, $referenceWidth, $fontSize): void {
+            $blank = true;
+            foreach ($text as $run) {
+                if (trim($run->node->text ?? '') !== '') $blank = false;
+            }
+            if (!$blank) {
+                $properties = ['display' => 'block'];
+                foreach (StyleComputer::INHERITED as $property) {
+                    $value = $node->style->get($property);
+                    if ($value !== null) $properties[$property] = $value;
+                }
+                $anonymous = new StyledNode(Node::element(BlockLayoutEngine::ANONYMOUS_TAG, [], []), new ComputedStyle($properties), $text);
+                $items[] = $this->inlineFormatter->intrinsicInlineSize($anonymous, $referenceWidth, $fontSize);
+            }
+            $text = [];
+        };
+
+        foreach ($node->children as $child) {
+            if ($child->node->type === 'text') {
+                $text[] = $child;
+                continue;
+            }
+            if ($this->display($child) === 'none') continue;
+            $position = strtolower(trim($child->style->get('position') ?? 'static'));
+            if ($position === 'absolute' || $position === 'fixed') continue;
+            $flush();
+            $items[] = $this->outerContribution($child, $referenceWidth, $fontSize);
+        }
+        $flush();
+
+        return $items;
+    }
+
+    private function columnGap(StyledNode $node, float $referenceWidth, float $fontSize): float
+    {
+        $parts = preg_split('/\s+/', trim($node->style->get('gap') ?? '')) ?: [];
+        $raw = $node->style->get('column-gap')
+            ?? (($parts[1] ?? '') !== '' ? $parts[1] : null)
+            ?? (($parts[0] ?? '') !== '' ? $parts[0] : null)
+            ?? $node->style->get('grid-column-gap');
+        // A percentage gap resolves against the width being measured, so it counts as zero here.
+        if ($raw === null || in_array(strtolower(trim($raw)), ['normal', ''], true) || str_contains($raw, '%')) {
+            return 0.0;
+        }
+
+        return max(0.0, $this->resolveLength($raw, $referenceWidth, $fontSize) ?? 0.0);
+    }
+
+    /**
+     * The explicit column tracks: a length for a fixed track, null for one sized by its content
+     * (`auto`, `fr`, `min-content`, `minmax()` with a flexible or content maximum, a percentage).
+     * Null for the whole list when it cannot be counted without the container's width.
+     *
+     * @return list<?float>|null
+     */
+    private function gridTracks(string $value, float $referenceWidth, float $fontSize): ?array
+    {
+        $value = trim((string) preg_replace('/\[[^\]]*\]/', ' ', $value));
+        if ($value === '' || strtolower($value) === 'none') return null;
+
+        $tracks = [];
+        foreach ($this->topLevelTokens($value) as $token) {
+            $lower = strtolower($token);
+            if (preg_match('/^repeat\(\s*(\d+)\s*,(.*)\)$/s', $lower, $m) === 1) {
+                $inner = $this->gridTracks($m[2], $referenceWidth, $fontSize);
+                if ($inner === null) return null;
+                for ($i = 0; $i < (int) $m[1]; $i++) array_push($tracks, ...$inner);
+                continue;
+            }
+            if (str_starts_with($lower, 'repeat(')) return null;
+            if (preg_match('/^minmax\((.*),([^,]*)\)$/s', $lower, $m) === 1) {
+                $lower = trim($m[2]);
+            }
+            $tracks[] = str_ends_with($lower, 'fr') || str_ends_with($lower, '%') || preg_match('/^[a-z-]+(\(.*\))?$/', $lower) === 1
+                ? null
+                : $this->resolveLength($lower, $referenceWidth, $fontSize);
+        }
+
+        return $tracks;
+    }
+
+    /** @return list<string> */
+    private function topLevelTokens(string $value): array
+    {
+        $tokens = [];
+        $buffer = '';
+        $depth = 0;
+        foreach (str_split($value) as $char) {
+            if ($char === '(') $depth++;
+            if ($char === ')') $depth = max(0, $depth - 1);
+            if ($depth === 0 && ctype_space($char)) {
+                if ($buffer !== '') $tokens[] = $buffer;
+                $buffer = '';
+                continue;
+            }
+            $buffer .= $char;
+        }
+        if ($buffer !== '') $tokens[] = $buffer;
+
+        return $tokens;
     }
 
     /**

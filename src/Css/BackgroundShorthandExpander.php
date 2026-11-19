@@ -23,12 +23,47 @@ final class BackgroundShorthandExpander
     private const REPEAT = ['repeat', 'no-repeat', 'repeat-x', 'repeat-y', 'space', 'round'];
     private const POSITION = ['left', 'right', 'top', 'bottom', 'center'];
     private const IGNORED = ['scroll', 'fixed', 'local', 'border-box', 'padding-box', 'content-box', 'text'];
+    public const PENDING = '-pagyra-pending-background(';
+    public const LONGHANDS = ['background-color', 'background-image', 'background-repeat', 'background-position', 'background-size'];
+
+    /**
+     * Replaces the pending-substitution longhands that expand() left for a `background` with
+     * var(), whose variables are now resolved, by the values the shorthand expands to.
+     *
+     * @param array<string,string> $properties
+     * @return array<string,string>
+     */
+    public function expandPending(array $properties): array
+    {
+        foreach (self::LONGHANDS as $longhand) {
+            $value = $properties[$longhand] ?? null;
+            if ($value === null || !str_starts_with($value, self::PENDING)) continue;
+            $shorthand = substr($value, strlen(self::PENDING), -1);
+            $expanded = str_contains(strtolower($shorthand), 'var(') ? null : $this->expand('background', $shorthand);
+            $properties[$longhand] = $expanded[$longhand] ?? match ($longhand) {
+                'background-color' => 'transparent',
+                'background-image' => 'none',
+                'background-repeat' => 'repeat',
+                'background-position' => '0% 0%',
+                default => 'auto',
+            };
+        }
+
+        return $properties;
+    }
 
     /** @return array<string,string>|null */
     public function expand(string $property, string $value): ?array
     {
         if (strtolower(trim($property)) !== 'background') {
             return null;
+        }
+        // With a var() inside, which token is the colour and which the image is only known after
+        // substitution (CSS Variables 1 §3.2, pending-substitution value): each longhand carries
+        // the whole shorthand and StyleComputer expands it once the variables are resolved.
+        // `background: var(--accent)` used to drop the colour, as the token matched nothing.
+        if (str_contains(strtolower($value), 'var(')) {
+            return array_fill_keys(self::LONGHANDS, self::PENDING . $value . ')');
         }
         $layers = $this->splitTopLevel($value, ',');
         $tokens = $this->splitTopLevelWhitespace($layers === [] ? $value : $layers[count($layers) - 1]);

@@ -94,6 +94,7 @@ final class BorderRadiusResolver
 
     private static function length(string $raw, float $percentReference, float $fontSize): float
     {
+        if ($raw === '0') return 0.0;
         $value = strtolower(trim($raw));
         if ($value === '') return 0.0;
         if (preg_match('/^(-?\d+(?:\.\d+)?)%$/', $value, $m) === 1) return max(0.0, (float) $m[1] * $percentReference / 100.0);
@@ -101,6 +102,16 @@ final class BorderRadiusResolver
         if (preg_match('/^(-?\d+(?:\.\d+)?)pt$/', $value, $m) === 1) return max(0.0, Units::ptToPx((float) $m[1]));
         if (preg_match('/^(-?\d+(?:\.\d+)?)em$/', $value, $m) === 1) return max(0.0, (float) $m[1] * $fontSize);
         if (preg_match('/^(-?\d+(?:\.\d+)?)rem$/', $value, $m) === 1) return max(0.0, (float) $m[1] * 16.0);
+        // Absolute units (CSS Values 4 §6.2): a `border-radius: 3mm` used to come out square.
+        if (preg_match('/^(-?\d*\.?\d+)(mm|cm|in|pc|q)$/', $value, $m) === 1) {
+            return max(0.0, (float) $m[1] * match ($m[2]) {
+                'mm' => 96.0 / 25.4,
+                'cm' => 96.0 / 2.54,
+                'in' => 96.0,
+                'pc' => 16.0,
+                'q' => 96.0 / 101.6,
+            });
+        }
         return is_numeric($value) ? max(0.0, (float) $value) : 0.0;
     }
 }

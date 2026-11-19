@@ -1246,14 +1246,43 @@ final class BlockLayoutEngine
                     }
                 }
             } elseif ($free < 0.0) {
-                $totalShrink = array_sum(array_map(static fn(int $i): float => $items[$i]['shrink'] * $items[$i]['main'], $line));
-                if ($totalShrink > 0.0) {
+                // CSS Flexbox 1 §9.7: shrink in proportion to shrink factor × base size, and freeze
+                // an item at its minimum (§4.5: its min-width, or else its min-content width) when
+                // its share would take it below, handing the rest of the overflow to the others.
+                // Without the floor a row too wide for its line squeezed a logo or a label below
+                // its longest word, wrapping and clipping text a browser keeps on one line.
+                $frozen = [];
+                $target = [];
+                foreach ($line as $i) {
+                    $target[$i] = $items[$i]['main'];
+                    if ($items[$i]['shrink'] <= 0.0) $frozen[$i] = true;
+                }
+                do {
+                    $remaining = $containerMain - $mainGap * (count($line) - 1);
                     foreach ($line as $i) {
-                        $share = $items[$i]['shrink'] * $items[$i]['main'] / $totalShrink;
-                        if ($share > 0.0) {
-                            $items[$i]['main'] = max(0.0, $items[$i]['main'] + $free * $share);
-                            $items[$i]['resize'] = true;
+                        $remaining -= $items[$i]['mainMargins'] + (isset($frozen[$i]) ? $target[$i] : $items[$i]['main']);
+                    }
+                    $totalShrink = 0.0;
+                    foreach ($line as $i) {
+                        if (!isset($frozen[$i])) $totalShrink += $items[$i]['shrink'] * $items[$i]['main'];
+                    }
+                    if ($remaining >= 0.0 || $totalShrink <= 0.0) break;
+                    $changed = false;
+                    foreach ($line as $i) {
+                        if (isset($frozen[$i])) continue;
+                        $target[$i] = $items[$i]['main'] + $remaining * $items[$i]['shrink'] * $items[$i]['main'] / $totalShrink;
+                        $minimum = $isRow ? $this->flexItemMinimumWidth($items[$i]['styled'], $items[$i]['main'], $contentWidth, $this->resolveFontSize($items[$i]['styled'], $fontSize)) : 0.0;
+                        if ($target[$i] < $minimum) {
+                            $target[$i] = $minimum;
+                            $frozen[$i] = true;
+                            $changed = true;
                         }
+                    }
+                } while ($changed);
+                foreach ($line as $i) {
+                    if (abs($target[$i] - $items[$i]['main']) > 1e-9) {
+                        $items[$i]['main'] = max(0.0, $target[$i]);
+                        $items[$i]['resize'] = true;
                     }
                 }
             }
@@ -1525,6 +1554,38 @@ final class BlockLayoutEngine
         }
 
         return new StyledNode(Node::element(self::ANONYMOUS_TAG, [], []), new ComputedStyle($properties), $texts);
+    }
+
+    /**
+     * The border-box width a row flex item cannot shrink below (CSS Flexbox 1 §4.5): a declared
+     * `min-width`, else, while its overflow is visible, its min-content width, capped by its
+     * hypothetical size (a declared `width` or a definite flex basis is a specified size
+     * suggestion and lowers the floor). `min-width: 0` or a clipping overflow lets it go to zero.
+     */
+    private function flexItemMinimumWidth(StyledNode $item, float $hypothetical, float $available, float $fontSize): float
+    {
+        $min = strtolower(trim($item->style->get('min-width') ?? 'auto'));
+        if ($min !== 'auto' && $min !== '') {
+            $resolved = $this->resolveLength($min, $available, $fontSize, $available, $this->viewportHeight, 'zero');
+            if (($item->style->get('box-sizing') ?? 'content-box') !== 'border-box') {
+                $resolved += $this->resolveEdges($item, 'padding', $available, $this->viewportHeight, $fontSize)->horizontal()
+                    + $this->resolveBorderEdges($item, $available, $this->viewportHeight, $fontSize)->horizontal();
+            }
+
+            return max(0.0, $resolved);
+        }
+        foreach (['overflow', 'overflow-x'] as $property) {
+            $overflow = strtolower(trim($item->style->get($property) ?? 'visible'));
+            if ($overflow !== '' && !str_starts_with($overflow, 'visible')) return 0.0;
+        }
+
+        // The content size suggestion is the min-content width of the content itself, so measure()
+        // and not borderBox(), which would answer a declared width instead.
+        $contentMinimum = $this->intrinsicSizeResolver->measure($item, $available, $fontSize)->minContent
+            + $this->resolveEdges($item, 'padding', $available, $this->viewportHeight, $fontSize)->horizontal()
+            + $this->resolveBorderEdges($item, $available, $this->viewportHeight, $fontSize)->horizontal();
+
+        return min($hypothetical, $contentMinimum);
     }
 
     /**

@@ -210,7 +210,10 @@ final class InlineTextFormatter
 
             $tokenAdvance = $this->tokenAdvanceWidth($token);
 
-            if ($allowSoftWrap && $lineRoom > 0.0 && $current !== [] && $currentWidth + $tokenAdvance > $lineRoom) {
+            // The tolerance absorbs float noise: a shrink-to-fit or flex item gets exactly its
+            // measured max-content width, written back as a "…px" string of 14 significant
+            // digits, and a sum a few ulps over that width must not push the last word down.
+            if ($allowSoftWrap && $lineRoom > 0.0 && $current !== [] && $currentWidth + $tokenAdvance > $lineRoom + self::EPSILON) {
                 if ($token['kind'] === 'space' && $this->collapsesSpaces($whiteSpace)) {
                     $lines[] = $current;
                     $current = [];
@@ -224,7 +227,7 @@ final class InlineTextFormatter
                 $lineRoom = $availableWidth - $insetLeft - $insetRight;
             }
 
-            if ($allowSoftWrap && $lineRoom > 0.0 && $token['kind'] === 'word' && $tokenAdvance > $lineRoom && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
+            if ($allowSoftWrap && $lineRoom > 0.0 && $token['kind'] === 'word' && $tokenAdvance > $lineRoom + self::EPSILON && $this->canBreakInsideWord($overflowWrap, $wordBreak)) {
                 foreach ($this->splitWordToken($token, $lineRoom) as $index => $chunk) {
                     if ($index > 0) {
                         $lines[] = $current;

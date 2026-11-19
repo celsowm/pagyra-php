@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pagyra\Style;
 
+use Pagyra\Css\BackgroundShorthandExpander;
 use Pagyra\Css\Color\ColorParser;
 use Pagyra\Css\DeclarationParser;
 use Pagyra\Css\Length\FontSizeKeywords;
@@ -87,6 +88,7 @@ final class StyleComputer
         private readonly SelectorMatcher $selectorMatcher = new SelectorMatcher(),
         private readonly DeclarationParser $declarationParser = new DeclarationParser(),
         private readonly UserAgentStyles $userAgentStyles = new UserAgentStyles(),
+        private readonly BackgroundShorthandExpander $backgroundShorthandExpander = new BackgroundShorthandExpander(),
     ) {
     }
 
@@ -670,6 +672,7 @@ final class StyleComputer
                 unset($properties[$property]);
             }
         }
+        $properties = $this->backgroundShorthandExpander->expandPending($properties);
         $this->absolutizeFontRelativeLengths($properties, $elementStyle);
         $style = new ComputedStyle($properties);
         if (strtolower(trim($style->get('display') ?? '')) === 'none') {
@@ -1026,6 +1029,7 @@ final class StyleComputer
                 $properties[$name] = $resolved;
             }
         }
+        $properties = $this->backgroundShorthandExpander->expandPending($properties);
 
         if ($node->type === 'element') {
             $this->absolutizeFontRelativeLengths($properties, $parent);
