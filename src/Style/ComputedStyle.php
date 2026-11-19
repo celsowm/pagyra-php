@@ -13,7 +13,9 @@ final readonly class ComputedStyle implements \JsonSerializable
 
     public function get(string $property, ?string $default = null): ?string
     {
-        return $this->properties[strtolower($property)] ?? $default;
+        // Properties are stored lower-cased and nearly every caller already asks in lower case;
+        // the lookup is the hottest call of a render, so lower-case only when it misses.
+        return $this->properties[$property] ?? $this->properties[strtolower($property)] ?? $default;
     }
 
     public function jsonSerialize(): array

@@ -15,7 +15,36 @@ final class GlyphTextMetrics implements TextMetrics
     ) {
     }
 
+    /** Limite de medidas guardadas por instancia (uma instancia por renderizacao). */
+    private const CACHE_MAX_ENTRIES = 50000;
+
+    /**
+     * Medidas ja calculadas nesta renderizacao. Layout, medida intrinseca e quebra de linha medem
+     * as mesmas palavras muitas vezes (uma fatura de 150 linhas repete "Webentwicklung" em cada
+     * celula, e cada celula e medida para o min/max-content e de novo para o layout), e cada
+     * medida resolvia a pilha de fontes caractere a caractere. A chave tem tudo o que a medida
+     * le do estilo: familia, peso, estilo, letter-spacing, word-spacing e line-height.
+     *
+     * @var array<string,TextMeasurement>
+     */
+    private array $cache = [];
+
     public function measure(string $text, ComputedStyle $style, float $fontSize): TextMeasurement
+    {
+        $key = $fontSize . "\0" . $style->get('font-family') . "\0" . $style->get('font-weight') . "\0"
+            . $style->get('font-style') . "\0" . $style->get('letter-spacing') . "\0" . $style->get('word-spacing') . "\0"
+            . $style->get('line-height') . "\0" . $text;
+        if (isset($this->cache[$key])) {
+            return $this->cache[$key];
+        }
+        if (count($this->cache) >= self::CACHE_MAX_ENTRIES) {
+            $this->cache = [];
+        }
+
+        return $this->cache[$key] = $this->measureUncached($text, $style, $fontSize);
+    }
+
+    private function measureUncached(string $text, ComputedStyle $style, float $fontSize): TextMeasurement
     {
         $lines = preg_split('/\r?\n/u', $text) ?: [''];
         $maxLine = 0.0;

@@ -43,6 +43,7 @@ final class FontRegistry
             metrics: $metrics,
             binary: $binary,
         );
+        $this->candidates = [];
     }
 
     public function registerFile(string $family, string $path, int $weight = 400, string $style = 'normal'): void
@@ -56,9 +57,56 @@ final class FontRegistry
 
     public function registerData(string $family, string $binary, int $weight = 400, string $style = 'normal'): void
     {
+        [$sfnt, $metrics] = self::parsed($binary);
+        $this->register($family, $metrics, $weight, $style, $sfnt);
+    }
+
+    /** Limites do cache entre renderizacoes: quantidade de fontes e bytes guardados. */
+    private const CACHE_MAX_ENTRIES = 32;
+    private const CACHE_MAX_BYTES = 64 * 1024 * 1024;
+
+    /**
+     * Fonte ja lida por hash dos bytes do arquivo: o sfnt (WOFF ja descompactado) e as metricas.
+     * Ler as tabelas de um TTF em PHP custa cerca de 15 ms por arquivo (a Inter regular e bold e
+     * a DejaVu de ultimo recurso somavam 45 ms em toda renderizacao, um terco de uma fatura de
+     * uma pagina), e documentos gerados em serie repetem as mesmas fontes. TtfFontMetrics e
+     * readonly, entao o mesmo objeto serve a varias renderizacoes.
+     *
+     * @var array<string,array{0:string,1:TtfFontMetrics}>
+     */
+    private static array $cache = [];
+    private static int $cacheBytes = 0;
+
+    public static function clearCache(): void
+    {
+        self::$cache = [];
+        self::$cacheBytes = 0;
+    }
+
+    /** @return array{0:string,1:TtfFontMetrics} */
+    private static function parsed(string $binary): array
+    {
+        $key = hash('xxh128', $binary);
+        if (isset(self::$cache[$key])) {
+            return self::$cache[$key];
+        }
+
         $woff = new WoffDecoder();
         $sfnt = $woff->isWoff($binary) ? $woff->decode($binary) : $binary;
-        $this->register($family, (new TtfParser())->parse($sfnt), $weight, $style, $sfnt);
+        $result = [$sfnt, (new TtfParser())->parse($sfnt)];
+
+        $size = strlen($sfnt);
+        if ($size <= self::CACHE_MAX_BYTES) {
+            while (self::$cache !== [] && (count(self::$cache) >= self::CACHE_MAX_ENTRIES || self::$cacheBytes + $size > self::CACHE_MAX_BYTES)) {
+                $oldest = array_key_first(self::$cache);
+                self::$cacheBytes -= strlen(self::$cache[$oldest][0]);
+                unset(self::$cache[$oldest]);
+            }
+            self::$cache[$key] = $result;
+            self::$cacheBytes += $size;
+        }
+
+        return $result;
     }
 
     public function resolve(?string $fontFamily, int $weight = 400, string $style = 'normal'): ?TtfFontMetrics
@@ -97,9 +145,31 @@ final class FontRegistry
         int $weight = 400,
         string $style = 'normal',
     ): ?RegisteredFont {
+        foreach ($this->candidates[$fontFamily . "\0" . $weight . "\0" . $style] ??= $this->candidateFaces($fontFamily, $weight, $style) as $face) {
+            if ($face->metrics->glyphId($codePoint) !== 0) {
+                return $face;
+            }
+        }
+
+        return $this->resolveLastResortFace($codePoint);
+    }
+
+    /**
+     * Faces que a pilha de familias oferece para um peso e estilo, na ordem do CSS. O layout e o
+     * PdfSerializer resolvem a face de cada caractere, e cada chamada reprocessava a string de
+     * `font-family` e procurava a variante mais proxima: guardada por pilha, peso e estilo, a
+     * resolucao de um caractere so consulta o cmap.
+     *
+     * @var array<string,list<RegisteredFont>>
+     */
+    private array $candidates = [];
+
+    /** @return list<RegisteredFont> */
+    private function candidateFaces(?string $fontFamily, int $weight, string $style): array
+    {
         $requestedWeight = $this->normalizedWeight($weight);
         $requestedStyle = $this->normalizedStyle($style);
-
+        $faces = [];
         foreach ($this->families($fontFamily) as $family) {
             $variants = $this->fonts[$this->familyKey($family)] ?? null;
             if ($variants === null) continue;
@@ -107,13 +177,10 @@ final class FontRegistry
             $face = $variants[$this->variantKey($requestedWeight, $requestedStyle)] ?? null;
             $face ??= $this->nearestVariant($variants, $requestedWeight, $requestedStyle, true);
             $face ??= $this->nearestVariant($variants, $requestedWeight, $requestedStyle, false);
-
-            if ($face !== null && $face->metrics->glyphId($codePoint) !== 0) {
-                return $face;
-            }
+            if ($face !== null) $faces[] = $face;
         }
 
-        return $this->resolveLastResortFace($codePoint);
+        return $faces;
     }
 
     /**
@@ -135,12 +202,13 @@ final class FontRegistry
                     continue;
                 }
                 try {
+                    [$sfnt, $metrics] = self::parsed($binary);
                     $face = new RegisteredFont(
                         family: $entry['family'],
                         weight: 400,
                         style: 'normal',
-                        metrics: (new TtfParser())->parse($binary),
-                        binary: $binary,
+                        metrics: $metrics,
+                        binary: $sfnt,
                     );
                 } catch (\InvalidArgumentException|\RuntimeException) {
                     unset($this->lastResort[$i]);

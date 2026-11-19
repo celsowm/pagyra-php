@@ -16,6 +16,8 @@ final readonly class LengthParser
 
     public function parseLength(string $value): float|RelativeLength|null
     {
+        // Most edges of most boxes are a bare zero; skip the regex for them (same result).
+        if ($value === '0') return 0.0;
         $normalized = strtolower(trim($value));
         if ($normalized === '' || $normalized === 'auto') {
             return null;

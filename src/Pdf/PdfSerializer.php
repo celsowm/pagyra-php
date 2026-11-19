@@ -30,6 +30,7 @@ final class PdfSerializer
     public function serialize(DisplayList $displayList, ?FontRegistry $fontRegistry = null, float $contentScale = 1.0): string
     {
         $contentScale = $contentScale > 0 ? $contentScale : 1.0;
+        $this->segments = [];
         $objects = [];
         $nextId = 1;
         $reserve = static function () use (&$objects, &$nextId): int {
@@ -105,6 +106,7 @@ final class PdfSerializer
         $kids = implode(' ', array_map(static fn (int $id): string => $id . ' 0 R', $pageIds));
         $objects[$pagesId] = '<< /Type /Pages /Count ' . count($pageIds) . ' /Kids [' . $kids . '] >>';
         $objects[$catalogId] = '<< /Type /Catalog /Pages ' . $pagesId . ' 0 R >>';
+        $this->segments = [];
         return $this->assemble($objects, $catalogId);
     }
 
@@ -662,6 +664,22 @@ final class PdfSerializer
      * @return list<array{key:string,face:?RegisteredFont,base14:?string,text:string}>
      */
     private function fontSegments(TextPaintCommand $command, ?FontRegistry $registry): array
+    {
+        // collectFontUsage() and the page content both split every text command; the split
+        // resolves a face per character, so the second pass reuses the first one's segments.
+        return $this->segments[spl_object_id($command)] ??= $this->splitFontSegments($command, $registry);
+    }
+
+    /**
+     * Segments already split in this serialize() call, by command object (the display list keeps
+     * every command alive until it returns, so the ids are not reused meanwhile).
+     *
+     * @var array<int,list<array{key:string,face:?RegisteredFont,base14:?string,text:string}>>
+     */
+    private array $segments = [];
+
+    /** @return list<array{key:string,face:?RegisteredFont,base14:?string,text:string}> */
+    private function splitFontSegments(TextPaintCommand $command, ?FontRegistry $registry): array
     {
         $chars = preg_split('//u', $command->text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
         if ($chars === []) return [];

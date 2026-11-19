@@ -54,13 +54,15 @@ final class TtfSubsetter
             }
             $offsets[] = strlen($newGlyf);
 
-            $newLoca = '';
-            foreach ($offsets as $offset) $newLoca .= pack('N', $offset);
+            $newLoca = pack('N*', ...$offsets);
 
             $numberOfHMetrics = $this->u16($hhea, 34);
             if ($numberOfHMetrics <= 0) return null;
-            $newHmtx = '';
-            for ($gid = 0; $gid <= $maxGid; $gid++) {
+            // The long metrics are copied as they are: re-packing them one glyph at a time gave
+            // the same bytes. Only the glyphs past numberOfHMetrics need the last advance.
+            $long = min($maxGid + 1, $numberOfHMetrics);
+            $newHmtx = strlen($hmtx) >= $long * 4 ? substr($hmtx, 0, $long * 4) : '';
+            for ($gid = $newHmtx === '' ? 0 : $long; $gid <= $maxGid; $gid++) {
                 [$advance, $lsb] = $this->horizontalMetric($hmtx, $numberOfHMetrics, $gid);
                 $newHmtx .= pack('n', $advance) . pack('n', $lsb & 0xFFFF);
             }
@@ -87,7 +89,7 @@ final class TtfSubsetter
             ];
             if (isset($tables['OS/2'])) $newTables['OS/2'] = $this->tableBytes($binary, $tables['OS/2']);
             if (isset($tables['name'])) $newTables['name'] = $this->tableBytes($binary, $tables['name']);
-            if (isset($tables['post'])) $newTables['post'] = $this->tableBytes($binary, $tables['post']);
+            if (isset($tables['post'])) $newTables['post'] = $this->postWithoutGlyphNames($this->tableBytes($binary, $tables['post']));
 
             ksort($newTables, SORT_STRING);
             $font = $this->buildFont($newTables);
@@ -179,6 +181,21 @@ final class TtfSubsetter
         return [$advance, $lsb];
     }
 
+    /**
+     * `post` version 3.0 (OpenType `post` table): the same italic angle, underline and pitch
+     * fields, without the glyph names of version 2.0. A CIDFontType2 with an Identity map is
+     * drawn by glyph id and never looks the names up, and the names held half of a subset font
+     * (32 KB of Inter's 68 KB) that every PDF embedded and checksummed for nothing.
+     */
+    private function postWithoutGlyphNames(string $post): string
+    {
+        if (strlen($post) < 32) return $post;
+        $header = substr($post, 0, 32);
+        $this->setU32($header, 0, 0x00030000);
+
+        return $header;
+    }
+
     private function minimalCmap(): string
     {
         return pack('nnnnN', 0, 1, 3, 1, 12)
@@ -221,10 +238,13 @@ final class TtfSubsetter
     {
         $padding = (4 - (strlen($data) % 4)) % 4;
         if ($padding) $data .= str_repeat("\0", $padding);
+        if ($data === '') return 0;
+        // One unpack of the whole table instead of one per word: summing tens of thousands of
+        // words with a substr()+unpack() each cost ~4 ms per subset font. Blocks of 2^20 words
+        // keep the running sum far below PHP_INT_MAX before it is folded to 32 bits.
         $sum = 0;
-        for ($i = 0; $i < strlen($data); $i += 4) {
-            $word = unpack('N', substr($data, $i, 4))[1];
-            $sum = ($sum + $word) & 0xFFFFFFFF;
+        foreach (str_split($data, 4 << 20) as $block) {
+            $sum = ($sum + array_sum(unpack('N*', $block))) & 0xFFFFFFFF;
         }
         return $sum;
     }
