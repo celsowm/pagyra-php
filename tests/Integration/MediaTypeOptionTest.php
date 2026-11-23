@@ -19,14 +19,19 @@ final class MediaTypeOptionTest extends TestCase
     private const CSS = '<style>@media print { a { color: #ff0000; } }'
         . '@media screen { a { color: #00ff00; } }</style>';
 
+    // Fill color of the text object that paints LINKMARK. Since the per-glyph font fallback
+    // (4c046a2) each run is written as segments, and every segment selects its font and word
+    // spacing (`Tf`, `Tw`) between the text matrix and the show operator.
+    private const LINK_COLOR = '/([0-9.]+ [0-9.]+ [0-9.]+) rg\n1 0 0 1 [0-9. ]+ Tm\n(?:[^\n]* T[fw]\n)*\(LINKMARK\) Tj/';
+
     private function linkColorRg(string $media): string
     {
         $pdf = Pagyra::renderHtmlToPdf(
             ['html' => self::CSS . '<p>x <a href="https://t.test/">LINKMARK</a> y</p>']
             + ($media === '' ? [] : ['media' => $media]),
         );
-        self::assertMatchesRegularExpression('/rg\n1 0 0 1 [0-9. ]+ Tm\n\(LINKMARK\) Tj/', $pdf);
-        preg_match('/([0-9.]+ [0-9.]+ [0-9.]+) rg\n1 0 0 1 [0-9. ]+ Tm\n\(LINKMARK\) Tj/', $pdf, $m);
+        self::assertMatchesRegularExpression(self::LINK_COLOR, $pdf);
+        preg_match(self::LINK_COLOR, $pdf, $m);
         return $m[1];
     }
 
@@ -52,7 +57,7 @@ final class MediaTypeOptionTest extends TestCase
                 . '<p>x <a href="https://t.test/">LINKMARK</a> y</p>',
             'media' => 'screen',
         ]);
-        preg_match('/([0-9.]+ [0-9.]+ [0-9.]+) rg\n1 0 0 1 [0-9. ]+ Tm\n\(LINKMARK\) Tj/', $pdf, $m);
+        preg_match(self::LINK_COLOR, $pdf, $m);
         self::assertSame('0 0 0.933333', $m[1]); // #0000EE
     }
 

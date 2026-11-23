@@ -30,17 +30,16 @@ final class TextStateDoesNotLeakBetweenRunsTest extends TestCase
                 . '<p>curta.</p>',
         ]);
 
-        $content = $this->contentStreams($pdf);
-        self::assertSame(
-            substr_count($content, "BT\n"),
-            preg_match_all('/ Tw\n/', $content),
-            'todo BT precisa declarar seu proprio Tw',
-        );
-        self::assertSame(
-            substr_count($content, "BT\n"),
-            preg_match_all('/ Tc\n/', $content),
-            'todo BT precisa declarar seu proprio Tc',
-        );
+        // Each BT ... ET block must set Tc and Tw before its first show operator. A block may
+        // set Tw more than once: since the per-glyph font fallback (4c046a2) a run is written as
+        // segments and every segment restates the word spacing its font needs.
+        preg_match_all('/BT\n(.*?)ET\n/s', $this->contentStreams($pdf), $objects);
+        self::assertNotEmpty($objects[1]);
+        foreach ($objects[1] as $object) {
+            $beforeShow = preg_split('/ T[jJ]\n/', $object, 2)[0];
+            self::assertMatchesRegularExpression('/ Tw\n/', $beforeShow, 'todo BT precisa declarar seu proprio Tw');
+            self::assertMatchesRegularExpression('/ Tc\n/', $beforeShow, 'todo BT precisa declarar seu proprio Tc');
+        }
     }
 
     public function testTheStretchedLineAndTheShortOneGetDifferentWordSpacing(): void
