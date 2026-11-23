@@ -2666,11 +2666,52 @@ final class BlockLayoutEngine
             }
 
             $pending[] = $child;
-            $pendingHasContent = true;
+            $pendingHasContent = $pendingHasContent || $this->inlineGeneratesContent($child);
         }
         if ($pendingHasContent) $segments[] = ['inline', $pending];
 
         return $segments;
+    }
+
+    /**
+     * Whether an inline child puts anything on a line. CSS 2.1 9.4.2: a line box with no text,
+     * no preserved white space, no inline element with non-zero margin, padding or border and no
+     * other in-flow content (image, `br`, atomic box) is treated as zero-height, and as not
+     * existing for margin collapsing. Every inline element used to count as content, so a
+     * paragraph holding nothing but a space wrapped in a span, `<p><span> </span></p>`, got a
+     * full line, and an empty span stopped the paragraph's margins from collapsing through it.
+     * Court documents pasted out of an editor stack those paragraphs to space the text out, and
+     * nine of them were enough to push the signature block of a one-page writ onto a second page.
+     */
+    private function inlineGeneratesContent(StyledNode $node, int $depth = 0): bool
+    {
+        if ($node->node->type === 'text') {
+            $text = $node->node->text ?? '';
+            if (trim($text) !== '') return true;
+            $whiteSpace = strtolower(trim($node->style->get('white-space', 'normal') ?? 'normal'));
+
+            return $text !== '' && in_array($whiteSpace, ['pre', 'pre-wrap', 'break-spaces'], true);
+        }
+        if ($node->node->type !== 'element') return false;
+        if ($this->display($node) === 'none') return false;
+        if ($depth >= 32) return true;
+        if ($node->node->isElement('br') || $node->node->isImage() || $node->node->isSvg()) return true;
+        if ($this->display($node) !== 'inline' || $this->isBlockLevel($node)) return true;
+
+        // Percentages only need to be told apart from zero, so any positive reference will do.
+        foreach ([
+            $this->resolveEdges($node, 'padding', 1000.0, 1000.0, 16.0),
+            $this->resolveEdges($node, 'margin', 1000.0, 1000.0, 16.0),
+            $this->resolveBorderEdges($node, 1000.0, 1000.0, 16.0),
+        ] as $edges) {
+            if ($edges->top != 0.0 || $edges->right != 0.0 || $edges->bottom != 0.0 || $edges->left != 0.0) return true;
+        }
+
+        foreach ($node->children as $child) {
+            if ($this->inlineGeneratesContent($child, $depth + 1)) return true;
+        }
+
+        return false;
     }
 
     /**
