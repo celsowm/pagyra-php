@@ -98,15 +98,17 @@ final class InlineBorderAndPaddingTest extends TestCase
 
     public function testInlineEdgesParticipateInWrapping(): void
     {
+        // The spaces are the break opportunities: `A<span>B</span>C` is one word and stays on one
+        // line however wide the span's edges are (see WordSplitAcrossInlineElementsTest).
         $plain = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
-            'html' => '<p style="margin:0;width:50px;font-size:16px">A<span>B</span>C</p>',
+            'html' => '<p style="margin:0;width:50px;font-size:16px">A <span>B</span> C</p>',
             'viewportWidth' => 100,
             'viewportHeight' => 200,
         ]);
         $decorated = Pagyra::prepareHtmlRender([
             'pagedBodyMargin' => 'zero',
-            'html' => '<p style="margin:0;width:50px;font-size:16px">A<span style="padding:0 12px;border:1px solid">B</span>C</p>',
+            'html' => '<p style="margin:0;width:50px;font-size:16px">A <span style="padding:0 12px;border:1px solid">B</span> C</p>',
             'viewportWidth' => 100,
             'viewportHeight' => 200,
         ]);

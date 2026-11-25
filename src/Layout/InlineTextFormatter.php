@@ -76,8 +76,14 @@ final class InlineTextFormatter
         $lineWidth = 0.0;
         $minContent = 0.0;
         $lastWasCollapsedSpace = true;
+        // Width of the word the current word token belongs to: consecutive word tokens come from
+        // one word split across elements and cannot be broken apart (see layout()).
+        $wordWidth = 0.0;
 
         foreach ($tokens as $token) {
+            if ($token['kind'] !== 'word') {
+                $wordWidth = 0.0;
+            }
             if ($token['kind'] === 'newline') {
                 $maxContent = max($maxContent, $lineWidth);
                 $lineWidth = 0.0;
@@ -123,7 +129,8 @@ final class InlineTextFormatter
                 continue;
             }
 
-            $minContent = max($minContent, $this->tokenAdvanceWidth($token));
+            $wordWidth += $this->tokenAdvanceWidth($token);
+            $minContent = max($minContent, $wordWidth);
         }
 
         $maxContent = max($maxContent, $lineWidth);
@@ -220,9 +227,31 @@ final class InlineTextFormatter
                     $currentWidth = 0.0;
                     continue;
                 }
+                // Two word tokens side by side are one word the markup split across elements
+                // (`re<span>direcionado</span>`, `<b>R$</b>60,00`): the element boundary is not a
+                // break opportunity (CSS Text 3 §5), so the pieces already on the line go down
+                // with the one that overflowed. When the word already starts the line there is
+                // nothing to carry: it overflows whole, like a single word wider than the line,
+                // unless `overflow-wrap` lets it break, and then the boundary is where it breaks.
+                $carried = [];
+                if ($token['kind'] === 'word' && $current[array_key_last($current)]['kind'] === 'word') {
+                    $start = count($current);
+                    while ($start > 0 && $current[$start - 1]['kind'] === 'word') {
+                        $start--;
+                    }
+                    if ($start === 0 && !$this->canBreakInsideWord($overflowWrap, $wordBreak)) {
+                        $current[] = $token;
+                        $currentWidth += $tokenAdvance;
+                        continue;
+                    }
+                    if ($start > 0) {
+                        $carried = array_slice($current, $start);
+                        $current = array_slice($current, 0, $start);
+                    }
+                }
                 $lines[] = $current;
-                $current = [];
-                $currentWidth = 0.0;
+                $current = $carried;
+                $currentWidth = array_sum(array_map(fn(array $piece): float => $this->tokenAdvanceWidth($piece), $carried));
                 [$insetLeft, $insetRight] = $exclusions === [] ? [0.0, 0.0] : $insets(count($lines));
                 $lineRoom = $availableWidth - $insetLeft - $insetRight;
             }
