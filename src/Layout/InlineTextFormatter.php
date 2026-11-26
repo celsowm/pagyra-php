@@ -233,6 +233,10 @@ final class InlineTextFormatter
                 // with the one that overflowed. When the word already starts the line there is
                 // nothing to carry: it overflows whole, like a single word wider than the line,
                 // unless `overflow-wrap` lets it break, and then the boundary is where it breaks.
+                // The same holds when the word would not fit a line even whole: with
+                // `overflow-wrap` carrying it gains nothing, and the carried pieces only took
+                // room the rest of the word then ran past the right edge into
+                // (`orçamentário"</em>.&nbsp;(https://…)`, `horas&nbsp;semanais.&nbsp;(<a>https://…`).
                 $carried = [];
                 if ($token['kind'] === 'word' && $current[array_key_last($current)]['kind'] === 'word') {
                     $start = count($current);
@@ -245,8 +249,14 @@ final class InlineTextFormatter
                         continue;
                     }
                     if ($start > 0) {
-                        $carried = array_slice($current, $start);
-                        $current = array_slice($current, 0, $start);
+                        $pieces = array_slice($current, $start);
+                        $wordWidth = $tokenAdvance + array_sum(array_map(fn(array $piece): float => $this->tokenAdvanceWidth($piece), $pieces));
+                        [$nextInsetLeft, $nextInsetRight] = $exclusions === [] ? [0.0, 0.0] : $insets(count($lines) + 1);
+                        $nextLineRoom = $availableWidth - $nextInsetLeft - $nextInsetRight;
+                        if (!$this->canBreakInsideWord($overflowWrap, $wordBreak) || $wordWidth <= $nextLineRoom + self::EPSILON) {
+                            $carried = $pieces;
+                            $current = array_slice($current, 0, $start);
+                        }
                     }
                 }
                 $lines[] = $current;

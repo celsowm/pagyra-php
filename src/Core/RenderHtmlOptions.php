@@ -25,9 +25,18 @@ final readonly class RenderHtmlOptions
          * `src/html-to-pdf/types.ts`).
          */
         public string $pagedBodyMargin = 'auto',
+        /**
+         * Smallest `contentScale` the render may fall back to when the content is wider than the
+         * page (a table with a fixed width, a word with no break opportunity). `null`, the
+         * default, keeps `contentScale` whatever the content; see Pagyra::renderHtmlToPdf().
+         */
+        public ?float $minContentScale = null,
     ) {
         if ($this->html === '') throw new \InvalidArgumentException('html must not be empty');
         if ($this->contentScale <= 0) throw new \InvalidArgumentException('contentScale must be greater than zero');
+        if ($this->minContentScale !== null && ($this->minContentScale <= 0 || $this->minContentScale > $this->contentScale)) {
+            throw new \InvalidArgumentException('minContentScale must be greater than zero and not greater than contentScale');
+        }
         if (!in_array($this->media, ['print', 'screen', 'all'], true)) {
             throw new \InvalidArgumentException("media must be 'print', 'screen' or 'all'");
         }
@@ -60,6 +69,7 @@ final readonly class RenderHtmlOptions
             contentScale: self::positiveNumber($options['contentScale'] ?? 1.0, 'contentScale'),
             media: is_string($options['media'] ?? null) ? strtolower(trim($options['media'])) : 'print',
             pagedBodyMargin: is_string($options['pagedBodyMargin'] ?? null) ? strtolower(trim($options['pagedBodyMargin'])) : 'auto',
+            minContentScale: isset($options['minContentScale']) ? self::positiveNumber($options['minContentScale'], 'minContentScale') : null,
         );
     }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pagyra\Tests\Integration;
 
 use Pagyra\Pagyra;
+use Pagyra\Paint\TextPaintCommand;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -76,6 +77,51 @@ final class WordSplitAcrossInlineElementsTest extends TestCase
             ['aaaaaaaaaa', 'bbbbbbbbbb'],
             $this->lineTexts('<span>aaaaaaaaaa</span>bbbbbbbbbb', 'width:100px;word-wrap:break-word'),
         );
+    }
+
+    /** @return array<string, array{0:string,1:string,2:string}> */
+    public static function wordsWiderThanTheLineWithTheirPieces(): array
+    {
+        return [
+            // `horas&nbsp;semanais.&nbsp;(<a>https://…</a>`: the URL alone is wider than the line
+            'the piece after the boundary is wider than the line' => [
+                'aaaa bbbb&nbsp;(<span>' . str_repeat('c', 60) . '</span>',
+                'aaaa bbbb (',
+                str_repeat('c', 60),
+            ],
+            // `orçamentário"</em>.&nbsp;(https://…)`: the URL fits a line, the whole word does not
+            'only the whole word is wider than the line' => [
+                'aaaa <em>cccc"</em>.&nbsp;(' . str_repeat('d', 17) . ')',
+                'aaaa cccc"',
+                '. (' . str_repeat('d', 17) . ')',
+            ],
+        ];
+    }
+
+    #[DataProvider('wordsWiderThanTheLineWithTheirPieces')]
+    public function testWithBreakWordAWordThatDoesNotFitEvenWholeBreaksAtTheBoundary(string $body, string $firstLine, string $rest): void
+    {
+        // Carrying the pieces before the boundary down with the rest of the word gains nothing
+        // when the word is wider than a line anyway: they only took room the rest then ran past
+        // the right edge into, cut off at the edge of the sheet in TJRJ and TRF2 decisions.
+        $prepared = Pagyra::prepareHtmlRender([
+            'html' => '<p style="margin:0;font:16px Arial;width:190px;word-wrap:break-word">' . $body . '</p>',
+            'viewportWidth' => 400,
+            'viewportHeight' => 400,
+        ]);
+        $paragraph = $prepared->layoutRoot->children[0];
+        $texts = array_map(static fn ($line): string => str_replace("\u{00A0}", ' ', trim($line->text)), $paragraph->lineBoxes);
+
+        self::assertSame($firstLine, $texts[0]);
+        self::assertSame($rest, implode('', array_slice($texts, 1)));
+
+        // paint commands are placed on the page, so the page margin comes before the paragraph
+        $right = $prepared->margins['left'] + $paragraph->box->content->x + 190.0;
+        foreach ($prepared->displayList->pages[0]->commands as $command) {
+            if ($command instanceof TextPaintCommand) {
+                self::assertLessThanOrEqual($right + 0.01, $command->x + $command->run->width, $command->text);
+            }
+        }
     }
 
     public function testShrinkToFitWidthCoversTheWholeWord(): void

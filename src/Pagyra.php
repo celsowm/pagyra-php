@@ -18,8 +18,15 @@ use Pagyra\Image\ImageSourceIntrinsicSizeResolver;
 use Pagyra\Layout\BlockLayoutEngine;
 use Pagyra\Pagination\PageFlow;
 use Pagyra\Pagination\PaginationEngine;
+use Pagyra\Paint\BorderPaintCommand;
 use Pagyra\Paint\BorderPatternExpander;
+use Pagyra\Paint\BoxPaintCommand;
+use Pagyra\Paint\ClipPaintCommand;
 use Pagyra\Paint\DisplayListBuilder;
+use Pagyra\Paint\GradientPaintCommand;
+use Pagyra\Paint\ImagePaintCommand;
+use Pagyra\Paint\RoundedBorderPaintCommand;
+use Pagyra\Paint\TextPaintCommand;
 use Pagyra\Paint\OpacityGroupNormalizer;
 use Pagyra\Paint\TrailingBlankPageTrimmer;
 use Pagyra\Paint\VisibilityFilter;
@@ -267,6 +274,103 @@ final class Pagyra
         $contentScale = $options->contentScale;
         $prepared = self::prepareHtmlRender($options->scaledForContentZoom($contentScale));
         if ($prepared->displayList === null) throw new \LogicException('Display list generation failed before PDF serialization.');
+        [$prepared, $contentScale] = self::shrinkToFitWidth($options, $prepared, $contentScale);
         return (new PdfSerializer())->serialize($prepared->displayList, $prepared->fontRegistry, $contentScale);
+    }
+
+    /** Layouts tried at a smaller scale before giving up and keeping the first one. */
+    private const SHRINK_TO_FIT_PASSES = 3;
+
+    /** Ink this far past the right edge of the content box (layout px) still counts as fitting. */
+    private const SHRINK_TO_FIT_TOLERANCE = 1.0;
+
+    /**
+     * wkhtmltopdf never draws past the right margin: when the content is wider than the page (a
+     * table pasted from Word with `width: 1339px`, a URL with no break opportunity) its "smart
+     * shrinking" lays the whole document out on a wider page and scales it down to fit. With
+     * `minContentScale` set the render does the same: it measures how far the ink goes past the
+     * content box, lays out again at the scale that brings it back, and keeps that layout only if
+     * it fits. Content that grows with the page (an image with `max-width: 100%` pushed right by
+     * `text-indent`) never fits that way, so the first layout stays and the text is not shrunk for
+     * nothing. Without `minContentScale`, or when nothing overflows, the first layout is returned.
+     *
+     * @return array{0:PreparedRender,1:float}
+     */
+    private static function shrinkToFitWidth(RenderHtmlOptions $options, PreparedRender $prepared, float $contentScale): array
+    {
+        $minScale = $options->minContentScale;
+        if ($minScale === null || $minScale >= $contentScale) return [$prepared, $contentScale];
+
+        $candidate = $prepared;
+        $scale = $contentScale;
+        for ($pass = 0; $pass <= self::SHRINK_TO_FIT_PASSES; $pass++) {
+            $ratio = self::horizontalOverflowRatio($candidate);
+            if ($ratio <= 1.0) return [$candidate, $scale];
+            if ($pass === self::SHRINK_TO_FIT_PASSES || $scale <= $minScale) break;
+
+            $scale = max($minScale, $scale / $ratio);
+            $candidate = self::prepareHtmlRender($options->scaledForContentZoom($scale));
+            if ($candidate->displayList === null) break;
+        }
+
+        return [$prepared, $contentScale];
+    }
+
+    /**
+     * How much wider than the content box the ink is: 1.0 when everything is drawn inside it,
+     * otherwise the widest page's (ink right edge − left margin) / content width. Only the right
+     * edge counts, since that is where an overflow is cut; ink inside an open clip counts up to
+     * the clip, and a box without background has no ink of its own.
+     */
+    private static function horizontalOverflowRatio(PreparedRender $prepared): float
+    {
+        if ($prepared->displayList === null) return 1.0;
+        $left = (float) $prepared->margins['left'];
+        $right = (float) $prepared->margins['right'];
+        $ratio = 1.0;
+
+        foreach ($prepared->displayList->pages as $page) {
+            $edge = $page->width - $right;
+            $available = $edge - $left;
+            if ($available <= 0.0) continue;
+
+            $inkRight = $edge;
+            $clips = [];
+            foreach ($page->commands as $command) {
+                if ($command instanceof ClipPaintCommand) {
+                    if ($command->opens()) {
+                        $clips[] = (float) $command->x + (float) $command->width;
+                    } else {
+                        array_pop($clips);
+                    }
+                    continue;
+                }
+                $commandRight = self::inkRight($command);
+                if ($commandRight === null) continue;
+                if ($clips !== []) $commandRight = min($commandRight, min($clips));
+                $inkRight = max($inkRight, $commandRight);
+            }
+
+            if ($inkRight > $edge + self::SHRINK_TO_FIT_TOLERANCE) {
+                $ratio = max($ratio, ($inkRight - $left) / $available);
+            }
+        }
+
+        return $ratio;
+    }
+
+    private static function inkRight(object $command): ?float
+    {
+        return match (true) {
+            $command instanceof TextPaintCommand => $command->x + $command->run->width,
+            $command instanceof ImagePaintCommand => $command->clipRect !== null
+                ? min($command->x + $command->width, $command->clipRect->right())
+                : $command->x + $command->width,
+            $command instanceof BoxPaintCommand => $command->backgroundColor !== null ? $command->x + $command->width : null,
+            $command instanceof BorderPaintCommand,
+            $command instanceof RoundedBorderPaintCommand,
+            $command instanceof GradientPaintCommand => $command->x + $command->width,
+            default => null,
+        };
     }
 }
